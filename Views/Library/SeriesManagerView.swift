@@ -12,6 +12,7 @@ struct SeriesManagerView: View {
     @State private var issues:         [Comic]  = []
     @State private var coverComicId:   Int64?   = nil
     @State private var selectedIssueId: Int64?  = nil
+    @State private var showMergeConfirm = false
 
     init(series: String, publisher: String?) {
         self.series    = series
@@ -76,6 +77,16 @@ struct SeriesManagerView: View {
                 .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty ||
                           newName.trimmingCharacters(in: .whitespaces) == series)
                 .tint(Design.brandGold)
+                .confirmationDialog(
+                    "A series named “\(newName.trimmingCharacters(in: .whitespaces))” already exists.",
+                    isPresented: $showMergeConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Merge Series", role: .destructive) { performRename() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Renaming will combine all issues from both series into one. This can't be undone automatically.")
+                }
             }
 
             Text("Renaming updates all \(issues.count) issues in this series.")
@@ -237,6 +248,15 @@ struct SeriesManagerView: View {
     private func renameSeries() {
         let trimmed = newName.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed != series else { return }
+        if vm.seriesNameCollides(oldName: series, publisher: publisher, newName: trimmed) {
+            showMergeConfirm = true
+            return
+        }
+        performRename()
+    }
+
+    private func performRename() {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
         vm.renameSeries(oldName: series, publisher: publisher, newName: trimmed)
         dismiss()
     }

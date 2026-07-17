@@ -700,6 +700,59 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    /// True if `newName` (scoped to `publisher`, if given) already names a different series
+    /// than `oldName` — i.e. renaming into it would silently merge the two series' issues.
+    func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
+        guard newName != oldName else { return false }
+        return queue.sync {
+            if let pub = publisher, !pub.isEmpty, pub != "All" {
+                return scalarInt("SELECT COUNT(*) FROM comics WHERE series = ? AND publisher = ?",
+                                  args: [newName, pub]) > 0
+            }
+            return scalarInt("SELECT COUNT(*) FROM comics WHERE series = ?", args: [newName]) > 0
+        }
+    }
+
+    /// Bulk-reassigns series and/or publisher for the given comics (e.g. correcting a bad
+    /// folder-derived guess across several issues at once). Marks each row meta_edited so a
+    /// later folder-derived reparse won't silently revert the correction.
+    func bulkReassign(ids: [Int64], series: String?, publisher: String?) {
+        guard !ids.isEmpty, series != nil || publisher != nil else { return }
+        queue.sync {
+            exec("BEGIN")
+            for id in ids {
+                if let ser = series {
+                    _ = run("UPDATE comics SET series = ?, meta_edited = 1 WHERE id = ?", args: [ser, id])
+                }
+                if let pub = publisher {
+                    _ = run("UPDATE comics SET publisher = ?, meta_edited = 1 WHERE id = ?", args: [pub, id])
+                }
+            }
+            exec("COMMIT")
+        }
+    }
+
+    /// Groups of comics sharing the same publisher+series+issue number — likely the same issue
+    /// imported twice under different filenames (a rescan, a re-rip, a variant cover, etc.).
+    func duplicateGroups() -> [[Comic]] {
+        queue.sync {
+            let keys = rows("""
+                SELECT publisher, series, issue_number, COUNT(*) c
+                FROM comics
+                WHERE deleted_at IS NULL AND issue_number IS NOT NULL AND issue_number != ''
+                GROUP BY publisher, series, issue_number
+                HAVING c > 1
+                ORDER BY publisher, series, CAST(issue_number AS INTEGER)
+            """) { (pub: self.colText($0, 0) ?? "", ser: self.colText($0, 1) ?? "", num: self.colText($0, 2) ?? "") }
+
+            guard !keys.isEmpty else { return [] }
+            return keys.map { key in
+                rows("\(comicSelect) WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ? AND c.issue_number = ?",
+                     args: [key.pub, key.ser, key.num], map: comicRow)
+            }
+        }
+    }
+
     func reorderComics(orderedIds: [Int64]) {
         queue.sync {
             exec("BEGIN")

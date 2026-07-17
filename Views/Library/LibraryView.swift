@@ -54,6 +54,7 @@ struct LibraryBrowserView: View {
 struct LibraryFilterBar: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var confirmBulkDelete = false
+    @State private var showBulkReassign = false
 
     private var displayCount: Int {
         switch vm.browseLevel {
@@ -174,6 +175,16 @@ struct LibraryFilterBar: View {
                 Label("Remove from List", systemImage: "bookmark.slash")
             }
             .disabled(vm.selectedComicIds.isEmpty).controlSize(.small)
+
+            Button { showBulkReassign = true } label: {
+                Label("Reassign…", systemImage: "folder.badge.gearshape")
+            }
+            .disabled(vm.selectedComicIds.isEmpty).controlSize(.small)
+            .sheet(isPresented: $showBulkReassign) {
+                BulkReassignView(count: vm.selectedComicIds.count) { series, publisher in
+                    vm.bulkReassign(series: series, publisher: publisher)
+                }
+            }
 
             Divider().frame(height: 16)
 

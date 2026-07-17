@@ -36,6 +36,9 @@ struct MacFileService: FileServiceProtocol {
     func revealInFinder(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+
+    // No-op: NSSavePanel already wrote the file to the user's chosen location.
+    func shareFile(_ url: URL) {}
 }
 
 // MARK: - macOS window service

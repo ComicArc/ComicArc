@@ -397,6 +397,60 @@ struct ComicDetailView: View {
     }
 }
 
+// MARK: - Bulk reassign sheet
+
+struct BulkReassignView: View {
+    let count: Int
+    let onApply: (_ series: String?, _ publisher: String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var series:    String = ""
+    @State private var publisher: String = ""
+    @State private var setSeries    = false
+    @State private var setPublisher = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Reassign \(count) Comic\(count == 1 ? "" : "s")")
+                .font(.title2.bold())
+                .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 4)
+            Text("Correct a bad folder-derived series or publisher across the selected issues at once.")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 24).padding(.bottom, 12)
+
+            Form {
+                Section {
+                    Toggle("Set Series", isOn: $setSeries.animation())
+                    if setSeries { TextField("Series", text: $series) }
+                }
+                Section {
+                    Toggle("Set Publisher", isOn: $setPublisher.animation())
+                    if setPublisher { TextField("Publisher", text: $publisher) }
+                }
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.escape)
+                Spacer()
+                Button("Apply") {
+                    let s = series.trimmingCharacters(in: .whitespaces)
+                    let p = publisher.trimmingCharacters(in: .whitespaces)
+                    onApply(setSeries && !s.isEmpty ? s : nil, setPublisher && !p.isEmpty ? p : nil)
+                    dismiss()
+                }
+                .keyboardShortcut(.return)
+                .buttonStyle(.borderedProminent)
+                .disabled((!setSeries || series.trimmingCharacters(in: .whitespaces).isEmpty)
+                       && (!setPublisher || publisher.trimmingCharacters(in: .whitespaces).isEmpty))
+            }
+            .padding(24)
+        }
+        .frame(width: 440)
+    }
+}
+
 // MARK: - Edit comic sheet
 
 struct EditComicView: View {

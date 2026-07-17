@@ -3,9 +3,18 @@ import SwiftUI
 @main
 struct ComicArcIPadApp: App {
     @StateObject private var vm = LibraryViewModel.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     private let fileService   = makePlatformFileService()
     private let windowService = makePlatformWindowService()
+
+    init() {
+        // Security-scope access to a bookmarked library folder must be re-started every
+        // process launch — iOS revokes it on relaunch even though the bookmark stays valid.
+        if let folder = resolveLibraryFolderBookmark() {
+            UserDefaults.standard.set(folder.path, forKey: "libraryPath")
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -13,6 +22,12 @@ struct ComicArcIPadApp: App {
                 .environmentObject(vm)
                 .environment(\.fileService, fileService)
                 .environment(\.windowService, windowService)
+                .onChange(of: scenePhase) { _, phase in
+                    // No FSEvents-equivalent for an arbitrary security-scoped folder on iOS;
+                    // rescanning whenever the app returns to the foreground is the closest
+                    // practical approximation of auto-detecting files added outside the app.
+                    if phase == .active, !vm.libraryPath.isEmpty { vm.scan() }
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {}

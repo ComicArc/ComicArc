@@ -12,6 +12,9 @@ protocol FileServiceProtocol {
     func pickFolder(completion: @escaping (URL?) -> Void)
     func pickSaveDestination(filename: String, completion: @escaping (URL?) -> Void)
     func revealInFinder(_ url: URL)
+    /// Presents the platform's way of getting an already-written file out to the user
+    /// (a no-op on macOS, where pickSaveDestination already saved it in place).
+    func shareFile(_ url: URL)
 }
 
 // MARK: - Window service
@@ -33,6 +36,7 @@ struct NoOpFileService: FileServiceProtocol {
     func pickFolder(completion: @escaping (URL?) -> Void) { completion(nil) }
     func pickSaveDestination(filename: String, completion: @escaping (URL?) -> Void) { completion(nil) }
     func revealInFinder(_ url: URL) {}
+    func shareFile(_ url: URL) {}
 }
 
 struct NoOpWindowService: WindowServiceProtocol {
@@ -49,6 +53,8 @@ struct NoOpWindowService: WindowServiceProtocol {
 func makePlatformFileService() -> any FileServiceProtocol {
     #if os(macOS)
     MacFileService()
+    #elseif os(iOS)
+    IOSFileService()
     #else
     NoOpFileService()
     #endif

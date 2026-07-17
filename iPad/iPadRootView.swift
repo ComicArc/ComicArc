@@ -42,6 +42,11 @@ private struct iPadSidebar: View {
                 ForEach([AppDestination.runs, .stats, .history, .creators], id: \.self) { s in
                     Label(s.title, systemImage: s.icon).tag(s)
                 }
+                if !vm.duplicateGroups.isEmpty {
+                    Label(AppDestination.duplicates.title, systemImage: AppDestination.duplicates.icon)
+                        .tag(AppDestination.duplicates)
+                        .badge(vm.duplicateGroups.count)
+                }
             }
             Section {
                 Label(AppDestination.settings.title, systemImage: AppDestination.settings.icon)
@@ -76,6 +81,9 @@ private struct iPadContentColumn: View {
             case .creators:
                 CreatorBrowseView().environmentObject(vm)
                     .navigationTitle("Creators")
+            case .duplicates:
+                DuplicatesView().environmentObject(vm)
+                    .navigationTitle("Possible Duplicates")
             case .settings:
                 iPadSettingsView()
                     .navigationTitle("Settings")
@@ -371,15 +379,18 @@ private struct iPadImportButton: View {
     }
 }
 
-// MARK: - Settings stub for iPad
+// MARK: - Settings for iPad
 
 struct iPadSettingsView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.fileService) private var fileService
     @AppStorage("scrollMode")    private var scrollMode    = false
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
+    @AppStorage("libraryPath")   private var libraryPath   = ""
     @State private var showClearConfirm = false
     @State private var cacheCleared     = false
     @State private var comicCount       = 0
+    @State private var backupErrorMessage: String?
 
     var body: some View {
         Form {
@@ -395,7 +406,40 @@ struct iPadSettingsView: View {
                 }
             }
 
-            Section("Library") {
+            Section {
+                if libraryPath.isEmpty {
+                    Text("No library folder set. Comics can still be imported one at a time with the + button, or choose a folder here to scan its whole contents (including subfolders) and pick up new files automatically whenever you return to the app.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    HStack {
+                        Label("Library Folder", systemImage: "folder")
+                        Spacer()
+                        Text(URL(fileURLWithPath: libraryPath).lastPathComponent)
+                            .foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Button {
+                    fileService.pickFolder { url in
+                        guard let url else { return }
+                        libraryPath = url.path
+                        vm.scan()
+                    }
+                } label: {
+                    Label(libraryPath.isEmpty ? "Choose Library Folder…" : "Change Library Folder…", systemImage: "folder.badge.plus")
+                }
+                if !libraryPath.isEmpty {
+                    Button { vm.scan() } label: {
+                        Label("Scan Now", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(vm.isScanning)
+                }
+            } header: {
+                Text("Library")
+            } footer: {
+                Text("CBZ, PDF, JPG, and PNG are supported. CBR isn't readable on iPad — extraction needs a command-line tool that doesn't exist in the iOS sandbox.")
+            }
+
+            Section {
                 HStack {
                     Label("Comics imported", systemImage: "books.vertical")
                     Spacer()
@@ -404,6 +448,23 @@ struct iPadSettingsView: View {
                 Button(role: .destructive) { showClearConfirm = true } label: {
                     Label("Clear Thumbnail Cache", systemImage: "trash")
                 }
+            }
+
+            Section {
+                Button {
+                    BackupService.export(fileService: fileService) { backupErrorMessage = $0 }
+                } label: {
+                    Label("Export Backup…", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    BackupService.import(fileService: fileService, vm: vm) { backupErrorMessage = $0 }
+                } label: {
+                    Label("Import Backup…", systemImage: "square.and.arrow.down")
+                }
+            } header: {
+                Text("Backup")
+            } footer: {
+                Text("Backs up ratings, reviews, tags, bookmarks, and reading orders. Comics themselves stay wherever they already are.")
             }
 
             Section("About") {
@@ -425,6 +486,11 @@ struct iPadSettingsView: View {
         }
         .alert("Cache cleared", isPresented: $cacheCleared) {
             Button("OK", role: .cancel) {}
+        }
+        .alert("Backup Error", isPresented: Binding(get: { backupErrorMessage != nil }, set: { if !$0 { backupErrorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(backupErrorMessage ?? "")
         }
         .task {
             let count = await Task.detached(priority: .utility) {

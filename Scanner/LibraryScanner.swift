@@ -13,7 +13,16 @@ final class LibraryScanner: @unchecked Sendable {
     private let db = DatabaseManager.shared
     private let queue = DispatchQueue(label: "com.comicarc.scanner", qos: .utility)
 
-    static let supportedExtensions: Set<String> = ["cbz", "cbr", "pdf", "jpg", "jpeg", "png"]
+    // CBR is extracted via the `unar` command-line tool (macOS only) — it isn't readable
+    // in the iOS sandbox, so folder scanning must skip it there rather than import comics
+    // that will always show 0 pages.
+    static let supportedExtensions: Set<String> = {
+        #if os(macOS)
+        ["cbz", "cbr", "pdf", "jpg", "jpeg", "png"]
+        #else
+        ["cbz", "pdf", "jpg", "jpeg", "png"]
+        #endif
+    }()
     private let supported = LibraryScanner.supportedExtensions
 
     struct ScanState: Sendable {

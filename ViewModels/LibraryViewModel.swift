@@ -16,6 +16,7 @@ enum AppDestination: Hashable, Codable {
     case stats
     case history
     case creators
+    case duplicates
     case settings
 
     var title: String {
@@ -30,6 +31,7 @@ enum AppDestination: Hashable, Codable {
         case .stats:            return "Statistics"
         case .history:          return "History"
         case .creators:         return "Creators"
+        case .duplicates:       return "Possible Duplicates"
         case .settings:         return "Settings"
         }
     }
@@ -46,6 +48,7 @@ enum AppDestination: Hashable, Codable {
         case .stats:           return "chart.bar.xaxis"
         case .history:         return "clock.fill"
         case .creators:        return "person.2.fill"
+        case .duplicates:      return "square.stack.3d.up.badge.a"
         case .settings:        return "gear"
         }
     }
@@ -87,12 +90,16 @@ final class LibraryViewModel: ObservableObject {
     // Series manager sheet trigger
     @Published var showSeriesManager: Bool = false
 
+    // Possible duplicates (same publisher+series+issue# imported under different filenames)
+    @Published var duplicateGroups:   [[Comic]] = []
+
     var selectedSection: SidebarSection {
         switch destination {
         case .runs:            return .runs
         case .stats:           return .stats
         case .history:         return .history
         case .creators:        return .creators
+        case .duplicates:      return .duplicates
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
         case .readingList:     return .readingList
@@ -110,7 +117,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, creators }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, creators, duplicates }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -141,6 +148,7 @@ final class LibraryViewModel: ObservableObject {
         reload()
         startWatcher()
         reparseMetaIfNeeded()
+        refreshDuplicates()
 
         // Restore library drill-down state (group/series) after initial data load
         if case .library = destination { restoreLibraryDrillDown() }
@@ -411,6 +419,12 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
+    func bulkReassign(series: String?, publisher: String?) {
+        db.bulkReassign(ids: Array(selectedComicIds), series: series, publisher: publisher)
+        selectedComicIds.removeAll()
+        reload()
+    }
+
     func bulkDelete() {
         let ids = Array(selectedComicIds)
         db.softDelete(ids)
@@ -436,6 +450,7 @@ final class LibraryViewModel: ObservableObject {
                     self.reload()
                     self.indexSpotlight()
                     self.notifyScanComplete(added: state.added)
+                    self.refreshDuplicates()
                 }
             }
         }
@@ -446,10 +461,18 @@ final class LibraryViewModel: ObservableObject {
         Task.detached(priority: .utility) { [weak self] in
             for url in urls { LibraryScanner.shared.addSingle(url: url, libraryPath: path) }
             await self?.reload()
+            await self?.refreshDuplicates()
             // Prewarm only the newly imported comics — not the entire library
             let paths = urls.map(\.path)
             let newComics = DatabaseManager.shared.comics(withPaths: paths)
             if !newComics.isEmpty { ThumbnailCache.shared.prewarm(comics: newComics) }
+        }
+    }
+
+    func refreshDuplicates() {
+        Task.detached(priority: .utility) { [db] in
+            let groups = db.duplicateGroups()
+            await MainActor.run { self.duplicateGroups = groups }
         }
     }
 
@@ -599,6 +622,9 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
     func renameSeries(oldName: String, publisher: String?, newName: String) { db.renameSeries(oldName: oldName, publisher: publisher, newName: newName); reload() }
+    func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
+        db.seriesNameCollides(oldName: oldName, publisher: publisher, newName: newName)
+    }
     func reorderComics(orderedIds: [Int64]) { db.reorderComics(orderedIds: orderedIds) }
 
     @discardableResult
