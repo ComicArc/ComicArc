@@ -1,0 +1,912 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B00000000000000000000001 /* ComicArcMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001 /* ComicArcMacApp.swift */; };
+		B00000000000000000000002 /* Comic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Comic.swift */; };
+		B00000000000000000000003 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* DatabaseManager.swift */; };
+		B00000000000000000000004 /* LibraryScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* LibraryScanner.swift */; };
+		B00000000000000000000005 /* FileWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000005 /* FileWatcher.swift */; };
+		B00000000000000000000006 /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000006 /* ThumbnailCache.swift */; };
+		B00000000000000000000007 /* PageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000007 /* PageCache.swift */; };
+		B00000000000000000000008 /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000008 /* LibraryViewModel.swift */; };
+		B00000000000000000000009 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000009 /* ContentView.swift */; };
+		B0000000000000000000000A /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* Design.swift */; };
+		B0000000000000000000000B /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000B /* LibraryView.swift */; };
+		B0000000000000000000000C /* ComicCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000C /* ComicCard.swift */; };
+
+		B0000000000000000000000E /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000E /* ReaderView.swift */; };
+		B0000000000000000000000F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000F /* SettingsView.swift */; };
+		B00000000000000000000010 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
+		B00000000000000000000011 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
+		B00000000000000000000020 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
+		B00000000000000000000021 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
+		B00000000000000000000022 /* CreatorBrowseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* CreatorBrowseView.swift */; };
+		B00000000000000000000023 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
+		B00000000000000000000024 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
+		B00000000000000000000025 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
+		B10000000000000000000001 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
+		B10000000000000000000002 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
+		B10000000000000000000003 /* iPadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* iPadReaderView.swift */; };
+		B0000000000000000000000D /* ComicDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* ComicDetailView.swift */; };
+		B10000000000000000000010 /* PlatformServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* PlatformServiceProtocols.swift */; };
+		B10000000000000000000011 /* EnvironmentServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* EnvironmentServices.swift */; };
+		B10000000000000000000012 /* MacPlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* MacPlatformServices.swift */; };
+		B10000000000000000000013 /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
+		B10000000000000000000014 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
+		F10000000000000000000001 /* ComicArcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* ComicArcTests.swift */; };
+		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
+		IP000000000000000000000C /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = IP000000000000000000000B /* ZIPFoundation */; };
+		IB0000000000000000000001 /* Comic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Comic.swift */; };
+		IB0000000000000000000002 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* DatabaseManager.swift */; };
+		IB0000000000000000000003 /* LibraryScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* LibraryScanner.swift */; };
+		IB0000000000000000000004 /* FileWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000005 /* FileWatcher.swift */; };
+		IB0000000000000000000005 /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000006 /* ThumbnailCache.swift */; };
+		IB0000000000000000000006 /* PageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000007 /* PageCache.swift */; };
+		IB0000000000000000000007 /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000008 /* LibraryViewModel.swift */; };
+		IB0000000000000000000008 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000009 /* ContentView.swift */; };
+		IB0000000000000000000009 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* Design.swift */; };
+		IB000000000000000000000A /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000B /* LibraryView.swift */; };
+		IB000000000000000000000B /* ComicCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000C /* ComicCard.swift */; };
+		IB000000000000000000000C /* ComicDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* ComicDetailView.swift */; };
+		IB000000000000000000000D /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000E /* ReaderView.swift */; };
+		IB000000000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000F /* SettingsView.swift */; };
+		IB000000000000000000000F /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
+		IB0000000000000000000010 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
+		IB0000000000000000000011 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
+		IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
+		IB0000000000000000000013 /* CreatorBrowseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* CreatorBrowseView.swift */; };
+		IB0000000000000000000014 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
+		IB0000000000000000000015 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
+		IB0000000000000000000016 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
+		IB0000000000000000000017 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
+		IB0000000000000000000018 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
+		IB0000000000000000000019 /* iPadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* iPadReaderView.swift */; };
+		IB000000000000000000001A /* PlatformServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* PlatformServiceProtocols.swift */; };
+		IB000000000000000000001B /* EnvironmentServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* EnvironmentServices.swift */; };
+		IB000000000000000000001C /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
+		IB000000000000000000001D /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
+		IB000000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
+		IB000000000000000000001F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* PrivacyInfo.xcprivacy */; };
+		B00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
+		B00000000000000000000013 /* icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* icon.icns */; };
+		E00000000000000000000003 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000002 /* ZIPFoundation */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F10000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D00000000000000000000002;
+			remoteInfo = ComicArc;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A00000000000000000000001 /* ComicArcMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcMacApp.swift; sourceTree = "<group>"; };
+		A00000000000000000000002 /* Comic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Comic.swift; sourceTree = "<group>"; };
+		A00000000000000000000003 /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
+		A00000000000000000000004 /* LibraryScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryScanner.swift; sourceTree = "<group>"; };
+		A00000000000000000000005 /* FileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileWatcher.swift; sourceTree = "<group>"; };
+		A00000000000000000000006 /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
+		A00000000000000000000007 /* PageCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageCache.swift; sourceTree = "<group>"; };
+		A00000000000000000000008 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
+		A00000000000000000000009 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A0000000000000000000000A /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		A0000000000000000000000B /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		A0000000000000000000000C /* ComicCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicCard.swift; sourceTree = "<group>"; };
+
+		A0000000000000000000000E /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		A0000000000000000000000F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000010 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000011 /* RunsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000020 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		A00000000000000000000021 /* ReadingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryView.swift; sourceTree = "<group>"; };
+		A00000000000000000000022 /* CreatorBrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatorBrowseView.swift; sourceTree = "<group>"; };
+		A00000000000000000000023 /* IssueDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailPage.swift; sourceTree = "<group>"; };
+		A00000000000000000000024 /* SeriesManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesManagerView.swift; sourceTree = "<group>"; };
+		A00000000000000000000025 /* TutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialView.swift; sourceTree = "<group>"; };
+		A00000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00000000000000000000013 /* icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "assets/icon.icns"; sourceTree = "<group>"; };
+		A00000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A00000000000000000000026 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B00000000000000000000026 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* PrivacyInfo.xcprivacy */; };
+		A00000000000000000000015 /* ComicArcMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ComicArcMac.entitlements; sourceTree = "<group>"; };
+		A00000000000000000000016 /* ComicArc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArc.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000001 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
+		A10000000000000000000002 /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* iPadReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadReaderView.swift; sourceTree = "<group>"; };
+		A0000000000000000000000D /* ComicDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicDetailView.swift; sourceTree = "<group>"; };
+		A10000000000000000000010 /* PlatformServiceProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformServiceProtocols.swift; sourceTree = "<group>"; };
+		A10000000000000000000011 /* EnvironmentServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentServices.swift; sourceTree = "<group>"; };
+		A10000000000000000000012 /* MacPlatformServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPlatformServices.swift; sourceTree = "<group>"; };
+		A10000000000000000000013 /* ReadingSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionService.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		F10000000000000000000002 /* ComicArcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcTests.swift; sourceTree = "<group>"; };
+		F10000000000000000000004 /* ComicArcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComicArcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		IP0000000000000000000001 /* ComicArcIPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcIPadApp.swift; sourceTree = "<group>"; };
+		IP0000000000000000000004 /* ComicArcPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArcPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D00000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E00000000000000000000003 /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C10000000000000000000001 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000001 /* Platform.swift */,
+			);
+			name = Shared;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000002 /* iPad */ = {
+			isa = PBXGroup;
+			children = (
+				IP0000000000000000000001 /* ComicArcIPadApp.swift */,
+				A10000000000000000000002 /* iPadRootView.swift */,
+				A10000000000000000000003 /* iPadReaderView.swift */,
+			);
+			name = iPad;
+			path = iPad;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000010 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000010 /* PlatformServiceProtocols.swift */,
+				A10000000000000000000011 /* EnvironmentServices.swift */,
+				A10000000000000000000013 /* ReadingSessionService.swift */,
+				C10000000000000000000011 /* macOS */,
+			);
+			name = Services;
+			path = Services;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000011 /* macOS */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000012 /* MacPlatformServices.swift */,
+			);
+			name = macOS;
+			path = macOS;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000001 /* = */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000001 /* ComicArcMacApp.swift */,
+				C10000000000000000000001 /* Shared */,
+				C10000000000000000000002 /* iPad */,
+				C10000000000000000000010 /* Services */,
+				C00000000000000000000004 /* Models */,
+				C00000000000000000000005 /* Database */,
+				C00000000000000000000006 /* Scanner */,
+				C00000000000000000000007 /* Caches */,
+				C00000000000000000000008 /* ViewModels */,
+				C00000000000000000000009 /* Views */,
+				A00000000000000000000012 /* Assets.xcassets */,
+				A00000000000000000000013 /* icon.icns */,
+				A00000000000000000000014 /* Info.plist */,
+				A00000000000000000000026 /* PrivacyInfo.xcprivacy */,
+				A00000000000000000000015 /* ComicArcMac.entitlements */,
+				F10000000000000000000005 /* ComicArcTests */,
+				C00000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C00000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000016 /* ComicArc.app */,
+				F10000000000000000000004 /* ComicArcTests.xctest */,
+				IP0000000000000000000004 /* ComicArcPad.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000002 /* Comic.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000005 /* Database */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000003 /* DatabaseManager.swift */,
+			);
+			path = Database;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000006 /* Scanner */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000004 /* LibraryScanner.swift */,
+				A00000000000000000000005 /* FileWatcher.swift */,
+			);
+			path = Scanner;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000007 /* Caches */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000006 /* ThumbnailCache.swift */,
+				A00000000000000000000007 /* PageCache.swift */,
+			);
+			path = Caches;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000008 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000008 /* LibraryViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000009 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000009 /* ContentView.swift */,
+				A0000000000000000000000A /* Design.swift */,
+				A00000000000000000000020 /* OnboardingView.swift */,
+				A00000000000000000000025 /* TutorialView.swift */,
+				C10000000000000000000012 /* Shared */,
+				C0000000000000000000000A /* Library */,
+				C0000000000000000000000B /* Reader */,
+				C0000000000000000000000C /* Settings */,
+				C0000000000000000000000D /* Stats */,
+				C0000000000000000000000E /* Runs */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000012 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000014 /* SharedComponents.swift */,
+			);
+			name = Shared;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F10000000000000000000005 /* ComicArcTests */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000002 /* ComicArcTests.swift */,
+			);
+			path = ComicArcTests;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000A /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000B /* LibraryView.swift */,
+				A0000000000000000000000C /* ComicCard.swift */,
+				A0000000000000000000000D /* ComicDetailView.swift */,
+				A00000000000000000000023 /* IssueDetailPage.swift */,
+				A00000000000000000000024 /* SeriesManagerView.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000B /* Reader */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000E /* ReaderView.swift */,
+			);
+			path = Reader;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000C /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000F /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000D /* Stats */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000010 /* StatsView.swift */,
+				A00000000000000000000021 /* ReadingHistoryView.swift */,
+				A00000000000000000000022 /* CreatorBrowseView.swift */,
+			);
+			path = Stats;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000E /* Runs */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000011 /* RunsView.swift */,
+			);
+			path = Runs;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D00000000000000000000002 /* ComicArc */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D00000000000000000000007 /* Build configuration list for PBXNativeTarget "ComicArc" */;
+			buildPhases = (
+				D00000000000000000000003 /* Sources */,
+				D00000000000000000000004 /* Frameworks */,
+				D00000000000000000000005 /* Resources */,
+				D000000000000000000000CC /* Copy to app folder */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ComicArc;
+			packageProductDependencies = (
+				E00000000000000000000002 /* ZIPFoundation */,
+			);
+			productName = ComicArc;
+			productReference = A00000000000000000000016 /* ComicArc.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F10000000000000000000006 /* ComicArcTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000000000000000000007 /* Build configuration list for PBXNativeTarget "ComicArcTests" */;
+			buildPhases = (
+				F10000000000000000000008 /* Sources */,
+				F10000000000000000000009 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F1000000000000000000000A /* PBXTargetDependency */,
+			);
+			name = ComicArcTests;
+			productName = ComicArcTests;
+			productReference = F10000000000000000000004 /* ComicArcTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		IP0000000000000000000003 /* ComicArcPad */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = IP0000000000000000000008 /* Build configuration list for PBXNativeTarget "ComicArcPad" */;
+			buildPhases = (
+				IP0000000000000000000005 /* Sources */,
+				IP0000000000000000000006 /* Frameworks */,
+				IP0000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ComicArcPad;
+			packageProductDependencies = (
+				IP000000000000000000000B /* ZIPFoundation */,
+			);
+			productName = ComicArcPad;
+			productReference = IP0000000000000000000004 /* ComicArcPad.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D000000000000000000000CC /* Copy to app folder */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy to app folder";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "APP_DEST=\"$SRCROOT/app/ComicArc.app\"\nrm -rf \"$APP_DEST\"\ncp -R \"$BUILT_PRODUCTS_DIR/ComicArc.app\" \"$APP_DEST\"\n\n# Bundle unar and lsar for CBR support (no Homebrew required at runtime)\nfor TOOL in unar lsar; do\n  for TOOLPATH in /opt/homebrew/bin/$TOOL /usr/local/bin/$TOOL; do\n    if [ -f \"$TOOLPATH\" ]; then\n      cp \"$TOOLPATH\" \"$APP_DEST/Contents/MacOS/$TOOL\"\n      break\n    fi\n  done\ndone\n\n# Skip deep codesign when xctest bundles are embedded (test/build-for-testing builds)\nif ! ls \"$APP_DEST/Contents/PlugIns\"/*.xctest >/dev/null 2>&1; then\n  codesign --force --deep --sign - \"$APP_DEST\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXProject section */
+		D00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					D00000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					F10000000000000000000006 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = D00000000000000000000002;
+					};
+					IP0000000000000000000003 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = D00000000000000000000006 /* Build configuration list for PBXProject "ComicArc" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C00000000000000000000001;
+			packageReferences = (
+				E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */,
+			);
+			productRefGroup = C00000000000000000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D00000000000000000000002 /* ComicArc */,
+				F10000000000000000000006 /* ComicArcTests */,
+				IP0000000000000000000003 /* ComicArcPad */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D00000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000012 /* Assets.xcassets in Resources */,
+				B00000000000000000000026 /* PrivacyInfo.xcprivacy in Resources */,
+				B00000000000000000000013 /* icon.icns in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D00000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* ComicArcMacApp.swift in Sources */,
+				B00000000000000000000002 /* Comic.swift in Sources */,
+				B00000000000000000000003 /* DatabaseManager.swift in Sources */,
+				B00000000000000000000004 /* LibraryScanner.swift in Sources */,
+				B00000000000000000000005 /* FileWatcher.swift in Sources */,
+				B00000000000000000000006 /* ThumbnailCache.swift in Sources */,
+				B00000000000000000000007 /* PageCache.swift in Sources */,
+				B00000000000000000000008 /* LibraryViewModel.swift in Sources */,
+				B00000000000000000000009 /* ContentView.swift in Sources */,
+				B0000000000000000000000A /* Design.swift in Sources */,
+				B0000000000000000000000B /* LibraryView.swift in Sources */,
+				B0000000000000000000000C /* ComicCard.swift in Sources */,
+
+				B0000000000000000000000E /* ReaderView.swift in Sources */,
+				B0000000000000000000000F /* SettingsView.swift in Sources */,
+				B00000000000000000000010 /* StatsView.swift in Sources */,
+				B00000000000000000000011 /* RunsView.swift in Sources */,
+				B00000000000000000000020 /* OnboardingView.swift in Sources */,
+				B00000000000000000000021 /* ReadingHistoryView.swift in Sources */,
+				B00000000000000000000022 /* CreatorBrowseView.swift in Sources */,
+				B00000000000000000000023 /* IssueDetailPage.swift in Sources */,
+				B00000000000000000000024 /* SeriesManagerView.swift in Sources */,
+				B00000000000000000000025 /* TutorialView.swift in Sources */,
+				B10000000000000000000001 /* Platform.swift in Sources */,
+				B10000000000000000000002 /* iPadRootView.swift in Sources */,
+				B10000000000000000000003 /* iPadReaderView.swift in Sources */,
+				B0000000000000000000000D /* ComicDetailView.swift in Sources */,
+				B10000000000000000000010 /* PlatformServiceProtocols.swift in Sources */,
+				B10000000000000000000011 /* EnvironmentServices.swift in Sources */,
+				B10000000000000000000012 /* MacPlatformServices.swift in Sources */,
+				B10000000000000000000013 /* ReadingSessionService.swift in Sources */,
+				B10000000000000000000014 /* SharedComponents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F10000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F10000000000000000000001 /* ComicArcTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		IP0000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */,
+				IB0000000000000000000001 /* Comic.swift in Sources */,
+				IB0000000000000000000002 /* DatabaseManager.swift in Sources */,
+				IB0000000000000000000003 /* LibraryScanner.swift in Sources */,
+				IB0000000000000000000004 /* FileWatcher.swift in Sources */,
+				IB0000000000000000000005 /* ThumbnailCache.swift in Sources */,
+				IB0000000000000000000006 /* PageCache.swift in Sources */,
+				IB0000000000000000000007 /* LibraryViewModel.swift in Sources */,
+				IB0000000000000000000008 /* ContentView.swift in Sources */,
+				IB0000000000000000000009 /* Design.swift in Sources */,
+				IB000000000000000000000A /* LibraryView.swift in Sources */,
+				IB000000000000000000000B /* ComicCard.swift in Sources */,
+				IB000000000000000000000C /* ComicDetailView.swift in Sources */,
+				IB000000000000000000000D /* ReaderView.swift in Sources */,
+				IB000000000000000000000E /* SettingsView.swift in Sources */,
+				IB000000000000000000000F /* StatsView.swift in Sources */,
+				IB0000000000000000000010 /* RunsView.swift in Sources */,
+				IB0000000000000000000011 /* OnboardingView.swift in Sources */,
+				IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */,
+				IB0000000000000000000013 /* CreatorBrowseView.swift in Sources */,
+				IB0000000000000000000014 /* IssueDetailPage.swift in Sources */,
+				IB0000000000000000000015 /* SeriesManagerView.swift in Sources */,
+				IB0000000000000000000016 /* TutorialView.swift in Sources */,
+				IB0000000000000000000017 /* Platform.swift in Sources */,
+				IB0000000000000000000018 /* iPadRootView.swift in Sources */,
+				IB0000000000000000000019 /* iPadReaderView.swift in Sources */,
+				IB000000000000000000001A /* PlatformServiceProtocols.swift in Sources */,
+				IB000000000000000000001B /* EnvironmentServices.swift in Sources */,
+				IB000000000000000000001C /* ReadingSessionService.swift in Sources */,
+				IB000000000000000000001D /* SharedComponents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F10000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		IP0000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				IP000000000000000000000C /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXResourcesBuildPhase section (iPad) */
+		IP0000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				IB000000000000000000001E /* Assets.xcassets in Resources */,
+				IB000000000000000000001F /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section (iPad) */
+
+/* Begin PBXTargetDependency section */
+		F1000000000000000000000A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D00000000000000000000002 /* ComicArc */;
+			targetProxy = F10000000000000000000003 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		D00000000000000000000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		D00000000000000000000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		D0000000000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ComicArcMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.app;
+				PRODUCT_BUNDLE_ICON_FILE = icon;
+				PRODUCT_NAME = ComicArc;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D0000000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ComicArcMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.app;
+				PRODUCT_BUNDLE_ICON_FILE = icon;
+				PRODUCT_NAME = ComicArc;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F1000000000000000000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.tests;
+				PRODUCT_NAME = ComicArcTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ComicArc.app/Contents/MacOS/ComicArc";
+			};
+			name = Debug;
+		};
+		F1000000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.tests;
+				PRODUCT_NAME = ComicArcTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ComicArc.app/Contents/MacOS/ComicArc";
+			};
+			name = Release;
+		};
+		IP0000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.ipad;
+				PRODUCT_NAME = ComicArcPad;
+				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		IP000000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 2.0;
+				OTHER_LDFLAGS = "-lsqlite3";
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.ipad;
+				PRODUCT_NAME = ComicArcPad;
+				SDKROOT = iphoneos;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D00000000000000000000006 /* Build configuration list for PBXProject "ComicArc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D00000000000000000000008 /* Debug */,
+				D00000000000000000000009 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D00000000000000000000007 /* Build configuration list for PBXNativeTarget "ComicArc" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0000000000000000000000A /* Debug */,
+				D0000000000000000000000B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		IP0000000000000000000008 /* Build configuration list for PBXNativeTarget "ComicArcPad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				IP0000000000000000000009 /* Debug */,
+				IP000000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000000000000000000007 /* Build configuration list for PBXNativeTarget "ComicArcTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1000000000000000000000B /* Debug */,
+				F1000000000000000000000C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ZIPFoundation;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E00000000000000000000002 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+		IP000000000000000000000B /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+	};
+	rootObject = D00000000000000000000001 /* Project object */;
+}

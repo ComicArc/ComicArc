@@ -1,0 +1,437 @@
+#if os(iOS)
+import SwiftUI
+
+// MARK: - iPad root navigation
+
+struct iPadRootView: View {
+    @EnvironmentObject var vm: LibraryViewModel
+    @State private var selectedComic: Comic?
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            iPadSidebar()
+                .navigationTitle("ComicArc")
+        } content: {
+            iPadContentColumn(selectedComic: $selectedComic)
+                .id(vm.destination)
+        } detail: {
+            iPadDetailColumn(comic: selectedComic)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .onChange(of: vm.destination) { selectedComic = nil }
+    }
+}
+
+// MARK: - Sidebar
+
+private struct iPadSidebar: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        List(selection: Binding(
+            get: { Optional(vm.destination) },
+            set: { if let d = $0 { vm.select(d) } }
+        )) {
+            Section("Library") {
+                ForEach([AppDestination.library, .continueReading, .favorites, .readingList], id: \.self) { s in
+                    Label(s.title, systemImage: s.icon).tag(s)
+                }
+            }
+            Section("Discover") {
+                ForEach([AppDestination.runs, .stats, .history, .creators], id: \.self) { s in
+                    Label(s.title, systemImage: s.icon).tag(s)
+                }
+            }
+            Section {
+                Label(AppDestination.settings.title, systemImage: AppDestination.settings.icon)
+                    .tag(AppDestination.settings)
+            }
+        }
+        .listStyle(.sidebar)
+    }
+}
+
+// MARK: - Content column
+
+private struct iPadContentColumn: View {
+    @Binding var selectedComic: Comic?
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        Group {
+            switch vm.destination {
+            case .library, .continueReading, .favorites, .readingList, .publisher, .tag:
+                iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
+                    .navigationTitle(vm.destination.title)
+            case .stats:
+                StatsView().environmentObject(vm)
+                    .navigationTitle("Statistics")
+            case .runs:
+                RunsView().environmentObject(vm)
+                    .navigationTitle("Reading Orders")
+            case .history:
+                ReadingHistoryView().environmentObject(vm)
+                    .navigationTitle("History")
+            case .creators:
+                CreatorBrowseView().environmentObject(vm)
+                    .navigationTitle("Creators")
+            case .settings:
+                iPadSettingsView()
+                    .navigationTitle("Settings")
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: { vm.scan() }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(vm.isScanning)
+                .accessibilityLabel("Rescan Library")
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                iPadImportButton()
+            }
+        }
+    }
+}
+
+// MARK: - Detail column
+
+private struct iPadDetailColumn: View {
+    let comic: Comic?
+    @EnvironmentObject var vm: LibraryViewModel
+    @State private var openReader = false
+
+    var body: some View {
+        Group {
+            if let comic {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        iPadComicHero(comic: comic)
+
+                        HStack(spacing: 12) {
+                            Button(action: { openReader = true }) {
+                                Label(comic.isStarted ? "Continue" : "Read", systemImage: "book.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .accessibilityLabel(comic.isStarted ? "Continue reading \(comic.title)" : "Read \(comic.title)")
+
+                            Button {
+                                if comic.isFinished { vm.markUnread(comic) } else { vm.markRead(comic) }
+                            } label: {
+                                Image(systemName: comic.isFinished ? "arrow.counterclockwise" : "checkmark")
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .accessibilityLabel(comic.isFinished ? "Mark as unread" : "Mark as read")
+
+                            Button(action: { vm.toggleFavorite(comic) }) {
+                                Image(systemName: comic.isFavorite ? "heart.fill" : "heart")
+                                    .font(.title3)
+                                    .foregroundStyle(comic.isFavorite ? .red : .primary)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .accessibilityLabel(comic.isFavorite ? "Remove from favorites" : "Add to favorites")
+
+                            Button(action: { vm.toggleReadingList(comic) }) {
+                                Image(systemName: comic.inReadingList ? "bookmark.fill" : "bookmark")
+                                    .font(.title3)
+                                    .foregroundStyle(comic.inReadingList ? Color.accentColor : .primary)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .accessibilityLabel(comic.inReadingList ? "Remove from reading list" : "Add to reading list")
+                        }
+                        .padding(.horizontal)
+
+                        iPadComicMeta(comic: comic)
+                    }
+                }
+                .navigationTitle(comic.title)
+                .navigationBarTitleDisplayMode(.large)
+                .fullScreenCover(isPresented: $openReader) {
+                    iPadReaderView(comic: comic, onClose: { openReader = false })
+                        .environmentObject(vm)
+                }
+            } else {
+                ContentUnavailableView("Select a Comic",
+                                       systemImage: "book.closed",
+                                       description: Text("Choose a comic from the library."))
+            }
+        }
+    }
+}
+
+// MARK: - Comic grid
+
+private struct iPadComicGrid: View {
+    let comics: [Comic]
+    @Binding var selectedComic: Comic?
+    @EnvironmentObject var vm: LibraryViewModel
+
+    private let columns = [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 16)]
+
+    var body: some View {
+        ScrollView {
+            if comics.isEmpty && vm.isLoading {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(0..<20, id: \.self) { _ in ShimmerCard() }
+                }
+                .padding()
+            } else if comics.isEmpty {
+                ContentUnavailableView("No Comics",
+                                       systemImage: "books.vertical",
+                                       description: Text("Import comics to get started."))
+                    .padding(.top, 80)
+            } else {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(comics) { comic in
+                        iPadComicTile(comic: comic)
+                            .onTapGesture { selectedComic = comic }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.accentColor, lineWidth: selectedComic?.id == comic.id ? 2 : 0)
+                            )
+                    }
+                }
+                .padding()
+            }
+        }
+    }
+}
+
+private struct iPadComicTile: View {
+    let comic: Comic
+    @EnvironmentObject var vm: LibraryViewModel
+    @State private var thumbnail: PlatformImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Group {
+                if let img = thumbnail {
+                    Image(platformImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.secondary.opacity(0.15))
+                        .overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))
+                }
+            }
+            .frame(width: 140, height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            Text(comic.title)
+                .font(.caption.weight(.medium))
+                .lineLimit(2)
+                .foregroundStyle(.primary)
+
+            if comic.progress > 0 {
+                ProgressView(value: Double(comic.progress), total: max(1, Double(comic.pageCount)))
+                    .tint(.accentColor)
+            }
+        }
+        .frame(width: 140)
+        .task { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
+        .contextMenu {
+            Button("Open") { vm.readerComic = comic }
+            Divider()
+            Button("Mark as Read") { vm.markRead(comic) }
+            Button(comic.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
+                vm.toggleFavorite(comic)
+            }
+            Button("Add to Reading List") { vm.toggleReadingList(comic) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(comic.title)
+        .accessibilityValue(comic.progress > 0
+            ? "Page \(comic.progress + 1) of \(comic.pageCount)"
+            : "Unread")
+        .accessibilityHint("Double-tap to open")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+// MARK: - Comic hero + meta
+
+private struct iPadComicHero: View {
+    let comic: Comic
+    @State private var thumbnail: PlatformImage?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 20) {
+            Group {
+                if let img = thumbnail {
+                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.secondary.opacity(0.15))
+                        .overlay(Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(.secondary))
+                }
+            }
+            .frame(width: 140, height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(radius: 4)
+            .padding(.leading)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(comic.title).font(.title2.bold()).lineLimit(3)
+                if !comic.series.isEmpty {
+                    Text(comic.series).font(.subheadline).foregroundStyle(.secondary)
+                }
+                if !comic.publisher.isEmpty {
+                    Text(comic.publisher).font(.caption).foregroundStyle(.tertiary)
+                }
+                if comic.pageCount > 0 {
+                    Text("\(comic.pageCount) pages").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.top, 4)
+        }
+        .task { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
+    }
+}
+
+private struct iPadComicMeta: View {
+    let comic: Comic
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if comic.progress > 0 {
+                metaRow("Progress",
+                        value: "Page \(comic.progress) of \(comic.pageCount)",
+                        icon: "book")
+                ProgressView(value: Double(comic.progress), total: max(1, Double(comic.pageCount)))
+                    .tint(.accentColor)
+                    .padding(.horizontal).padding(.bottom, 8)
+            }
+            if let issue = comic.issueNumber  { metaRow("Issue",    value: "#\(issue)",       icon: "number") }
+            if let year  = comic.year          { metaRow("Year",     value: "\(year)",         icon: "calendar") }
+            if let writer = comic.writer,  !writer.isEmpty  { metaRow("Writer",   value: writer,    icon: "pencil") }
+            if let pencil = comic.penciller, !pencil.isEmpty { metaRow("Penciller", value: pencil,  icon: "paintbrush") }
+            if let arc    = comic.storyArc, !arc.isEmpty     { metaRow("Story Arc", value: arc,     icon: "books.vertical") }
+
+            if !comic.tags.isEmpty {
+                Divider().padding(.horizontal)
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Tags", systemImage: "tag").font(.subheadline).foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(comic.tags, id: \.self) { tag in
+                                Text("#\(tag)")
+                                    .font(.caption)
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(Color.accentColor.opacity(0.12))
+                                    .foregroundStyle(Color.accentColor)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical, 10)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func metaRow(_ label: String, value: String, icon: String) -> some View {
+        Divider().padding(.horizontal)
+        HStack {
+            Label(label, systemImage: icon).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).foregroundStyle(.primary)
+        }
+        .padding()
+    }
+}
+
+// MARK: - Import button (UIDocumentPicker)
+
+private struct iPadImportButton: View {
+    @State private var showPicker = false
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        Button(action: { showPicker = true }) {
+            Image(systemName: "plus")
+        }
+        .accessibilityLabel("Import Comics")
+        .sheet(isPresented: $showPicker) {
+            iPadDocumentPicker { urls in
+                vm.importFiles(urls)
+            }
+        }
+    }
+}
+
+// MARK: - Settings stub for iPad
+
+struct iPadSettingsView: View {
+    @EnvironmentObject var vm: LibraryViewModel
+    @AppStorage("scrollMode")    private var scrollMode    = false
+    @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
+    @State private var showClearConfirm = false
+    @State private var cacheCleared     = false
+    @State private var comicCount       = 0
+
+    var body: some View {
+        Form {
+            Section("Reader") {
+                Toggle("Scroll Mode", isOn: $scrollMode)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Slideshow Speed")
+                        Spacer()
+                        Text(String(format: "%.1fs", autoplaySpeed)).foregroundStyle(.secondary)
+                    }
+                    Slider(value: $autoplaySpeed, in: 1.0...15.0, step: 0.5)
+                }
+            }
+
+            Section("Library") {
+                HStack {
+                    Label("Comics imported", systemImage: "books.vertical")
+                    Spacer()
+                    Text("\(comicCount)").foregroundStyle(.secondary)
+                }
+                Button(role: .destructive) { showClearConfirm = true } label: {
+                    Label("Clear Thumbnail Cache", systemImage: "trash")
+                }
+            }
+
+            Section("About") {
+                HStack {
+                    Text("ComicArc")
+                    Spacer()
+                    let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                    Text(v).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .confirmationDialog("Clear the thumbnail cache? Thumbnails will be regenerated on next view.",
+                            isPresented: $showClearConfirm, titleVisibility: .visible) {
+            Button("Clear Cache", role: .destructive) {
+                Task.detached(priority: .utility) { ThumbnailCache.shared.clearAll() }
+                cacheCleared = true
+            }
+        }
+        .alert("Cache cleared", isPresented: $cacheCleared) {
+            Button("OK", role: .cancel) {}
+        }
+        .task {
+            let count = await Task.detached(priority: .utility) {
+                DatabaseManager.shared.allComics().count
+            }.value
+            comicCount = count
+        }
+    }
+}
+#endif

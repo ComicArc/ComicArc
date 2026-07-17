@@ -1,0 +1,65 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build ComicArc.app (ad-hoc signed, no Developer Team required)
+        run: |
+          xcodebuild -project ComicArc.xcodeproj \
+            -scheme ComicArc \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Package
+        run: |
+          APP_PATH="build/Build/Products/Release/ComicArc.app"
+          ditto -c -k --keepParent "$APP_PATH" ComicArc-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS
+          path: ComicArc-macOS.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: false
+          body: |
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's new.
+
+            **First launch:** macOS will flag this as unsigned. Right-click → Open, or run:
+            ```sh
+            xattr -cr /Applications/ComicArc.app
+            ```

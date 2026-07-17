@@ -1,0 +1,660 @@
+import Foundation
+import Combine
+import CoreSpotlight
+import UserNotifications
+
+// MARK: - Navigation
+
+enum AppDestination: Hashable, Codable {
+    case library
+    case continueReading
+    case favorites
+    case readingList
+    case publisher(String)
+    case tag(String)
+    case runs
+    case stats
+    case history
+    case creators
+    case settings
+
+    var title: String {
+        switch self {
+        case .library:          return "All Comics"
+        case .continueReading:  return "Continue Reading"
+        case .favorites:        return "Favorites"
+        case .readingList:      return "Reading List"
+        case .publisher(let p): return p
+        case .tag(let t):       return "#\(t)"
+        case .runs:             return "Reading Orders"
+        case .stats:            return "Statistics"
+        case .history:          return "History"
+        case .creators:         return "Creators"
+        case .settings:         return "Settings"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .library:         return "books.vertical.fill"
+        case .continueReading: return "book.open.fill"
+        case .favorites:       return "heart.fill"
+        case .readingList:     return "bookmark.fill"
+        case .publisher:       return "building.columns"
+        case .tag:             return "tag"
+        case .runs:            return "list.bullet.rectangle.portrait.fill"
+        case .stats:           return "chart.bar.xaxis"
+        case .history:         return "clock.fill"
+        case .creators:        return "person.2.fill"
+        case .settings:        return "gear"
+        }
+    }
+}
+
+@MainActor
+final class LibraryViewModel: ObservableObject {
+    static let shared = LibraryViewModel()
+
+    @Published var comics:            [Comic] = []
+    @Published var publishers:        [String] = []
+    @Published var allTags:           [(tag: Tag, count: Int)] = []
+    @Published var inProgressComics:  [Comic] = []
+    @Published var destination: AppDestination = .library
+    @Published var selectedSeries:    String? = nil
+    @Published var searchText:        String = ""
+    @Published var sortOrder: DatabaseManager.SortOrder =
+        DatabaseManager.SortOrder(rawValue: UserDefaults.standard.string(forKey: "comicSortOrder") ?? "") ?? .manual {
+        didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "comicSortOrder") }
+    }
+    @Published var scanState:           LibraryScanner.ScanState = .init()
+    @Published var isScanning:          Bool = false
+    @Published var isLoading:           Bool = false
+    @Published var isLibraryAvailable:  Bool = true
+    @Published var selectedComic:     Comic? = nil
+    @Published var selectedRun:       Run? = nil
+    @Published var readerComic:       Comic? = nil
+
+    // Browse hierarchy state
+    @Published var characterGroups:   [DatabaseManager.CharacterGroup] = []
+    @Published var seriesGroups:      [DatabaseManager.SeriesGroup] = []
+    @Published var selectedGroup:     DatabaseManager.CharacterGroup? = nil
+    @Published var useGroupedView:    Bool = true
+
+    // Bulk selection
+    @Published var bulkMode:          Bool = false
+    @Published var selectedComicIds:  Set<Int64> = []
+
+    // Series manager sheet trigger
+    @Published var showSeriesManager: Bool = false
+
+    var selectedSection: SidebarSection {
+        switch destination {
+        case .runs:            return .runs
+        case .stats:           return .stats
+        case .history:         return .history
+        case .creators:        return .creators
+        case .continueReading: return .continueReading
+        case .favorites:       return .favorites
+        case .readingList:     return .readingList
+        default:               return .library
+        }
+    }
+
+    var activePublisher: String? {
+        if case .publisher(let p) = destination { return p }
+        return nil
+    }
+
+    var activeTag: String? {
+        if case .tag(let t) = destination { return t }
+        return nil
+    }
+
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, creators }
+
+    enum BrowseLevel { case characters, seriesGroups, issues }
+    var browseLevel: BrowseLevel {
+        if !useGroupedView || selectedSection != .library || activeTag != nil { return .issues }
+        if selectedSeries != nil { return .issues }
+        if selectedGroup  != nil { return .seriesGroups }
+        return .characters
+    }
+
+    private var db: DatabaseManager { .shared }
+    private var watcher: FileWatcher?
+    private var searchCancellable: AnyCancellable?
+    var libraryPath: String { UserDefaults.standard.string(forKey: "libraryPath") ?? "" }
+
+    private init() {
+        useGroupedView = true  // grouped hierarchy is the only browse mode
+
+        // Restore last destination before initial reload so the right data loads
+        if let data = UserDefaults.standard.data(forKey: "session.destination"),
+           let dest = try? JSONDecoder().decode(AppDestination.self, from: data) {
+            destination = dest
+            if case .tag = dest { useGroupedView = false }
+        }
+
+        searchCancellable = $searchText
+            .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.reload() }
+        reload()
+        startWatcher()
+        reparseMetaIfNeeded()
+
+        // Restore library drill-down state (group/series) after initial data load
+        if case .library = destination { restoreLibraryDrillDown() }
+    }
+
+    // MARK: - Session persistence
+
+    func saveNavigationState() {
+        if let data = try? JSONEncoder().encode(destination) {
+            UserDefaults.standard.set(data, forKey: "session.destination")
+        }
+        UserDefaults.standard.set(selectedGroup?.groupName ?? "", forKey: "session.groupName")
+        UserDefaults.standard.set(selectedGroup?.publisher ?? "", forKey: "session.groupPublisher")
+        UserDefaults.standard.set(selectedSeries ?? "", forKey: "session.series")
+    }
+
+    private func restoreLibraryDrillDown() {
+        let groupName = UserDefaults.standard.string(forKey: "session.groupName") ?? ""
+        let groupPub  = UserDefaults.standard.string(forKey: "session.groupPublisher") ?? ""
+        let series    = UserDefaults.standard.string(forKey: "session.series") ?? ""
+        guard !groupName.isEmpty else { return }
+
+        Task.detached(priority: .userInitiated) { [db] in
+            let groups = db.characterGroups(publisher: nil, search: nil)
+            guard let group = groups.first(where: { $0.groupName == groupName && $0.publisher == groupPub })
+            else { return }
+            let seriesList = db.seriesGroups(groupName: groupName, publisher: groupPub.isEmpty ? nil : groupPub)
+            await MainActor.run {
+                self.selectedGroup = group
+                if !series.isEmpty, seriesList.contains(where: { $0.series == series }) {
+                    self.selectedSeries = series
+                    self.reload()
+                } else {
+                    self.seriesGroups = seriesList
+                }
+            }
+        }
+    }
+
+    // One-time migration: re-derive publisher/character/series from folder structure.
+    // Runs in the background; resets the flag so a manual trigger (Settings) can force it again.
+    func reparseMetaIfNeeded() {
+        // Bump version key when the reparse logic changes so all users get the updated fix.
+        let key = "folderMetaReparseV2"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        let path = libraryPath
+        guard !path.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            LibraryScanner.shared.reparseAllMeta(libraryPath: path)
+            UserDefaults.standard.set(true, forKey: key)
+            DispatchQueue.main.async { self?.reload() }
+        }
+    }
+
+    func forceReparseAllMeta() {
+        let path = libraryPath
+        guard !path.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            LibraryScanner.shared.reparseAllMeta(libraryPath: path)
+            UserDefaults.standard.set(true, forKey: "folderMetaReparseV2")
+            DispatchQueue.main.async { self?.reload() }
+        }
+    }
+
+    // MARK: - Load
+
+    private var reloadWorkItem: DispatchWorkItem?
+    // Guards against an older, slower reload overwriting a newer one's results
+    // when rapid successive reload() calls each spawn their own detached query.
+    private var reloadGeneration = 0
+
+    func reload() {
+        // Debounce: coalesce rapid consecutive calls into one (16ms window)
+        reloadWorkItem?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?._reload() }
+        reloadWorkItem = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016, execute: w)
+    }
+
+    private func _reload() {
+        isLoading = true
+        reloadGeneration += 1
+        let gen = reloadGeneration
+        let section = selectedSection
+
+        if section == .library && useGroupedView && selectedSeries == nil && activeTag == nil && searchText.isEmpty {
+            loadCharacterGroups()
+            return
+        }
+
+        let pub   = activePublisher
+        let ser   = selectedSeries
+        let tag   = activeTag
+        let q     = searchText.isEmpty ? nil : searchText
+        let sort  = sortOrder
+        let group = selectedGroup
+
+        Task.detached(priority: .userInitiated) { [db] in
+            let pubs = db.publishers()
+            let tags = db.allTags()
+
+            guard section == .library || section == .continueReading
+                || section == .favorites || section == .readingList else {
+                await MainActor.run {
+                    guard gen == self.reloadGeneration else { return }
+                    self.publishers = pubs; self.allTags = tags; self.isLoading = false
+                }
+                return
+            }
+
+            let loaded: [Comic]
+            switch section {
+            case .continueReading:
+                loaded = db.inProgress()
+            case .favorites:
+                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, favoritesOnly: true)
+            case .readingList:
+                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, readingListOnly: true)
+            default:
+                let character    = group?.character
+                let nullCharOnly = group != nil && character == nil
+                loaded = db.allComics(publisher: pub, character: character, series: ser,
+                                      search: q, sortOrder: sort,
+                                      nullCharacterOnly: nullCharOnly, tag: tag)
+            }
+            await MainActor.run {
+                guard gen == self.reloadGeneration else { return }
+                self.comics     = loaded
+                self.publishers = pubs
+                self.allTags    = tags
+                self.isLoading  = false
+            }
+        }
+    }
+
+    private func loadCharacterGroups() {
+        reloadGeneration += 1
+        let gen = reloadGeneration
+        let pub = activePublisher
+        let q   = searchText.isEmpty ? nil : searchText
+        Task.detached(priority: .userInitiated) { [db] in
+            let groups = db.characterGroups(publisher: pub, search: q)
+            let pubs   = db.publishers()
+            let tags   = db.allTags()
+            let shelf  = db.inProgress(limit: 8)
+            await MainActor.run {
+                guard gen == self.reloadGeneration else { return }
+                self.characterGroups   = groups
+                self.publishers        = pubs
+                self.allTags           = tags
+                self.inProgressComics  = shelf
+                self.comics            = []
+                self.isLoading         = false
+            }
+        }
+    }
+
+    func select(_ item: AppDestination) {
+        destination       = item
+        selectedSeries    = nil
+        selectedGroup     = nil
+        selectedComic     = nil
+        bulkMode          = false
+        selectedComicIds.removeAll()
+        if case .tag = item { useGroupedView = false } else { useGroupedView = true }
+        saveNavigationState()
+        reload()
+    }
+
+    func clearAllFilters() {
+        searchText     = ""
+        selectedSeries = nil
+        selectedGroup  = nil
+        select(.library)
+    }
+
+    func selectSeries(_ series: String?) {
+        selectedSeries = series
+        reload()
+    }
+
+    // MARK: - Hierarchical browsing
+
+    func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
+        let pub = activePublisher
+        Task.detached(priority: .userInitiated) { [db] in
+            let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
+            await MainActor.run {
+                self.selectedGroup = group
+                if series.count == 1 {
+                    self.selectedSeries = series[0].series
+                    self.saveNavigationState()
+                    self.reload()
+                } else {
+                    self.seriesGroups = series
+                    self.saveNavigationState()
+                }
+            }
+        }
+    }
+
+    func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
+        selectedSeries = sg.series
+        saveNavigationState()
+        reload()
+    }
+
+    func navigateBack() {
+        if selectedSeries != nil {
+            selectedSeries = nil
+            comics = []
+            if let group = selectedGroup {
+                let pub = activePublisher
+                Task.detached(priority: .userInitiated) { [db] in
+                    let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
+                    await MainActor.run { self.seriesGroups = series }
+                }
+            } else {
+                loadCharacterGroups()
+            }
+        } else if selectedGroup != nil {
+            selectedGroup  = nil
+            selectedSeries = nil
+            comics         = []
+            loadCharacterGroups()
+        }
+        saveNavigationState()
+    }
+
+    // MARK: - Bulk operations
+
+    func toggleBulkMode() {
+        bulkMode.toggle()
+        if !bulkMode { selectedComicIds.removeAll() }
+    }
+
+    func toggleSelection(_ id: Int64) {
+        if selectedComicIds.contains(id) { selectedComicIds.remove(id) }
+        else { selectedComicIds.insert(id) }
+    }
+
+    func selectAll() { selectedComicIds = Set(comics.map(\.id)) }
+
+    func bulkMarkRead() {
+        let updates = comics
+            .filter { selectedComicIds.contains($0.id) }
+            .map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) }
+        db.updateProgress(updates)
+        selectedComicIds.removeAll()
+        reload()
+    }
+
+    func bulkMarkUnread() {
+        db.updateProgress(selectedComicIds.map { (comicId: $0, page: 0) })
+        selectedComicIds.removeAll()
+        reload()
+    }
+
+    func bulkAddToReadingList() {
+        db.setInReadingList(Array(selectedComicIds), true)
+        selectedComicIds.removeAll()
+        reload()
+    }
+
+    func bulkRemoveFromReadingList() {
+        db.setInReadingList(Array(selectedComicIds), false)
+        selectedComicIds.removeAll()
+        reload()
+    }
+
+    func bulkDelete() {
+        let ids = Array(selectedComicIds)
+        db.softDelete(ids)
+        ids.forEach { ThumbnailCache.shared.evict($0) }
+        selectedComicIds.removeAll()
+        bulkMode = false
+        reload()
+    }
+
+    // MARK: - Scan / import
+
+    func scan() {
+        let path = libraryPath
+        guard !path.isEmpty, !isScanning else { return }
+        isScanning = true
+        scanState = .init()   // Clear previous error before starting a fresh scan
+        LibraryScanner.shared.scan(libraryPath: path) { [weak self] state in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.scanState  = state
+                self.isScanning = state.running
+                if !state.running {
+                    self.reload()
+                    self.indexSpotlight()
+                    self.notifyScanComplete(added: state.added)
+                }
+            }
+        }
+    }
+
+    func importFiles(_ urls: [URL]) {
+        let path = libraryPath
+        Task.detached(priority: .utility) { [weak self] in
+            for url in urls { LibraryScanner.shared.addSingle(url: url, libraryPath: path) }
+            await self?.reload()
+            // Prewarm only the newly imported comics — not the entire library
+            let paths = urls.map(\.path)
+            let newComics = DatabaseManager.shared.comics(withPaths: paths)
+            if !newComics.isEmpty { ThumbnailCache.shared.prewarm(comics: newComics) }
+        }
+    }
+
+    func openReader(_ comic: Comic) { readerComic = comic }
+    func openReader(id: Int64) { if let c = db.comic(id: id) { readerComic = c } }
+    func closeReader() { readerComic = nil }
+
+    func clearLibrary(resetPreferences: Bool = false) {
+        db.clearAll()
+        ThumbnailCache.shared.clearAll()
+        CSSearchableIndex.default().deleteAllSearchableItems { _ in }
+
+        selectedComic = nil; selectedRun = nil; readerComic = nil
+        selectedGroup = nil; selectedSeries = nil
+        bulkMode = false; selectedComicIds.removeAll()
+        comics = []; characterGroups = []; seriesGroups = []
+
+        if resetPreferences {
+            let keep: Set<String> = ["onboardingCompletedForBuild"]
+            let all = UserDefaults.standard.dictionaryRepresentation().keys
+            for key in all where !keep.contains(key) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        reload()
+    }
+
+    // MARK: - File watcher
+
+    func startWatcher() {
+        let path = libraryPath
+        guard !path.isEmpty else { return }
+        let w = FileWatcher(
+            onAdded: { [weak self] url in
+                self?.isLibraryAvailable = true
+                LibraryScanner.shared.addSingle(url: url, libraryPath: path)
+                self?.reload()
+            },
+            onRemoved: { [weak self] p in
+                LibraryScanner.shared.removeSingle(path: p)
+                self?.reload()
+            },
+            onVolumeUnavailable: { [weak self] in
+                self?.isLibraryAvailable = false
+            }
+        )
+        w.start(path: path)
+        watcher = w
+    }
+
+    func restartWatcher() { watcher?.stop(); watcher = nil; startWatcher() }
+
+    func retryAfterVolumeUnavailable() {
+        isLibraryAvailable = true
+        restartWatcher()
+        scan()
+    }
+
+    // MARK: - Mutations
+
+    func markAllRead() {
+        db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
+        reload()
+    }
+
+    func setSeriesCover(_ comic: Comic) {
+        db.setSeriesCover(series: comic.series, publisher: comic.publisher, comicId: comic.id)
+        reload()
+    }
+
+    func moveComic(id: Int64, before targetId: Int64) {
+        guard id != targetId else { return }
+        var list = comics
+        guard let fromIdx = list.firstIndex(where: { $0.id == id }) else { return }
+        let moved = list.remove(at: fromIdx)
+        if let toIdx = list.firstIndex(where: { $0.id == targetId }) {
+            list.insert(moved, at: toIdx)
+        } else {
+            list.append(moved)
+        }
+        comics = list
+        db.reorderComics(orderedIds: list.map(\.id))
+    }
+
+    func moveSeriesGroup(fromSeries: String, toSeries: String) {
+        guard fromSeries != toSeries,
+              let group = selectedGroup else { return }
+        var list = seriesGroups
+        guard let fromIdx = list.firstIndex(where: { $0.series == fromSeries }) else { return }
+        let moved = list.remove(at: fromIdx)
+        if let toIdx = list.firstIndex(where: { $0.series == toSeries }) {
+            list.insert(moved, at: toIdx)
+        } else {
+            list.append(moved)
+        }
+        seriesGroups = list
+        db.reorderSeriesGroups(groupName: group.groupName, publisher: group.publisher,
+                               orderedSeries: list.map(\.series))
+    }
+
+    func setCharacterGroupCover(group: DatabaseManager.CharacterGroup, imageURL: URL) {
+        guard let path = ThumbnailCache.shared.saveCustomGroupCover(
+            groupName: group.groupName,
+            publisher: group.publisher,
+            imageURL: imageURL
+        ) else { return }
+        db.setCharacterGroupCover(groupName: group.groupName, publisher: group.publisher, imagePath: path)
+        reload()
+    }
+
+    func clearCharacterGroupCover(group: DatabaseManager.CharacterGroup) {
+        db.clearCharacterGroupCover(groupName: group.groupName, publisher: group.publisher)
+        reload()
+    }
+
+    func toggleFavorite(_ comic: Comic)    { db.setFavorite(comic.id, !comic.isFavorite); reload() }
+    func toggleReadingList(_ comic: Comic) { db.setInReadingList(comic.id, !comic.inReadingList); reload() }
+    func setRating(_ comic: Comic, rating: Int) { db.setRating(comic.id, rating: rating); reload() }
+    func markRead(_ comic: Comic)   { db.updateProgress(comicId: comic.id, page: max(0, comic.pageCount - 1)); reload() }
+    func markUnread(_ comic: Comic) { db.updateProgress(comicId: comic.id, page: 0); reload() }
+    func markRead(_ comics: [Comic]) {
+        db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
+        reload()
+    }
+
+    func setReview(_ comic: Comic, review: String?) { db.setComicReview(comic.id, review: review?.isEmpty == false ? review : nil) }
+    func updateMeta(comicId: Int64, fields: [(String, Any?)]) { db.updateMeta(comicId: comicId, fields: fields) }
+
+    func addTag(name: String, to comic: Comic) { db.addTag(name: name, to: comic.id) }
+    func removeTag(tagId: Int64, from comic: Comic) { db.removeTag(tagId: tagId, from: comic.id) }
+
+    func addToShelf(comicId: Int64, shelfId: Int64) { db.addToShelf(comicId: comicId, shelfId: shelfId) }
+    func removeFromShelf(comicId: Int64, shelfId: Int64) { db.removeFromShelf(comicId: comicId, shelfId: shelfId) }
+
+    func restoreComic(id: Int64) { db.restoreComic(id: id); reload() }
+
+    func setReadingGoal(year: Int, count: Int) { db.setReadingGoal(year: year, count: count) }
+
+    func setSeriesCoverById(series: String, publisher: String, comicId: Int64) {
+        db.setSeriesCover(series: series, publisher: publisher, comicId: comicId)
+        ThumbnailCache.shared.evict(comicId)
+        reload()
+    }
+    func clearSeriesCoverByName(series: String, publisher: String) {
+        db.clearSeriesCover(series: series, publisher: publisher)
+        reload()
+    }
+    func renameSeries(oldName: String, publisher: String?, newName: String) { db.renameSeries(oldName: oldName, publisher: publisher, newName: newName); reload() }
+    func reorderComics(orderedIds: [Int64]) { db.reorderComics(orderedIds: orderedIds) }
+
+    @discardableResult
+    func createRun(title: String, description: String) -> Int64 { db.createRun(title: title, description: description) }
+    func deleteRun(_ runId: Int64) { db.deleteRun(runId) }
+
+    func addToRun(runId: Int64, comicIds: [Int64]) { db.addToRun(runId: runId, comicIds: comicIds) }
+    func removeFromRun(runId: Int64, comicIds: [Int64]) { db.removeFromRun(runId: runId, comicIds: comicIds) }
+    func reorderRun(runId: Int64, orderedIds: [Int64]) { db.reorderRun(runId: runId, orderedIds: orderedIds) }
+    func updateRun(id: Int64, title: String, description: String, buyLink: String?) { db.updateRun(id: id, title: title, description: description, buyLink: buyLink) }
+    func setRunRating(_ runId: Int64, rating: Int, review: String?) { db.setRunRating(runId, rating: rating, review: review) }
+    func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }
+
+    func delete(_ toDelete: [Comic]) {
+        db.softDelete(toDelete.map(\.id))
+        for c in toDelete { ThumbnailCache.shared.evict(c.id) }
+        reload()
+    }
+
+    func updateProgress(comic: Comic, page: Int) {
+        db.updateProgress(comicId: comic.id, page: page)
+        if let idx = comics.firstIndex(where: { $0.id == comic.id }) { comics[idx].progress = page }
+        if selectedComic?.id == comic.id { selectedComic?.progress = page }
+    }
+
+    // MARK: - Spotlight
+
+    func indexSpotlight() {
+        Task.detached(priority: .background) {
+            let all = DatabaseManager.shared.allComics()
+            let items: [CSSearchableItem] = all.map { comic in
+                let attrs = CSSearchableItemAttributeSet(contentType: .data)
+                attrs.title            = comic.title
+                attrs.contentDescription = "\(comic.series) · \(comic.publisher)"
+                attrs.keywords         = [comic.series, comic.publisher, comic.title]
+                return CSSearchableItem(
+                    uniqueIdentifier: "comicarc-\(comic.id)",
+                    domainIdentifier: "com.comicarc.library",
+                    attributeSet: attrs
+                )
+            }
+            try? await CSSearchableIndex.default().indexSearchableItems(items)
+        }
+    }
+
+    // MARK: - Scan notifications
+
+    func notifyScanComplete(added: Int) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted, added > 0 else { return }
+            let content          = UNMutableNotificationContent()
+            content.title        = "Library Updated"
+            content.body         = "Added \(added) new comic\(added == 1 ? "" : "s") to your library."
+            content.sound        = .default
+            let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(req)
+        }
+    }
+}

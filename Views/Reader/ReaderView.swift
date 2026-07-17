@@ -1,0 +1,850 @@
+import SwiftUI
+
+// MARK: - Reader settings enums
+
+enum FitMode: String, CaseIterable {
+    case fitPage    = "fitPage"
+    case fitWidth   = "fitWidth"
+    case fitHeight  = "fitHeight"
+    case original   = "original"
+
+    var label: String {
+        switch self {
+        case .fitPage:   return "Fit Page"
+        case .fitWidth:  return "Fit Width"
+        case .fitHeight: return "Fit Height"
+        case .original:  return "Original Size"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .fitPage:   return "arrow.up.left.and.arrow.down.right"
+        case .fitWidth:  return "arrow.left.and.right"
+        case .fitHeight: return "arrow.up.and.down"
+        case .original:  return "1.circle"
+        }
+    }
+}
+
+enum ColorFilter: String, CaseIterable {
+    case none, night, sepia, grayscale
+    var label: String {
+        switch self {
+        case .none:      return "Normal"
+        case .night:     return "Night"
+        case .sepia:     return "Sepia"
+        case .grayscale: return "Grayscale"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .none:      return "circle.lefthalf.filled"
+        case .night:     return "moon.fill"
+        case .sepia:     return "photo.artframe"
+        case .grayscale: return "circle.fill"
+        }
+    }
+}
+
+// MARK: - ReaderView
+
+struct ReaderView: View {
+    let comic: Comic
+    let onClose: () -> Void
+
+    @Environment(\.windowService) private var windowService
+    @FocusState private var isFocused: Bool
+
+    // Reading state
+    @State private var currentPage:      Int
+    @State private var sessionStartPage: Int
+
+    // Mode toggles (persisted)
+    @AppStorage("scrollMode")           private var scrollMode    = false
+    @AppStorage("readingDirectionRTL")  private var rtl           = false
+    @AppStorage("readerFitMode")        private var fitModeRaw    = FitMode.fitPage.rawValue
+    @AppStorage("readerColorFilter")    private var colorFilterRaw = ColorFilter.none.rawValue
+
+    // Derived
+    private var fitMode: FitMode         { FitMode(rawValue: fitModeRaw) ?? .fitPage }
+    private var colorFilter: ColorFilter { ColorFilter(rawValue: colorFilterRaw) ?? .none }
+
+    // Reader features
+    @State private var doublePage        = false
+    @State private var currentPageIsSpread = false  // updated by PagedModeView after each load
+    @State private var autoplay          = false
+    @State private var countdownProgress = 0.0
+    @AppStorage("autoplaySpeed") private var autoplayInterval: Double = 6.0
+
+    // Bookmarks
+    @State private var bookmarks:   [Bookmark] = []
+    @State private var isBookmarked = false
+    @State private var showBookmarks = false
+
+    // Overlays
+    @State private var showShortcuts = false
+    @State private var comicRating:  Int
+
+    // Auto-hide bar state
+    @State private var showTopBar    = true
+    @State private var showBottomBar = true
+    @State private var hideTask:     DispatchWorkItem? = nil
+    @AppStorage("readerToolbarLocked") private var toolbarLocked = false
+
+    // Zoom & pan — single source of truth (PagedModeView owns no zoom state)
+    @GestureState private var pinchScale: CGFloat = 1.0
+    @State private var steadyZoom: CGFloat = 1.0
+    @State private var panOffset:  CGSize  = .zero
+    @GestureState private var dragOffset: CGSize = .zero
+    @State private var cursorPosition: CGPoint = .zero   // tracked for cursor-anchored zoom
+
+    private var currentZoom: CGFloat { min(5, max(0.5, steadyZoom * pinchScale)) }
+    private var isZoomed:    Bool    { currentZoom > 1.05 }
+    private var totalOffset: CGSize {
+        CGSize(width: panOffset.width + dragOffset.width,
+               height: panOffset.height + dragOffset.height)
+    }
+
+    init(comic: Comic, onClose: @escaping () -> Void) {
+        self.comic        = comic
+        self.onClose      = onClose
+        _currentPage      = State(initialValue: max(0, comic.progress))
+        _sessionStartPage = State(initialValue: max(0, comic.progress))
+        _comicRating      = State(initialValue: comic.rating)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
+
+                pageContent
+                    .colorEffect(colorFilter)
+
+                VStack(spacing: 0) {
+                    if showTopBar {
+                        topBar
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    Spacer()
+                    if showBottomBar {
+                        bottomBar
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+
+                if autoplay {
+                    autoplayBar
+                }
+            }
+            .onContinuousHover { phase in
+                if case .active(let loc) = phase {
+                    cursorPosition = loc
+                    let nearTop    = loc.y < 100
+                    let nearBottom = loc.y > geo.size.height - 120
+                    withAnimation(Design.easeFast) {
+                        if nearTop || toolbarLocked { showTopBar = true }
+                        if nearBottom || toolbarLocked { showBottomBar = true }
+                    }
+                    scheduleHide()
+                }
+            }
+            // Cursor-anchored double-click zoom (needs geo.size, so lives here not in pageContent)
+            .onTapGesture(count: 2) {
+                withAnimation(Design.springGentle) {
+                    if isZoomed {
+                        steadyZoom = 1; panOffset = .zero
+                    } else {
+                        let cx = geo.size.width / 2
+                        let cy = geo.size.height / 2
+                        steadyZoom  = 2.0
+                        panOffset   = CGSize(width:  cx - cursorPosition.x,
+                                            height: cy - cursorPosition.y)
+                    }
+                }
+            }
+        }
+        .accessibilityLabel("Comic reader — \(comic.title), page \(currentPage + 1) of \(comic.pageCount)")
+        .accessibilityHint("Double-tap to zoom. Swipe to navigate pages.")
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(.leftArrow)  { rtl ? nextPage() : prevPage(); return .handled }
+        .onKeyPress(.rightArrow) { rtl ? prevPage() : nextPage(); return .handled }
+        .onKeyPress(.upArrow)    { prevPage(); return .handled }
+        .onKeyPress(.downArrow)  { nextPage(); return .handled }
+        .onKeyPress(.escape) {
+            if autoplay { autoplay = false; return .handled }
+            onClose(); return .handled
+        }
+        .onKeyPress(KeyEquivalent("a")) { toggleAutoplay(); return .handled }
+        .onKeyPress(KeyEquivalent("d")) { doublePage.toggle(); return .handled }
+        .onKeyPress(KeyEquivalent("b")) { toggleBookmark(); return .handled }
+        .onKeyPress(KeyEquivalent("r")) { rtl.toggle(); return .handled }
+        .onKeyPress(KeyEquivalent("?")) { showShortcuts.toggle(); return .handled }
+        .onKeyPress(.home) { currentPage = 0; saveProgress(); return .handled }
+        .onKeyPress(.end)  { currentPage = max(0, comic.pageCount - 1); saveProgress(); return .handled }
+        .onKeyPress(KeyEquivalent("=")) { zoomIn(); return .handled }
+        .onKeyPress(KeyEquivalent("+")) { zoomIn(); return .handled }
+        .onKeyPress(KeyEquivalent("-")) { zoomOut(); return .handled }
+        .onKeyPress(KeyEquivalent("0")) { resetZoom(); return .handled }
+        .onChange(of: currentPage)     { _, _ in resetZoom(); loadBookmarks() }
+        .onKeyPress(KeyEquivalent("w"), action: { onClose(); return .handled })
+        .onKeyPress(KeyEquivalent("f")) {
+            windowService.toggleFullScreen()
+            return .handled
+        }
+        .background(
+            Button("") { onClose() }
+                .keyboardShortcut("w", modifiers: .command)
+                .opacity(0).frame(width: 0, height: 0)
+        )
+        .onAppear {
+            isFocused = true
+            loadBookmarks()
+            scheduleHide()
+            windowService.enterImmersiveMode()
+        }
+        .onDisappear {
+            saveProgress(); logSession(); hideTask?.cancel()
+            windowService.showCursor()
+            windowService.exitImmersiveMode()
+        }
+        .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
+        .sheet(isPresented: $showShortcuts) { shortcutsSheet }
+        .sheet(isPresented: $showBookmarks) { bookmarksPanel }
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        guard !toolbarLocked else {
+            withAnimation(Design.easeFast) { showTopBar = true; showBottomBar = true }
+            return
+        }
+        let w = DispatchWorkItem { [self] in
+            withAnimation(.easeOut(duration: 0.25)) {
+                showTopBar    = false
+                showBottomBar = false
+            }
+            if !scrollMode { windowService.hideCursorUntilMouseMoves() }
+        }
+        hideTask = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: w)
+    }
+
+    // MARK: - Page content
+
+    @ViewBuilder
+    private var pageContent: some View {
+        if scrollMode {
+            ScrollModeView(comic: comic, currentPage: $currentPage)
+        } else {
+            PagedModeView(
+                comic: comic,
+                currentPage: $currentPage,
+                isSpread: $currentPageIsSpread,
+                doublePage: doublePage,
+                fitMode: fitMode,
+                rtl: rtl,
+                isZoomed: isZoomed
+            )
+            .scaleEffect(currentZoom)
+            .offset(isZoomed ? totalOffset : .zero)
+            // Pinch-to-zoom — live scale via @GestureState pinchScale, committed on end
+            .gesture(
+                MagnifyGesture()
+                    .updating($pinchScale) { val, state, _ in state = val.magnification }
+                    .onEnded { val in
+                        steadyZoom = min(5, max(0.5, steadyZoom * val.magnification))
+                        if steadyZoom <= 1.05 {
+                            withAnimation(Design.springGentle) { steadyZoom = 1; panOffset = .zero }
+                        }
+                    }
+            )
+            // Drag-to-pan — always attached, only responds when zoomed
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .updating($dragOffset) { val, state, _ in
+                        guard currentZoom > 1.05 else { return }
+                        state = val.translation
+                    }
+                    .onEnded { val in
+                        guard currentZoom > 1.05 else { return }
+                        panOffset = CGSize(
+                            width:  panOffset.width  + val.translation.width,
+                            height: panOffset.height + val.translation.height
+                        )
+                    }
+            )
+            .onTapGesture { }   // absorbs single taps so they don't fall through
+            .animation(Design.springSnappy, value: currentZoom)
+        }
+    }
+
+    private func zoomIn()  { withAnimation { steadyZoom = min(5, steadyZoom * 1.25) } }
+    private func zoomOut() {
+        withAnimation {
+            steadyZoom = max(0.5, steadyZoom / 1.25)
+            if steadyZoom <= 1.05 { steadyZoom = 1; panOffset = .zero }
+        }
+    }
+    private func resetZoom() { withAnimation { steadyZoom = 1; panOffset = .zero } }
+
+    // MARK: - Color filter modifier
+
+    private var autoplayBar: some View {
+        VStack {
+            Spacer()
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Design.brandBlue)
+                    .frame(width: geo.size.width * countdownProgress, height: 3)
+                    .animation(.linear(duration: 0.1), value: countdownProgress)
+            }
+            .frame(height: 3)
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Overlay
+
+    private var topBar: some View {
+        HStack {
+            Button { onClose() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2).foregroundStyle(.white.opacity(0.85))
+            }
+            .buttonStyle(.plain).padding()
+            .accessibilityLabel("Close reader")
+            .help("Close reader (W)")
+
+            Spacer()
+
+            Text(comic.title)
+                .font(.headline).foregroundStyle(.white).lineLimit(1).padding(.horizontal)
+                .accessibilityLabel("Reading: \(comic.title)")
+
+            Spacer()
+
+            HStack(spacing: 10) {
+                Button { toggleBookmark() } label: {
+                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.title2)
+                        .foregroundStyle(isBookmarked ? Design.brandGold : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isBookmarked ? "Remove bookmark from page \(currentPage + 1)" : "Bookmark page \(currentPage + 1)")
+                .help("Bookmark this page (B)")
+
+                Button { showBookmarks.toggle() } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.title2).foregroundStyle(bookmarks.isEmpty ? .white.opacity(0.4) : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("All bookmarks\(bookmarks.isEmpty ? "" : ", \(bookmarks.count) total")")
+                .help("All bookmarks")
+                .overlay(alignment: .topTrailing) {
+                    if !bookmarks.isEmpty {
+                        Text("\(bookmarks.count)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 3)
+                            .background(Design.brandGold)
+                            .clipShape(Capsule())
+                            .offset(x: 4, y: -4)
+                            .accessibilityHidden(true)
+                    }
+                }
+
+                Divider().frame(height: 16).background(.white.opacity(0.3)).accessibilityHidden(true)
+
+                Menu {
+                    ForEach(FitMode.allCases, id: \.self) { mode in
+                        Button { fitModeRaw = mode.rawValue } label: {
+                            Label(mode.label, systemImage: mode.icon)
+                        }
+                    }
+                } label: {
+                    Image(systemName: fitMode.icon)
+                        .font(.title2).foregroundStyle(.white.opacity(0.85))
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Fit mode: \(fitMode.label)")
+                .help("Fit mode: \(fitMode.label)")
+
+                Menu {
+                    ForEach(ColorFilter.allCases, id: \.self) { f in
+                        Button { colorFilterRaw = f.rawValue } label: {
+                            Label(f.label, systemImage: f.icon)
+                        }
+                    }
+                } label: {
+                    Image(systemName: colorFilter.icon)
+                        .font(.title2)
+                        .foregroundStyle(colorFilter == .none ? .white.opacity(0.85) : Design.brandGold)
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Color filter: \(colorFilter.label)")
+                .help("Color filter: \(colorFilter.label)")
+
+                Divider().frame(height: 16).background(.white.opacity(0.3)).accessibilityHidden(true)
+
+                Button { rtl.toggle() } label: {
+                    Image(systemName: rtl ? "arrow.right.to.line" : "arrow.left.to.line")
+                        .font(.title2)
+                        .foregroundStyle(rtl ? Design.brandGold : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(rtl ? "Reading direction: Right to Left — tap for Left to Right" : "Reading direction: Left to Right — tap for Right to Left")
+                .help(rtl ? "Right-to-Left (RTL) — click for LTR" : "Left-to-Right — click for RTL (R)")
+
+                if !scrollMode {
+                    Button { doublePage.toggle() } label: {
+                        Image(systemName: doublePage ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                            .font(.title2).foregroundStyle(doublePage ? Design.brandGold : .white.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(doublePage ? "Double-page spread: on" : "Double-page spread: off")
+                    .help("Double-page spread (D)")
+                }
+
+                Button { scrollMode.toggle() } label: {
+                    Image(systemName: scrollMode ? "doc.text.image" : "scroll")
+                        .font(.title2).foregroundStyle(.white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(scrollMode ? "Switch to page mode" : "Switch to scroll mode")
+                .help(scrollMode ? "Switch to Page Mode" : "Switch to Scroll Mode")
+
+                Button { toggleAutoplay() } label: {
+                    Image(systemName: autoplay ? "pause.circle.fill" : "play.circle")
+                        .font(.title2).foregroundStyle(autoplay ? Design.brandGold : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(autoplay ? "Stop slideshow" : "Start slideshow")
+                .help(autoplay ? "Stop Autoplay (A)" : "Start Autoplay (A)")
+
+                Button { showShortcuts.toggle() } label: {
+                    Image(systemName: "keyboard")
+                        .font(.title2).foregroundStyle(.white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Keyboard shortcuts")
+                .help("Keyboard Shortcuts (?)")
+
+                Button { toolbarLocked.toggle() } label: {
+                    Image(systemName: toolbarLocked ? "pin.fill" : "pin")
+                        .font(.title2)
+                        .foregroundStyle(toolbarLocked ? Design.brandGold : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(toolbarLocked ? "Toolbar pinned — tap to auto-hide" : "Pin toolbar")
+                .help(toolbarLocked ? "Toolbar pinned — click to auto-hide" : "Pin toolbar (always visible)")
+            }
+            .padding()
+        }
+        .background(.ultraThinMaterial.opacity(0.9))
+    }
+
+    @State private var showPageJump = false
+    @State private var pageJumpText = ""
+
+    private var bottomBar: some View {
+        HStack {
+            Button { rtl ? nextPage() : prevPage() } label: {
+                Image(systemName: "chevron.left.circle.fill")
+                    .font(.title).foregroundStyle(.white.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .disabled(rtl ? currentPage >= comic.pageCount - 1 : currentPage == 0)
+            .accessibilityLabel(rtl ? "Next page" : "Previous page")
+            .help(rtl ? "Next page (→)" : "Previous page (←)")
+
+            Spacer()
+
+            VStack(spacing: 6) {
+                if comic.pageCount > 1 {
+                    Slider(
+                        value: Binding(
+                            get: { Double(currentPage) },
+                            set: { currentPage = Int($0.rounded()); saveProgress() }
+                        ),
+                        in: 0...Double(max(1, comic.pageCount - 1)),
+                        step: 1
+                    )
+                    .frame(width: 300)
+                    .tint(Design.brandBlue)
+                    .accessibilityLabel("Page scrubber")
+                    .accessibilityValue("Page \(currentPage + 1) of \(comic.pageCount)")
+                    .help("Drag to jump to any page")
+                }
+
+                Button {
+                    pageJumpText = "\(currentPage + 1)"
+                    showPageJump = true
+                } label: {
+                    Text("Page \(currentPage + 1) of \(comic.pageCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(.ultraThinMaterial).clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Page \(currentPage + 1) of \(comic.pageCount) — tap to jump")
+                .help("Click to jump to page")
+                .popover(isPresented: $showPageJump) {
+                    HStack(spacing: 8) {
+                        Text("Go to page:")
+                            .foregroundStyle(.primary)
+                        TextField("", text: $pageJumpText)
+                            .frame(width: 48)
+                            .onSubmit {
+                                if let n = Int(pageJumpText) {
+                                    currentPage = max(0, min(comic.pageCount - 1, n - 1))
+                                }
+                                showPageJump = false
+                            }
+                        Text("of \(comic.pageCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                }
+
+                HStack(spacing: 4) {
+                    ForEach(1...5, id: \.self) { star in
+                        Button {
+                            let newRating = star == comicRating ? 0 : star
+                            comicRating = newRating
+                            LibraryViewModel.shared.setRating(comic, rating: newRating)
+                        } label: {
+                            Image(systemName: star <= comicRating ? "star.fill" : "star")
+                                .font(.system(size: 13))
+                                .foregroundStyle(star <= comicRating ? Design.brandGold : .white.opacity(0.55))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(star == comicRating ? "Remove \(star)-star rating" : "Rate \(star) star\(star == 1 ? "" : "s")")
+                        .help(star == comicRating ? "Tap to clear rating" : "Rate \(star) star\(star == 1 ? "" : "s")")
+                    }
+                }
+            }
+
+            Spacer()
+
+            Button { rtl ? prevPage() : nextPage() } label: {
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.title).foregroundStyle(.white.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .disabled(rtl ? currentPage == 0 : currentPage >= comic.pageCount - 1)
+            .accessibilityLabel(rtl ? "Previous page" : "Next page")
+            .help(rtl ? "Previous page (←)" : "Next page (→)")
+        }
+        .padding(.horizontal, 20).padding(.bottom, 16)
+        .background(.ultraThinMaterial.opacity(0.9))
+    }
+
+    // MARK: - Bookmarks panel
+
+    private var bookmarksPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Bookmarks — \(comic.title)")
+                    .font(.title3.bold())
+                Spacer()
+                Button("Done") { showBookmarks = false }.keyboardShortcut(.return)
+            }
+            .padding()
+
+            Divider()
+
+            if bookmarks.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "bookmark").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("No bookmarks yet").foregroundStyle(.secondary)
+                    Text("Press B while reading to bookmark a page.")
+                        .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(bookmarks) { bm in
+                        HStack {
+                            Image(systemName: "bookmark.fill").foregroundStyle(Design.brandGold)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Page \(bm.page + 1)")
+                                    .font(.headline)
+                                if !bm.label.isEmpty {
+                                    Text(bm.label).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button("Go") {
+                                currentPage = bm.page
+                                showBookmarks = false
+                            }
+                            .buttonStyle(.bordered).controlSize(.small)
+                        }
+                    }
+                    .onDelete { idx in
+                        idx.forEach { i in
+                            ReadingSessionService.shared.toggleBookmark(comicId: comic.id, page: bookmarks[i].page)
+                        }
+                        loadBookmarks()
+                    }
+                }
+            }
+        }
+        .frame(width: 380, height: 420)
+    }
+
+    // MARK: - Shortcuts sheet
+
+    private var shortcutsSheet: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Keyboard Shortcuts")
+                .font(.title2.bold())
+                .padding(24)
+            Divider()
+
+            let shortcuts: [(String, String)] = [
+                ("→ / ←",        "Next / Previous page (respects RTL)"),
+                ("↑ / ↓",        "Previous / Next page"),
+                ("Home",         "First page"),
+                ("End",          "Last page"),
+                ("A",            "Toggle Autoplay"),
+                ("B",            "Bookmark current page"),
+                ("D",            "Toggle Double-Page Spread"),
+                ("R",            "Toggle RTL reading direction"),
+                ("+ / -",        "Zoom in / out"),
+                ("0",            "Reset zoom"),
+                ("F",            "Toggle fullscreen"),
+                ("Escape / W",   "Close reader"),
+                ("?",            "Show / hide this panel"),
+            ]
+            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 14) {
+                ForEach(shortcuts, id: \.0) { key, desc in
+                    GridRow {
+                        Text(key).font(.system(.body, design: .monospaced).bold()).foregroundStyle(Design.brandBlue)
+                        Text(desc).foregroundStyle(.primary)
+                    }
+                }
+            }
+            .padding(24)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done") { showShortcuts = false }.keyboardShortcut(.return).padding(16)
+            }
+        }
+        .frame(width: 420)
+    }
+
+    // MARK: - Helpers
+
+    private func nextPage() {
+        let advance = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
+        let target  = min(currentPage + advance, comic.pageCount - 1)
+        guard target != currentPage else { return }
+        currentPage = target
+        saveProgress()
+    }
+
+    private func prevPage() {
+        let step    = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
+        currentPage = max(0, currentPage - step)
+        saveProgress()
+    }
+
+    private func toggleAutoplay() {
+        autoplay.toggle()
+        if !autoplay { countdownProgress = 0 }
+    }
+
+    private func toggleBookmark() {
+        isBookmarked = ReadingSessionService.shared.toggleBookmark(comicId: comic.id, page: currentPage)
+        loadBookmarks()
+    }
+
+    private func loadBookmarks() {
+        bookmarks    = ReadingSessionService.shared.bookmarks(for: comic.id)
+        isBookmarked = bookmarks.contains { $0.page == currentPage }
+    }
+
+    private func saveProgress() {
+        ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
+    }
+
+    private func logSession() {
+        ReadingSessionService.shared.logSession(comicId: comic.id, from: sessionStartPage, to: currentPage)
+    }
+
+    private func runAutoplay() async {
+        guard autoplay, !scrollMode else { return }
+        let steps = 60
+        for i in 0..<steps {
+            guard autoplay else { countdownProgress = 0; return }
+            await MainActor.run { countdownProgress = Double(i) / Double(steps) }
+            try? await Task.sleep(for: .milliseconds(Int(autoplayInterval * 1000) / steps))
+        }
+        await MainActor.run {
+            countdownProgress = 0
+            if currentPage < comic.pageCount - 1 { nextPage() }
+            else { autoplay = false }
+        }
+    }
+}
+
+// MARK: - Color filter view extension
+
+extension View {
+    @ViewBuilder
+    func colorEffect(_ filter: ColorFilter) -> some View {
+        switch filter {
+        case .none:
+            self
+        case .night:
+            self.colorMultiply(Color(red: 1.0, green: 0.85, blue: 0.65))
+                .brightness(-0.05)
+        case .sepia:
+            self.saturation(0)
+                .colorMultiply(Color(red: 1.12, green: 0.96, blue: 0.82))
+        case .grayscale:
+            self.grayscale(1.0)
+        }
+    }
+}
+
+// MARK: - Paged mode
+
+struct PagedModeView: View {
+    let comic:      Comic
+    @Binding var currentPage: Int
+    @Binding var isSpread:    Bool
+    let doublePage: Bool
+    let fitMode:    FitMode
+    let rtl:        Bool
+    let isZoomed:   Bool   // owned by ReaderView; used to block page-swipe while zoomed
+
+    @State private var imageLeft:  PlatformImage?
+    @State private var imageRight: PlatformImage?
+    @State private var isLoading  = false
+
+    private var isSpreadPage: Bool {
+        guard let img = imageLeft else { return false }
+        return img.size.width > img.size.height * 1.15
+    }
+    private var effectiveDoublePage: Bool { doublePage && !isSpreadPage }
+    private var pageAdvance: Int { effectiveDoublePage ? 2 : 1 }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black
+
+                if isLoading {
+                    ProgressView().tint(.white)
+                } else if effectiveDoublePage, let left = imageLeft {
+                    HStack(spacing: 1) {
+                        pageImage(left, size: geo.size)
+                        if let right = imageRight { pageImage(right, size: geo.size) }
+                    }
+                } else if let img = imageLeft {
+                    pageImage(img, size: geo.size)
+                } else {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle).foregroundStyle(.secondary)
+                }
+            }
+        }
+        // Page-swipe: only when not zoomed (zoom/pan is handled entirely by ReaderView)
+        .gesture(
+            DragGesture(minimumDistance: 40).onEnded { val in
+                guard !isZoomed else { return }
+                let forward  = val.translation.width < -40
+                let backward = val.translation.width >  40
+                if rtl {
+                    if forward  && currentPage > 0                   { currentPage -= pageAdvance }
+                    if backward && currentPage < comic.pageCount - 1 { currentPage += pageAdvance }
+                } else {
+                    if forward  && currentPage < comic.pageCount - 1 { currentPage += pageAdvance }
+                    if backward && currentPage > 0                   { currentPage -= pageAdvance }
+                }
+            }
+        )
+        .onChange(of: currentPage) { _, page in loadPage(page) }
+        .onChange(of: doublePage)  { _, _    in loadPage(currentPage) }
+        .onAppear { loadPage(currentPage) }
+    }
+
+    @ViewBuilder
+    private func pageImage(_ img: PlatformImage, size: CGSize) -> some View {
+        let imgSize = img.size
+        switch fitMode {
+        case .fitPage:
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .fitWidth:
+            let h = imgSize.height > 0 ? (size.width * imgSize.height / imgSize.width) : size.height
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: size.width, height: h)
+        case .fitHeight:
+            let w = imgSize.width > 0 ? (size.height * imgSize.width / imgSize.height) : size.width
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: w, height: size.height)
+        case .original:
+            ScrollView([.horizontal, .vertical]) {
+                Image(platformImage: img).frame(width: imgSize.width, height: imgSize.height)
+            }
+        }
+    }
+
+    private func loadPage(_ page: Int) {
+        isLoading = true
+        imageLeft = nil; imageRight = nil
+        PageCache.shared.load(comic: comic, page: page) { img in
+            self.imageLeft  = img
+            self.isLoading  = false
+            self.isSpread   = self.isSpreadPage
+            if self.effectiveDoublePage && page + 1 < self.comic.pageCount {
+                PageCache.shared.load(comic: self.comic, page: page + 1) { self.imageRight = $0 }
+            }
+        }
+        PageCache.shared.prefetch(comic: comic, around: page, count: 4)
+    }
+}
+
+// MARK: - Scroll mode
+
+struct ScrollModeView: View {
+    let comic: Comic
+    @Binding var currentPage: Int
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(0..<comic.pageCount, id: \.self) { idx in
+                    ScrollPageView(comic: comic, index: idx)
+                        .frame(maxWidth: .infinity)
+                        .onAppear { currentPage = idx }
+                }
+            }
+        }
+        .scrollIndicators(.never)
+    }
+}
+
+struct ScrollPageView: View {
+    let comic: Comic
+    let index: Int
+    @State private var image: PlatformImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(platformImage: img).resizable().aspectRatio(contentMode: .fit).frame(maxWidth: .infinity)
+            } else {
+                Color.black.frame(height: 600)
+                    .overlay(ProgressView().tint(.white))
+            }
+        }
+        .task { PageCache.shared.load(comic: comic, page: index) { image = $0 } }
+    }
+}
