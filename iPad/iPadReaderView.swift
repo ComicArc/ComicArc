@@ -19,7 +19,10 @@ struct iPadReaderView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
-    @AppStorage("scrollMode") private var scrollMode = false
+    @AppStorage("scrollMode")    private var scrollMode = false
+    @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
+    @State private var autoplay = false
+    @State private var countdownProgress: Double = 0
 
     init(comic: Comic, onClose: @escaping () -> Void) {
         self.comic = comic
@@ -45,6 +48,7 @@ struct iPadReaderView: View {
         .persistentSystemOverlays(showBars ? .visible : .hidden)
         .onAppear { scheduleHide() }
         .onDisappear { saveProgress() }
+        .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
     }
 
     // MARK: - Page reader (swipe between pages)
@@ -171,7 +175,15 @@ struct iPadReaderView: View {
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.8))
                 .monospacedDigit()
-                .padding(.trailing, 8)
+            Button(action: { autoplay.toggle(); if !autoplay { countdownProgress = 0 } }) {
+                Image(systemName: autoplay ? "pause.circle.fill" : "play.circle")
+                    .font(.title3)
+                    .foregroundStyle(autoplay ? Design.brandGold : .white)
+                    .padding(.leading, 10).padding(.trailing, 12)
+            }
+            .disabled(scrollMode)
+            .opacity(scrollMode ? 0.35 : 1)
+            .accessibilityLabel(autoplay ? "Stop Slideshow" : "Start Slideshow")
         }
         .padding(.horizontal, 8)
         .padding(.top, 4)
@@ -184,6 +196,15 @@ struct iPadReaderView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
+            if autoplay {
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(Design.brandGold)
+                        .frame(width: geo.size.width * countdownProgress, height: 2)
+                }
+                .frame(height: 2)
+                .padding(.horizontal, 20)
+            }
             Slider(
                 value: Binding(
                     get: { Double(currentPage) },
@@ -220,6 +241,21 @@ struct iPadReaderView: View {
 
     private func saveProgress() {
         ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
+    }
+
+    private func runAutoplay() async {
+        guard autoplay, !scrollMode else { return }
+        let steps = 60
+        for i in 0..<steps {
+            guard autoplay else { countdownProgress = 0; return }
+            await MainActor.run { countdownProgress = Double(i) / Double(steps) }
+            try? await Task.sleep(for: .milliseconds(Int(autoplaySpeed * 1000) / steps))
+        }
+        await MainActor.run {
+            countdownProgress = 0
+            if currentPage < pageCount - 1 { currentPage += 1 }
+            else { autoplay = false }
+        }
     }
 }
 

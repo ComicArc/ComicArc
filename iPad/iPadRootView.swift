@@ -19,6 +19,7 @@ struct iPadRootView: View {
             iPadDetailColumn(comic: selectedComic)
         }
         .navigationSplitViewStyle(.balanced)
+        .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library…")
         .onChange(of: vm.destination) { selectedComic = nil }
     }
 }
@@ -36,6 +37,24 @@ private struct iPadSidebar: View {
             Section("Library") {
                 ForEach([AppDestination.library, .continueReading, .favorites, .readingList], id: \.self) { s in
                     Label(s.title, systemImage: s.icon).tag(s)
+                }
+            }
+            if !vm.publishers.isEmpty {
+                Section("Publishers") {
+                    ForEach(vm.publishers, id: \.self) { pub in
+                        Label(pub, systemImage: "building.columns")
+                            .foregroundStyle(Design.publisherColor(pub))
+                            .tag(AppDestination.publisher(pub))
+                    }
+                }
+            }
+            if !vm.allTags.isEmpty {
+                Section("Tags") {
+                    ForEach(vm.allTags.prefix(15), id: \.tag.id) { t in
+                        Label("#\(t.tag.name)", systemImage: "tag")
+                            .tag(AppDestination.tag(t.tag.name))
+                            .badge(t.count)
+                    }
                 }
             }
             Section("Discover") {
