@@ -4,6 +4,23 @@ All notable changes to ComicArc are documented here.
 
 ---
 
+## [2.1.0] — 2026-07-17
+
+### Library
+- Possible Duplicates view flags comics sharing the same publisher, series, and issue number (a common result of a rescan or re-rip under a different filename), with a one-click delete per duplicate
+- Bulk-select mode gains Reassign…, correcting series/publisher across multiple selected issues at once instead of one at a time
+- Renaming a series to a name that already exists now asks for confirmation instead of silently merging the two series' issues
+- Manual title/series/publisher/character edits are no longer overwritten by folder-derived metadata reparsing
+- Backup export/import now actually covers everything it claims to: tags, reviews, bookmarks, and reading orders, not just ratings/favorites/progress
+
+### iPad
+- Real folder-based library scanning: choose a library folder from Settings and ComicArc scans it (including subfolders) instead of importing one file at a time
+- The app rescans automatically whenever it returns to the foreground, the closest practical approximation of auto-detecting new files without a Files-app-level file-watching API
+- Settings now has library folder management and the same backup export/import as macOS
+- CBR files are no longer offered for import on iPad — CBR extraction depends on a command-line tool unavailable in the iOS sandbox, so an imported CBR would previously show 0 pages with no explanation
+
+---
+
 ## [2.0.0] — 2026-07-17
 
 ### Native Rewrite

@@ -48,7 +48,7 @@ enum AppDestination: Hashable, Codable {
         case .stats:           return "chart.bar.xaxis"
         case .history:         return "clock.fill"
         case .creators:        return "person.2.fill"
-        case .duplicates:      return "square.stack.3d.up.badge.a"
+        case .duplicates:      return "doc.on.doc"
         case .settings:        return "gear"
         }
     }
@@ -133,6 +133,15 @@ final class LibraryViewModel: ObservableObject {
     var libraryPath: String { UserDefaults.standard.string(forKey: "libraryPath") ?? "" }
 
     private init() {
+        #if os(iOS)
+        // Security-scope access to a bookmarked library folder must be re-started every
+        // process launch — iOS revokes it on relaunch even though the bookmark stays valid.
+        // Must happen before startWatcher()/reload() below touch the library path.
+        if let folder = resolveLibraryFolderBookmark() {
+            UserDefaults.standard.set(folder.path, forKey: "libraryPath")
+        }
+        #endif
+
         useGroupedView = true  // grouped hierarchy is the only browse mode
 
         // Restore last destination before initial reload so the right data loads
@@ -423,6 +432,7 @@ final class LibraryViewModel: ObservableObject {
         db.bulkReassign(ids: Array(selectedComicIds), series: series, publisher: publisher)
         selectedComicIds.removeAll()
         reload()
+        refreshDuplicates()
     }
 
     func bulkDelete() {
@@ -432,6 +442,7 @@ final class LibraryViewModel: ObservableObject {
         selectedComicIds.removeAll()
         bulkMode = false
         reload()
+        refreshDuplicates()
     }
 
     // MARK: - Scan / import
@@ -621,7 +632,11 @@ final class LibraryViewModel: ObservableObject {
         db.clearSeriesCover(series: series, publisher: publisher)
         reload()
     }
-    func renameSeries(oldName: String, publisher: String?, newName: String) { db.renameSeries(oldName: oldName, publisher: publisher, newName: newName); reload() }
+    func renameSeries(oldName: String, publisher: String?, newName: String) {
+        db.renameSeries(oldName: oldName, publisher: publisher, newName: newName)
+        reload()
+        refreshDuplicates()
+    }
     func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
         db.seriesNameCollides(oldName: oldName, publisher: publisher, newName: newName)
     }
@@ -642,6 +657,7 @@ final class LibraryViewModel: ObservableObject {
         db.softDelete(toDelete.map(\.id))
         for c in toDelete { ThumbnailCache.shared.evict(c.id) }
         reload()
+        refreshDuplicates()
     }
 
     func updateProgress(comic: Comic, page: Int) {

@@ -8,14 +8,6 @@ struct ComicArcIPadApp: App {
     private let fileService   = makePlatformFileService()
     private let windowService = makePlatformWindowService()
 
-    init() {
-        // Security-scope access to a bookmarked library folder must be re-started every
-        // process launch — iOS revokes it on relaunch even though the bookmark stays valid.
-        if let folder = resolveLibraryFolderBookmark() {
-            UserDefaults.standard.set(folder.path, forKey: "libraryPath")
-        }
-    }
-
     var body: some Scene {
         WindowGroup {
             iPadRootView()

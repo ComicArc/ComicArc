@@ -54,6 +54,42 @@ private struct iPadSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            if !vm.isLibraryAvailable {
+                libraryUnavailableBanner
+            } else if let err = vm.scanState.error, !vm.isScanning {
+                scanErrorBanner(err)
+            }
+        }
+    }
+
+    private var libraryUnavailableBanner: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(.caption)
+                Text("Library folder unavailable")
+                    .font(.caption.bold())
+                Spacer()
+            }
+            Button("Retry") { vm.retryAfterVolumeUnavailable() }
+                .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private func scanErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "xmark.octagon.fill")
+                .foregroundStyle(.red).font(.caption)
+            Text(message).font(.caption2).lineLimit(2)
+            Spacer()
+        }
+        .padding(10)
+        .background(.regularMaterial)
     }
 }
 

@@ -277,7 +277,7 @@ struct SidebarView: View {
                 navRow("History",        icon: "clock.fill",                          item: .history)
                 navRow("Creators",       icon: "person.2.fill",                       item: .creators)
                 if !vm.duplicateGroups.isEmpty {
-                    navRow("Possible Duplicates", icon: "square.stack.3d.up.badge.a", item: .duplicates,
+                    navRow("Possible Duplicates", icon: "doc.on.doc", item: .duplicates,
                            trailingText: "\(vm.duplicateGroups.count)")
                 }
             }
