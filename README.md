@@ -144,7 +144,7 @@ Everything lives on your Mac. Nothing leaves it.
 
 Your comic files are **never moved, renamed, or modified.**
 
-You can export a full JSON backup — comics, progress, ratings, tags, and runs — and restore it at any time from Settings.
+You can export a full JSON backup — comics, progress, ratings, reviews, tags, bookmarks, and reading orders — and restore it at any time from Settings.
 
 ---
 

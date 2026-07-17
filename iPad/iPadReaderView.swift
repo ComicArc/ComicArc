@@ -257,9 +257,11 @@ struct iPadDocumentPicker: UIViewControllerRepresentable {
     let onPick: ([URL]) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        // CBR is intentionally excluded: it's extracted via the `unar` command-line
+        // tool on macOS (Scanner/LibraryScanner.swift), which isn't available in the
+        // iOS sandbox, so a CBR imported here would show 0 pages and never open.
         let types: [UTType] = [
             UTType(filenameExtension: "cbz") ?? .zip,
-            UTType(filenameExtension: "cbr") ?? .data,
             .pdf
         ]
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)

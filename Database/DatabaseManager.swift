@@ -304,6 +304,7 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN story_arc TEXT")
         exec("ALTER TABLE comics ADD COLUMN language_iso TEXT")
         exec("ALTER TABLE comics ADD COLUMN deleted_at TIMESTAMP")
+        exec("ALTER TABLE comics ADD COLUMN meta_edited INTEGER NOT NULL DEFAULT 0")
 
         exec("""
         UPDATE comics SET position = COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
@@ -598,14 +599,21 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    // Columns that folder-derived reparsing (batchUpdateFolderMeta) also writes.
+    // Editing any of these by hand marks the row so a later reparse won't clobber it.
+    private static let folderDerivedColumns: Set<String> = ["title", "series", "publisher", "character"]
+
     // fields is ordered: [(column, value)] to prevent Dict iteration-order bugs
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) {
         guard !fields.isEmpty else { return }
         queue.sync {
-            let sets = fields.map { "\($0.0) = ?" }.joined(separator: ", ")
+            var sets = fields.map { "\($0.0) = ?" }
             var args: [Any?] = fields.map { $0.1 }
+            if fields.contains(where: { Self.folderDerivedColumns.contains($0.0) }) {
+                sets.append("meta_edited = 1")
+            }
             args.append(comicId)
-            _ = run("UPDATE comics SET \(sets) WHERE id = ?", args: args)
+            _ = run("UPDATE comics SET \(sets.joined(separator: ", ")) WHERE id = ?", args: args)
         }
     }
 
@@ -925,23 +933,25 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    // Skips rows the user has hand-edited (meta_edited=1) so folder-derived
+    // reparsing never silently reverts a manual title/series/publisher/character fix.
     func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String)]) {
         queue.sync {
             exec("BEGIN")
             for item in items {
                 if let pub = item.pub {
-                    _ = run("UPDATE comics SET publisher=? WHERE id=?", args: [pub, item.id])
+                    _ = run("UPDATE comics SET publisher=? WHERE id=? AND meta_edited=0", args: [pub, item.id])
                 }
                 if let char = item.char {
-                    _ = run("UPDATE comics SET character=? WHERE id=?", args: [char, item.id])
+                    _ = run("UPDATE comics SET character=? WHERE id=? AND meta_edited=0", args: [char, item.id])
                 } else {
-                    _ = run("UPDATE comics SET character=NULL WHERE id=? AND (character LIKE '%,%' OR character LIKE '%[%' OR LENGTH(COALESCE(character,''))>60)",
+                    _ = run("UPDATE comics SET character=NULL WHERE id=? AND meta_edited=0 AND (character LIKE '%,%' OR character LIKE '%[%' OR LENGTH(COALESCE(character,''))>60)",
                             args: [item.id])
                 }
                 if let ser = item.ser {
-                    _ = run("UPDATE comics SET series=? WHERE id=?", args: [ser, item.id])
+                    _ = run("UPDATE comics SET series=? WHERE id=? AND meta_edited=0", args: [ser, item.id])
                 }
-                _ = run("UPDATE comics SET title=? WHERE id=?", args: [item.title, item.id])
+                _ = run("UPDATE comics SET title=? WHERE id=? AND meta_edited=0", args: [item.title, item.id])
             }
             exec("COMMIT")
         }
