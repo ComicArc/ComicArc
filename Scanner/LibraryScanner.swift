@@ -42,6 +42,16 @@ final class LibraryScanner: @unchecked Sendable {
     private func setState(_ block: (inout ScanState) -> Void) { stateLock.lock(); defer { stateLock.unlock() }; block(&_state) }
     func cancel() { setState { $0.cancelled = true } }
 
+    /// Runs `block` after anything already queued on the scanner's serial queue (an in-flight
+    /// scan's remaining chunks, or another addSingle()) has finished. cancel() only flips a
+    /// flag checked between files — it does not wait for the scan to actually stop, so a
+    /// cancelled scan's final flushPending() can still land on the DB queue after the caller
+    /// thinks cancellation is complete. Used by "Clear Library" so it can't run concurrently
+    /// with a scan's tail end and have a few last comics reappear right after clearing.
+    func runAfterCurrentWork(_ block: @escaping () -> Void) {
+        queue.async(execute: block)
+    }
+
     func scan(libraryPath: String, onProgress: @escaping (ScanState) -> Void) {
         // Re-entrancy guard: ignore if already scanning
         guard !state.running else { return }
@@ -137,22 +147,31 @@ final class LibraryScanner: @unchecked Sendable {
         onProgress(state)
     }
 
+    // Serialized on `queue` — the same queue full scans run on — so the
+    // check-then-insert below can't race against another addSingle() call or an in-flight
+    // scan. Without this, two near-simultaneous imports of the same file (e.g. a double
+    // drag-drop, or a manual import racing the file watcher's own onAdded for that same
+    // file) could both pass the "not already known" check before either had inserted,
+    // producing two DB rows for one physical comic — file_hash has no uniqueness
+    // constraint, so nothing else would have caught it.
     func addSingle(url: URL, libraryPath: String) {
-        let fp = url.path
-        guard FileManager.default.fileExists(atPath: fp), supported.contains(url.pathExtension.lowercased()) else { return }
-        let knownPaths = db.knownPaths()
-        guard !knownPaths.contains(fp) else { return }
-        let hash = fileHash(fp)
-        if let h = hash, db.knownHashes().contains(h) { return }
-        let meta = parseMeta(url: url, libraryPath: libraryPath)
-        db.insert(comic: (
-            title: meta.title, filePath: fp, publisher: meta.publisher,
-            character: meta.character, series: meta.series,
-            issueNumber: meta.issueNumber, pageCount: pageCount(fp),
-            writer: meta.writer, penciller: meta.penciller,
-            year: meta.year, storyArc: meta.storyArc,
-            languageIso: meta.languageIso, fileHash: hash
-        ))
+        queue.sync {
+            let fp = url.path
+            guard FileManager.default.fileExists(atPath: fp), supported.contains(url.pathExtension.lowercased()) else { return }
+            let knownPaths = db.knownPaths()
+            guard !knownPaths.contains(fp) else { return }
+            let hash = fileHash(fp)
+            if let h = hash, db.knownHashes().contains(h) { return }
+            let meta = parseMeta(url: url, libraryPath: libraryPath)
+            db.insert(comic: (
+                title: meta.title, filePath: fp, publisher: meta.publisher,
+                character: meta.character, series: meta.series,
+                issueNumber: meta.issueNumber, pageCount: pageCount(fp),
+                writer: meta.writer, penciller: meta.penciller,
+                year: meta.year, storyArc: meta.storyArc,
+                languageIso: meta.languageIso, fileHash: hash
+            ))
+        }
     }
 
     func removeSingle(path: String) {

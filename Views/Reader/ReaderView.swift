@@ -164,6 +164,13 @@ struct ReaderView: View {
                     }
                 }
             }
+            // steadyZoom/panOffset are absolute points computed against geo.size at the
+            // moment of the gesture; resizing the window (or toggling fullscreen) reapplies
+            // that same stale offset/scale to the new size via .scaleEffect/.offset below,
+            // so the pan no longer matches where the user actually zoomed. Resetting on
+            // resize is simpler and safer than trying to rescale a pan offset proportionally,
+            // and matches the existing page-change behavior on the line below.
+            .onChange(of: geo.size) { _, _ in resetZoom() }
         }
         .accessibilityLabel("Comic reader — \(comic.title), page \(currentPage + 1) of \(comic.pageCount)")
         .accessibilityHint("Double-tap to zoom. Swipe to navigate pages.")

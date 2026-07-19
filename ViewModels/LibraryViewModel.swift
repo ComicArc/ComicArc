@@ -535,14 +535,16 @@ final class LibraryViewModel: ObservableObject {
     func closeReader() { readerComic = nil }
 
     func clearLibrary(resetPreferences: Bool = false) {
-        // An in-flight scan writing to the comics table concurrently with clearAll() could
-        // repopulate rows right after the clear, or race with the thumbnail cache wipe below.
+        // cancel() only flips a flag checked between files in the scan loop — it does not
+        // wait for the scan thread to stop, so a cancelled scan's final flushPending() can
+        // still be sitting on (or about to join) the scanner's serial queue. Clearing the DB
+        // here directly could race that tail write and have a few comics reappear right
+        // after "Clear Library" finishes. Routing the actual clear through the same queue
+        // guarantees it runs after any in-flight scan work, not concurrently with it.
         LibraryScanner.shared.cancel()
         isScanning = false
-        db.clearAll()
-        ThumbnailCache.shared.clearAll()
-        CSSearchableIndex.default().deleteAllSearchableItems { _ in }
 
+        // UI resets immediately — none of this depends on the DB clear having happened yet.
         selectedComic = nil; selectedRun = nil; readerComic = nil
         selectedGroup = nil; selectedSeries = nil
         bulkMode = false; selectedComicIds.removeAll()
@@ -556,7 +558,12 @@ final class LibraryViewModel: ObservableObject {
             }
         }
 
-        reload()
+        LibraryScanner.shared.runAfterCurrentWork { [db] in
+            db.clearAll()
+            ThumbnailCache.shared.clearAll()
+            CSSearchableIndex.default().deleteAllSearchableItems { _ in }
+            DispatchQueue.main.async { self.reload() }
+        }
     }
 
     // MARK: - File watcher
