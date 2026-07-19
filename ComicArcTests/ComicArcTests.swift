@@ -178,6 +178,80 @@ final class ComicArcTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "test.destination")
     }
 
+    // MARK: - ComicSortClassifier: mainline issues never classified as special
+
+    func test_sortClassifier_regularNumberedIssue_isNotSpecial() {
+        XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
+            issueNumber: "1", title: "Amazing Spider-Man (1963-2012) #001", series: "Amazing Spider-Man"))
+        XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
+            issueNumber: "442", title: "Amazing Spider-Man (1963-2012) #442", series: "Amazing Spider-Man"))
+    }
+
+    // MARK: - ComicSortClassifier: special-issue keywords, from the exact screenshot scenario
+
+    func test_sortClassifier_annualInTitle_isSpecial() {
+        XCTAssertTrue(ComicSortClassifier.isSpecialIssue(
+            issueNumber: "1", title: "Amazing Spider-Man (1963-2012) Annual #001", series: "Amazing Spider-Man"))
+    }
+
+    func test_sortClassifier_annualInSeriesName_isSpecial() {
+        XCTAssertTrue(ComicSortClassifier.isSpecialIssue(
+            issueNumber: "1", title: "The_Amazing_Spider-Man_(1999)_Annual_1",
+            series: "The Amazing Spider-Man (1999) Annual"))
+    }
+
+    func test_sortClassifier_otherKeywords_areSpecial() {
+        for keyword in ["Special", "Holiday", "One-Shot", "Preview", "Giant-Size", "King-Size"] {
+            XCTAssertTrue(ComicSortClassifier.isSpecialIssue(
+                issueNumber: nil, title: "Some Series \(keyword) #1", series: "Some Series"),
+                "Expected '\(keyword)' to be classified as a special issue")
+        }
+    }
+
+    func test_sortClassifier_caseInsensitive() {
+        XCTAssertTrue(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "annual edition", series: ""))
+        XCTAssertTrue(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "ANNUAL EDITION", series: ""))
+    }
+
+    // MARK: - ComicSortClassifier: missing metadata falls back safely
+
+    func test_sortClassifier_missingIssueNumber_fallsBackToTitleSeries() {
+        XCTAssertFalse(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "Batman #1", series: "Batman"))
+        XCTAssertTrue(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "Batman Annual", series: "Batman"))
+    }
+
+    func test_sortClassifier_allFieldsEmpty_isNotSpecial() {
+        XCTAssertFalse(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "", series: ""))
+    }
+
+    // MARK: - ComicSortClassifier: doesn't false-positive on ordinary titles/series
+
+    func test_sortClassifier_ordinaryStoryArcTitles_areNotSpecial() {
+        XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
+            issueNumber: "3", title: "The Sinister Six", series: "Amazing Spider-Man"))
+        XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
+            issueNumber: "12", title: "Batman: Legend Reborn", series: "Detective Comics"))
+    }
+
+    // MARK: - ComicSortClassifier: seeded position bands specials after mainline
+
+    func test_sortClassifier_seededPosition_specialAlwaysAfterMainline() {
+        let mainlinePos = ComicSortClassifier.seededPosition(
+            issueNumber: "999", title: "Amazing Spider-Man #999", series: "Amazing Spider-Man", numericIssueOrId: 999)
+        let specialPos = ComicSortClassifier.seededPosition(
+            issueNumber: "1", title: "Amazing Spider-Man Annual #001", series: "Amazing Spider-Man", numericIssueOrId: 1)
+        XCTAssertLessThan(mainlinePos, specialPos,
+            "A high-numbered mainline issue must still sort before a low-numbered annual")
+    }
+
+    func test_sortClassifier_seededPosition_specialsOrderedAmongThemselves() {
+        let annual1 = ComicSortClassifier.seededPosition(
+            issueNumber: "1", title: "Annual", series: "X", numericIssueOrId: 1)
+        let annual2 = ComicSortClassifier.seededPosition(
+            issueNumber: "2", title: "Annual", series: "X", numericIssueOrId: 2)
+        XCTAssertLessThan(annual1, annual2)
+    }
+
     // MARK: - Helpers
 
     private func roundTrip<T: Codable>(_ value: T) throws -> T {

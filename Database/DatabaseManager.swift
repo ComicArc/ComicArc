@@ -26,8 +26,24 @@ final class DatabaseManager: @unchecked Sendable {
         exec("PRAGMA cache_size = -8000")
         exec("PRAGMA journal_size_limit = 67108864")  // cap WAL at 64 MB
         exec("PRAGMA mmap_size = 268435456")           // 256 MB memory-mapped I/O for fast reads
+        registerCustomFunctions()
         recoverIfCorrupted(dbURL: dbURL)
         migrate()
+    }
+
+    // Registers SQL-callable scalar functions backed by shared Swift logic, so every query
+    // (library, series, search, duplicates) agrees on the same "is this a special issue"
+    // answer instead of each ORDER BY clause re-implementing its own keyword matching.
+    private func registerCustomFunctions() {
+        sqlite3_create_function_v2(db, "is_special_issue", 3, SQLITE_UTF8, nil, { context, argc, argv in
+            guard let context, let argv, argc >= 3 else { return }
+            func text(_ i: Int32) -> String {
+                guard let p = sqlite3_value_text(argv[Int(i)]) else { return "" }
+                return String(cString: p)
+            }
+            let special = ComicSortClassifier.isSpecialIssue(issueNumber: text(0), title: text(1), series: text(2))
+            sqlite3_result_int(context, special ? 1 : 0)
+        }, nil, nil, nil)
     }
 
     // If the DB fails integrity_check, swap in the .bak and reopen.
@@ -50,6 +66,7 @@ final class DatabaseManager: @unchecked Sendable {
         try? FileManager.default.removeItem(at: dbURL)
         try? FileManager.default.copyItem(at: bakURL, to: dbURL)
         _ = sqlite3_open(dbURL.path, &db)
+        registerCustomFunctions()  // lost when the connection was closed and reopened above
     }
 
     // MARK: - Low-level helpers
@@ -306,10 +323,36 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN deleted_at TIMESTAMP")
         exec("ALTER TABLE comics ADD COLUMN meta_edited INTEGER NOT NULL DEFAULT 0")
 
+        // Mainline issues seed into the low range sorted by issue number (or insertion order
+        // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
+        // above that, so they default to the end of the series instead of interleaving with
+        // regular issues just because their issue number happens to collide (e.g. many
+        // annuals are numbered "1" same as issue #1 of the ongoing series).
         exec("""
-        UPDATE comics SET position = COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
+        UPDATE comics SET position =
+            is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
         WHERE position IS NULL
         """)
+
+        resortSpecialIssuesIfNeeded()
+    }
+
+    // One-time re-seed for libraries that were scanned before special-issue-aware sorting
+    // existed: their `position` column is already non-NULL (so the migration above skips
+    // them) but was seeded with the old formula that let annuals interleave with regular
+    // issues. Recomputes every comic's position with the corrected formula, once, tracked
+    // via a marker row so it never re-runs and clobbers a user's later manual reordering.
+    private func resortSpecialIssuesIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'specialIssueSortV1'") > 0
+        guard !alreadyRun else { return }
+        exec("""
+        UPDATE comics SET position =
+            is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
+        """)
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('specialIssueSortV1')")
     }
 
     // MARK: - Comics
@@ -354,7 +397,7 @@ final class DatabaseManager: @unchecked Sendable {
         var id: String { rawValue }
         var clause: String {
             switch self {
-            case .publisher: return "c.publisher, c.series, COALESCE(CAST(NULLIF(c.issue_number,'') AS INTEGER), c.id), c.title"
+            case .publisher: return "c.publisher, c.series, is_special_issue(c.issue_number, c.title, c.series), COALESCE(CAST(NULLIF(c.issue_number,'') AS INTEGER), c.id), c.title"
             case .title:     return "c.title"
             case .dateAdded: return "c.added_at DESC"
             case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
