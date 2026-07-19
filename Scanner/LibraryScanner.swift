@@ -236,7 +236,13 @@ final class LibraryScanner: @unchecked Sendable {
         if let fc = folderCharacter { character = fc }
         else if let c = ci["Characters"], isCleanCharacterName(c) { character = c }
         else { character = nil }
-        let issueNum = ci["IssueNumber"] ?? extractIssueNumber(from: filename)
+        // Filename wins over embedded ComicInfo.xml, same as every other field here (folder
+        // structure is the source of truth, ComicInfo.xml is the fallback — see README).
+        // Real-world libraries mix legacy and current numbering: a file renamed/organized as
+        // "...#442" can still carry an embedded <Number>1</Number> left over from whatever
+        // catalog it was scraped from, which — if trusted — collides with the real issue #1
+        // and breaks reading order for the whole series.
+        let issueNum = extractIssueNumber(from: filename) ?? ci["IssueNumber"]
         let title = filename
         return ComicMeta(title: title, publisher: publisher, character: character,
                          series: series, issueNumber: issueNum,
@@ -269,11 +275,12 @@ final class LibraryScanner: @unchecked Sendable {
 
     func reparseAllMeta(libraryPath: String) {
         let comics = DatabaseManager.shared.allComicPaths()
-        var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String)] = []
+        var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?)] = []
         for (id, path) in comics {
             let url = URL(fileURLWithPath: path)
             let (pub, char, ser) = folderComponents(url: url, libraryPath: libraryPath)
-            updates.append((id, pub, char, ser, url.deletingPathExtension().lastPathComponent))
+            let filename = url.deletingPathExtension().lastPathComponent
+            updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename)))
         }
         DatabaseManager.shared.batchUpdateFolderMeta(updates)
     }

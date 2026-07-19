@@ -1056,7 +1056,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     // Skips rows the user has hand-edited (meta_edited=1) so folder-derived
     // reparsing never silently reverts a manual title/series/publisher/character fix.
-    func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String)]) {
+    func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?)]) {
         queue.sync {
             exec("BEGIN")
             for item in items {
@@ -1073,8 +1073,27 @@ final class DatabaseManager: @unchecked Sendable {
                     _ = run("UPDATE comics SET series=? WHERE id=? AND meta_edited=0", args: [ser, item.id])
                 }
                 _ = run("UPDATE comics SET title=? WHERE id=? AND meta_edited=0", args: [item.title, item.id])
+                // Only overwrite when the filename actually yielded a number, and only when
+                // it disagrees with what's stored — an embedded ComicInfo.xml number that
+                // collides with a different issue's number (e.g. legacy vs. current-run
+                // numbering) breaks reading order for the whole series.
+                if let num = item.issueNumber {
+                    _ = run("""
+                        UPDATE comics SET issue_number=? WHERE id=? AND meta_edited=0
+                        AND (issue_number IS NULL OR issue_number != ?)
+                        """, args: [num, item.id, num])
+                }
             }
             exec("COMMIT")
+
+            // Issue numbers may have just changed for any number of rows above — recompute
+            // every position from scratch rather than trying to figure out which rows were
+            // actually touched. Cheap (single UPDATE) and idempotent.
+            exec("""
+                UPDATE comics SET position =
+                    is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+                    + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
+            """)
         }
     }
 

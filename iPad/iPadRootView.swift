@@ -486,12 +486,25 @@ struct iPadSettingsView: View {
                     Button { vm.scan() } label: {
                         Label("Scan Now", systemImage: "arrow.clockwise")
                     }
-                    .disabled(vm.isScanning)
+                    .disabled(vm.isScanning || vm.isResyncing)
+                    Button {
+                        vm.resyncLibrary()
+                    } label: {
+                        if vm.isResyncing {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Resyncing…")
+                            }
+                        } else {
+                            Label("Resync Library", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .disabled(vm.isScanning || vm.isResyncing)
                 }
             } header: {
                 Text("Library")
             } footer: {
-                Text("CBZ, PDF, JPG, and PNG are supported. CBR isn't readable on iPad — extraction needs a command-line tool that doesn't exist in the iOS sandbox.")
+                Text("CBZ, PDF, JPG, and PNG are supported. CBR isn't readable on iPad — extraction needs a command-line tool that doesn't exist in the iOS sandbox. If reading order or metadata looks wrong, use Resync Library — it rescans and re-derives metadata for every comic.")
             }
 
             Section {

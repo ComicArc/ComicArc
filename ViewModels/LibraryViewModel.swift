@@ -71,6 +71,7 @@ final class LibraryViewModel: ObservableObject {
     }
     @Published var scanState:           LibraryScanner.ScanState = .init()
     @Published var isScanning:          Bool = false
+    @Published var isResyncing:         Bool = false
     @Published var isLoading:           Bool = false
     @Published var isLibraryAvailable:  Bool = true
     @Published var selectedComic:     Comic? = nil
@@ -201,7 +202,7 @@ final class LibraryViewModel: ObservableObject {
     // Runs in the background; resets the flag so a manual trigger (Settings) can force it again.
     func reparseMetaIfNeeded() {
         // Bump version key when the reparse logic changes so all users get the updated fix.
-        let key = "folderMetaReparseV2"
+        let key = "folderMetaReparseV3"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         let path = libraryPath
         guard !path.isEmpty else { return }
@@ -212,13 +213,32 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func forceReparseAllMeta() {
+    /// One button that actually fixes things: rescans for file changes, then re-derives
+    /// metadata (publisher/character/series/issue number) for every comic from its folder
+    /// path and filename, respecting any manual edits (meta_edited=1 rows are skipped).
+    /// Previously a user had to know that "Scan Library" only catches new/removed files and
+    /// separately find "Re-parse Library Metadata" buried in Settings to fix drifted
+    /// ordering or metadata — this does both in one visible, one-button action.
+    func resyncLibrary() {
         let path = libraryPath
-        guard !path.isEmpty else { return }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            LibraryScanner.shared.reparseAllMeta(libraryPath: path)
-            UserDefaults.standard.set(true, forKey: "folderMetaReparseV2")
-            DispatchQueue.main.async { self?.reload() }
+        guard !path.isEmpty, !isScanning, !isResyncing else { return }
+        isResyncing = true
+        LibraryScanner.shared.scan(libraryPath: path) { [weak self] state in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.scanState  = state
+                self.isScanning = state.running
+                guard !state.running else { return }
+                DispatchQueue.global(qos: .utility).async {
+                    LibraryScanner.shared.reparseAllMeta(libraryPath: path)
+                    DispatchQueue.main.async {
+                        self.reload()
+                        self.indexSpotlight()
+                        self.refreshDuplicates()
+                        self.isResyncing = false
+                    }
+                }
+            }
         }
     }
 

@@ -66,6 +66,10 @@ struct ComicArcApp: App {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(vm.libraryPath.isEmpty)
+                Button("Resync Library") { vm.resyncLibrary() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift, .option])
+                    .disabled(vm.libraryPath.isEmpty || vm.isResyncing || vm.isScanning)
+                    .help("Rescans and re-derives metadata for every comic — use if reading order or metadata looks wrong")
                 Button("Import Files…") {
                     NotificationCenter.default.post(name: .triggerImport, object: nil)
                 }

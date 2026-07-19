@@ -99,8 +99,20 @@ struct SettingsView: View {
                     Button("Import Backup…") { importBackup() }
                     Button("View Trash…") { showTrash = true }
                     Divider()
-                    Button("Re-parse Library Metadata") { vm.forceReparseAllMeta() }
-                        .help("Re-derive publisher, character, and series from your folder structure")
+                    Button {
+                        vm.resyncLibrary()
+                    } label: {
+                        if vm.isResyncing {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Resyncing…")
+                            }
+                        } else {
+                            Text("Resync Library")
+                        }
+                    }
+                    .disabled(vm.isResyncing || vm.isScanning)
+                    .help("Rescans your folder and re-derives publisher, character, series, and issue number for every comic. Use this if reading order or metadata looks wrong.")
                     Button("Clear Thumbnail Cache") { clearCache() }
                         .help("Remove cached thumbnails — they regenerate on demand")
                     Button("Clear Library…", role: .destructive) { confirmClear() }
