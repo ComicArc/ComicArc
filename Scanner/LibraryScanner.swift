@@ -358,8 +358,29 @@ final class LibraryScanner: @unchecked Sendable {
         proc.arguments = args
         let pipe = Pipe()
         proc.standardOutput = pipe; proc.standardError = Pipe()
+
+        // Track the in-flight process so app termination can kill it explicitly instead of
+        // leaving it to be silently reparented to launchd as an orphan (macOS does not kill
+        // child processes just because their parent exited).
+        activeProcessLock.lock()
+        activeProcess = proc
+        activeProcessLock.unlock()
+        defer { activeProcessLock.lock(); activeProcess = nil; activeProcessLock.unlock() }
+
         try? proc.run(); proc.waitUntilExit()
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
+    private let activeProcessLock = NSLock()
+    private var activeProcess: Process?
+
+    /// Called on app termination: kills any `unar` extraction currently in flight so it
+    /// doesn't outlive the app as an orphaned background process.
+    func terminateActiveProcess() {
+        activeProcessLock.lock()
+        let proc = activeProcess
+        activeProcessLock.unlock()
+        if proc?.isRunning == true { proc?.terminate() }
     }
     #endif
 

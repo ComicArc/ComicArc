@@ -23,6 +23,7 @@ struct iPadReaderView: View {
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
     @State private var autoplay = false
     @State private var countdownProgress: Double = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     init(comic: Comic, onClose: @escaping () -> Void) {
         self.comic = comic
@@ -48,6 +49,12 @@ struct iPadReaderView: View {
         .persistentSystemOverlays(showBars ? .visible : .hidden)
         .onAppear { scheduleHide() }
         .onDisappear { saveProgress() }
+        // iOS can suspend or kill the app without ever calling onDisappear (a phone call,
+        // the app switcher, a low-memory kill while backgrounded) — flush progress the
+        // moment the scene stops being active rather than only when the view tears down.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { saveProgress() }
+        }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
     }
 

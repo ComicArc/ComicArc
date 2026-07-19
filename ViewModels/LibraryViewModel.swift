@@ -537,6 +537,22 @@ final class LibraryViewModel: ObservableObject {
 
     func restartWatcher() { watcher?.stop(); watcher = nil; startWatcher() }
 
+    // MARK: - App termination
+
+    /// Synchronous, best-effort cleanup run on app quit: stop watching the filesystem,
+    /// cancel any in-flight scan (and the `unar` subprocess it may be blocked on), and
+    /// checkpoint+close the database connection so nothing is left running or holding
+    /// a file handle once the process actually exits.
+    func shutdown() {
+        watcher?.stop()
+        watcher = nil
+        LibraryScanner.shared.cancel()
+        #if os(macOS)
+        LibraryScanner.shared.terminateActiveProcess()
+        #endif
+        db.checkpointAndClose()
+    }
+
     func retryAfterVolumeUnavailable() {
         isLibraryAvailable = true
         restartWatcher()

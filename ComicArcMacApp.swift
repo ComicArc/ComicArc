@@ -5,6 +5,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         UserDefaults.standard.bool(forKey: "quitOnLastWindowClose")
     }
+
+    // Quitting should mean quitting: stop the file watcher, cancel any in-flight scan
+    // (and kill the `unar` subprocess it may be blocked on) and cleanly close the
+    // database before the process actually exits, instead of relying on the OS to
+    // reclaim everything abruptly.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        LibraryViewModel.shared.shutdown()
+        return .terminateNow
+    }
 }
 #endif
 

@@ -69,6 +69,31 @@ final class DatabaseManager: @unchecked Sendable {
         registerCustomFunctions()  // lost when the connection was closed and reopened above
     }
 
+    /// Flushes the WAL into the main database file without closing the connection.
+    /// Safe to call anytime, including from a state that isn't guaranteed to be a real
+    /// shutdown (e.g. iOS backgrounding, which happens constantly during normal use and
+    /// is very often followed by returning to the foreground rather than termination).
+    /// Reduces the amount of unflushed WAL data at risk if the process is later killed
+    /// while suspended, without making the database unusable if the app resumes.
+    func checkpoint() {
+        queue.sync {
+            guard db != nil else { return }
+            exec("PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+    }
+
+    /// Checkpoints and fully closes the connection. Only for an actual process exit
+    /// (macOS quit) — the connection is not reopened automatically, so calling this
+    /// anywhere the app might keep running afterward will break every subsequent query.
+    func checkpointAndClose() {
+        queue.sync {
+            guard db != nil else { return }
+            exec("PRAGMA wal_checkpoint(TRUNCATE)")
+            sqlite3_close(db)
+            db = nil
+        }
+    }
+
     // MARK: - Low-level helpers
 
     @discardableResult
