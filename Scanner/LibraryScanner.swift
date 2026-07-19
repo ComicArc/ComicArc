@@ -483,7 +483,12 @@ final class LibraryScanner: @unchecked Sendable {
         let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
-        shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path, images[index]])
+        // `--` stops unar from parsing a page filename that happens to start with "-" (common
+        // for bonus/variant-cover pages named like "-Insomniacs-.jpg") as a command-line flag —
+        // Process passes args directly via execve with no shell involved, so unlike a shell
+        // script, quoting the string does nothing to protect it here. Without this, any CBR
+        // whose alphabetically-first image starts with "-" silently failed to extract at all.
+        shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path, "--", images[index]])
         let enumerator = FileManager.default.enumerator(atPath: tmpDir.path)
         while let file = enumerator?.nextObject() as? String {
             if imageExts.contains(URL(fileURLWithPath: file).pathExtension.lowercased()) {
