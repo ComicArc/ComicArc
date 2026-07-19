@@ -26,7 +26,6 @@
 		B00000000000000000000011 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		B00000000000000000000020 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		B00000000000000000000021 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
-		B00000000000000000000022 /* CreatorBrowseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* CreatorBrowseView.swift */; };
 		B00000000000000000000023 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		B00000000000000000000024 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		B00000000000000000000025 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
@@ -65,7 +64,6 @@
 		IB0000000000000000000010 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		IB0000000000000000000011 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
-		IB0000000000000000000013 /* CreatorBrowseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* CreatorBrowseView.swift */; };
 		IB0000000000000000000014 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		IB0000000000000000000015 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		IB0000000000000000000016 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
@@ -115,7 +113,6 @@
 		A00000000000000000000011 /* RunsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000020 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A00000000000000000000021 /* ReadingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryView.swift; sourceTree = "<group>"; };
-		A00000000000000000000022 /* CreatorBrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatorBrowseView.swift; sourceTree = "<group>"; };
 		A00000000000000000000023 /* IssueDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailPage.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* SeriesManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesManagerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000025 /* TutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialView.swift; sourceTree = "<group>"; };
@@ -353,7 +350,6 @@
 			children = (
 				A00000000000000000000010 /* StatsView.swift */,
 				A00000000000000000000021 /* ReadingHistoryView.swift */,
-				A00000000000000000000022 /* CreatorBrowseView.swift */,
 			);
 			path = Stats;
 			sourceTree = "<group>";
@@ -447,7 +443,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n\n# Bundle unar and lsar for CBR support (no Homebrew required at runtime).\n# IMPORTANT: these must be copied into $BUILT_PRODUCTS_DIR/ComicArc.app \u2014 the actual build\n# product that gets archived/installed \u2014 not only into the app/ dev convenience copy below.\n# This used to only try Homebrew paths (/opt/homebrew/bin, /usr/local/bin) and only wrote\n# into app/, so a real Release build on a machine without Homebrew's unar/lsar installed \u2014\n# or Xcode's own DerivedData output, which is what actually ships \u2014 silently never had CBR\n# support at all, despite the docs and code claiming it was always bundled. Vendored copies\n# in Vendor/unar/ (tracked in git) remove the dependency on the local machine's state.\nfor TOOL in unar lsar; do\n  cp \"$SRCROOT/Vendor/unar/$TOOL\" \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\n  chmod +x \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\ndone\n\n# Skip deep codesign when xctest bundles are embedded (test/build-for-testing builds) \u2014\n# adding files after Xcode's own signing pass invalidates the seal, so re-sign here.\nif ! ls \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/PlugIns\"/*.xctest >/dev/null 2>&1; then\n  codesign --force --deep --sign - \"$BUILT_PRODUCTS_DIR/ComicArc.app\"\nfi\n\nAPP_DEST=\"$SRCROOT/app/ComicArc.app\"\nrm -rf \"$APP_DEST\"\ncp -R \"$BUILT_PRODUCTS_DIR/ComicArc.app\" \"$APP_DEST\"\n";
+			shellScript = "set -e\n\n# Bundle unar and lsar for CBR support (no Homebrew required at runtime).\n# IMPORTANT: these must be copied into $BUILT_PRODUCTS_DIR/ComicArc.app \u2014 the actual build\n# product that gets archived/installed \u2014 not only into the app/ dev convenience copy below.\n# This used to only try Homebrew paths (/opt/homebrew/bin, /usr/local/bin) and only wrote\n# into app/, so a real Release build on a machine without Homebrew's unar/lsar installed \u2014\n# or Xcode's own DerivedData output, which is what actually ships \u2014 silently never had CBR\n# support at all, despite the docs and code claiming it was always bundled. Vendored copies\n# in Vendor/unar/ (tracked in git) remove the dependency on the local machine's state.\nfor TOOL in unar lsar; do\n  cp -f \"$SRCROOT/Vendor/unar/$TOOL\" \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\n  chmod 755 \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\ndone\n\n# Skip deep codesign when xctest bundles are embedded (test/build-for-testing builds) \u2014\n# adding files after Xcode's own signing pass invalidates the seal, so re-sign here.\nif ! ls \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/PlugIns\"/*.xctest >/dev/null 2>&1; then\n  codesign --force --deep --sign - \"$BUILT_PRODUCTS_DIR/ComicArc.app\"\nfi\n\nAPP_DEST=\"$SRCROOT/app/ComicArc.app\"\nrm -rf \"$APP_DEST\"\ncp -R \"$BUILT_PRODUCTS_DIR/ComicArc.app\" \"$APP_DEST\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -531,7 +527,6 @@
 				B00000000000000000000011 /* RunsView.swift in Sources */,
 				B00000000000000000000020 /* OnboardingView.swift in Sources */,
 				B00000000000000000000021 /* ReadingHistoryView.swift in Sources */,
-				B00000000000000000000022 /* CreatorBrowseView.swift in Sources */,
 				B00000000000000000000023 /* IssueDetailPage.swift in Sources */,
 				B00000000000000000000024 /* SeriesManagerView.swift in Sources */,
 				B00000000000000000000025 /* TutorialView.swift in Sources */,
@@ -581,7 +576,6 @@
 				IB0000000000000000000010 /* RunsView.swift in Sources */,
 				IB0000000000000000000011 /* OnboardingView.swift in Sources */,
 				IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */,
-				IB0000000000000000000013 /* CreatorBrowseView.swift in Sources */,
 				IB0000000000000000000014 /* IssueDetailPage.swift in Sources */,
 				IB0000000000000000000015 /* SeriesManagerView.swift in Sources */,
 				IB0000000000000000000016 /* TutorialView.swift in Sources */,

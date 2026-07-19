@@ -1018,11 +1018,38 @@ final class DatabaseManager: @unchecked Sendable {
                 ORDER BY rp.last_read DESC LIMIT 8
             """, map: comicRow)
 
+            let growth = monthlyCollectionGrowth(months: 6)
+
             return LibraryStats(totalComics: total, pagesRead: pagesRead, favorites: favorites,
                                 inProgress: inProg, finished: finished, unread: max(0, total - inProg - finished),
                                 runsCount: runsCount, readingStreak: streak, activityMap: activityMap,
-                                publisherBreakdown: pubRows, topSeries: seriesRows, recentlyRead: recent)
+                                publisherBreakdown: pubRows, topSeries: seriesRows, recentlyRead: recent,
+                                collectionGrowth: growth)
         }
+    }
+
+    // Comics added per calendar month, most recent `months` months (oldest first) — powers
+    // the Stats dashboard's collection-growth chart. Must be called from inside queue.sync.
+    private func monthlyCollectionGrowth(months: Int) -> [GrowthPoint] {
+        let raw = rows("""
+            SELECT strftime('%Y-%m', added_at) as ym, COUNT(*)
+            FROM comics
+            WHERE deleted_at IS NULL AND added_at >= date('now', '-\(months) months', 'start of month')
+            GROUP BY ym ORDER BY ym
+        """) { (colText($0, 0) ?? "", colInt($0, 1)) }
+        let counts = Dictionary(uniqueKeysWithValues: raw)
+
+        let cal = Calendar(identifier: .gregorian)
+        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM"; fmt.locale = Locale(identifier: "en_US_POSIX")
+        let labelFmt = DateFormatter(); labelFmt.dateFormat = "MMM"; labelFmt.locale = Locale(identifier: "en_US_POSIX")
+
+        var points: [GrowthPoint] = []
+        for offset in stride(from: months - 1, through: 0, by: -1) {
+            guard let date = cal.date(byAdding: .month, value: -offset, to: Date()) else { continue }
+            let key = fmt.string(from: date)
+            points.append(GrowthPoint(month: key, label: labelFmt.string(from: date), count: counts[key] ?? 0))
+        }
+        return points
     }
 
     private static let yyyyMMddFormatter: DateFormatter = {
@@ -1459,47 +1486,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Creator browsing
-
-    func allWriters() -> [CreatorStat] {
-        queue.sync {
-            rows("""
-                SELECT writer, COUNT(*) as cnt
-                FROM comics
-                WHERE deleted_at IS NULL AND writer IS NOT NULL AND writer != ''
-                GROUP BY writer
-                ORDER BY cnt DESC, writer
-            """) { s in
-                CreatorStat(name: colText(s, 0) ?? "", count: colInt(s, 1), role: "Writer")
-            }
-        }
-    }
-
-    func allPencillers() -> [CreatorStat] {
-        queue.sync {
-            rows("""
-                SELECT penciller, COUNT(*) as cnt
-                FROM comics
-                WHERE deleted_at IS NULL AND penciller IS NOT NULL AND penciller != ''
-                GROUP BY penciller
-                ORDER BY cnt DESC, penciller
-            """) { s in
-                CreatorStat(name: colText(s, 0) ?? "", count: colInt(s, 1), role: "Artist")
-            }
-        }
-    }
-
-    func comicsByCreator(name: String, role: String) -> [Comic] {
-        queue.sync {
-            let col = role == "Writer" ? "writer" : "penciller"
-            let sql = """
-                \(comicSelect)
-                WHERE c.deleted_at IS NULL AND c.\(col) = ?
-                ORDER BY c.series, c.position
-            """
-            return rows(sql, args: [name]) { comicRow($0) }
-        }
-    }
 
     // MARK: - Series gap detection
 

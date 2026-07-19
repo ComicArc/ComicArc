@@ -74,6 +74,7 @@ struct Tag: Identifiable, Hashable {
 
 struct PublisherStat { let publisher: String; let count: Int }
 struct SeriesStat     { let series: String; let publisher: String; let count: Int }
+struct GrowthPoint: Identifiable { let id = UUID(); let month: String; let label: String; let count: Int }
 
 struct Bookmark: Identifiable {
     let id: Int64
@@ -95,12 +96,6 @@ struct HistoryEntry: Identifiable {
     var pagesRead: Int { max(0, pageEnd - pageStart) }
 }
 
-struct CreatorStat: Identifiable {
-    var id: String { "\(role):\(name)" }
-    let name: String
-    let count: Int
-    let role: String
-}
 
 struct LibraryStats {
     let totalComics: Int
@@ -115,4 +110,5 @@ struct LibraryStats {
     let publisherBreakdown: [PublisherStat]
     let topSeries: [SeriesStat]
     let recentlyRead: [Comic]
+    let collectionGrowth: [GrowthPoint]
 }

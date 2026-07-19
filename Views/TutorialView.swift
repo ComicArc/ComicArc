@@ -33,7 +33,7 @@ private let steps: [TStepInfo] = [
 
     TStepInfo(icon: "filemenu.and.selection",
               title: "Navigation Tabs",
-              body: "Switch between Library, Reading Runs, Stats, History, Creators, and Settings using the tabs in the top bar.",
+              body: "Switch between Library, Reading Runs, Stats, History, and Settings using the tabs in the top bar.",
               spot: .navCenter, above: false),
 
     TStepInfo(icon: "sidebar.right",

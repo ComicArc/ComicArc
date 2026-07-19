@@ -90,7 +90,6 @@ struct ComicArcApp: App {
                 Button("Reading Orders") { vm.select(.runs) }    .keyboardShortcut("5", modifiers: .command)
                 Button("Statistics")     { vm.select(.stats) }   .keyboardShortcut("6", modifiers: .command)
                 Button("History")        { vm.select(.history) } .keyboardShortcut("7", modifiers: .command)
-                Button("Creators")       { vm.select(.creators) }.keyboardShortcut("8", modifiers: .command)
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }

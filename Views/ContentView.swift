@@ -114,8 +114,6 @@ struct ContentView: View {
             StatsView()
         case .history:
             ReadingHistoryView()
-        case .creators:
-            CreatorBrowseView()
         case .duplicates:
             DuplicatesView()
         }
@@ -314,7 +312,6 @@ struct SidebarView: View {
                 navRow("Reading Orders", icon: "list.bullet.rectangle.portrait.fill", item: .runs)
                 navRow("Statistics",     icon: "chart.bar.xaxis",                     item: .stats)
                 navRow("History",        icon: "clock.fill",                          item: .history)
-                navRow("Creators",       icon: "person.2.fill",                       item: .creators)
                 if !vm.duplicateGroups.isEmpty {
                     navRow("Possible Duplicates", icon: "doc.on.doc", item: .duplicates,
                            trailingText: "\(vm.duplicateGroups.count)")

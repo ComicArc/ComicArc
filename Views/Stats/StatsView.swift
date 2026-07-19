@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 struct StatsView: View {
     @State private var stats:    LibraryStats? = nil
@@ -8,32 +9,29 @@ struct StatsView: View {
     @State private var editingGoal = false
     @State private var goalDraft   = ""
 
+    private let gridColumns = [GridItem(.adaptive(minimum: 320, maximum: 480), spacing: 20, alignment: .top)]
+
     var body: some View {
         Group {
             if let stats {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 28) {
                         heading
-                        statCards(stats)
-                        sectionDivider
-                        readingGoalSection
-                        sectionDivider
-                        HStack(alignment: .top, spacing: 40) {
-                            publisherSection(stats)
-                            Divider()
-                            topSeriesSection(stats)
+                        heroRow(stats)
+                        readingGoalCard
+
+                        LazyVGrid(columns: gridColumns, spacing: 20) {
+                            publisherCard(stats)
+                            topSeriesCard(stats)
+                            growthCard(stats)
+                            if !stats.activityMap.isEmpty { activityCard(stats) }
                         }
                         .padding(.horizontal, 24)
-                        sectionDivider
-                        yearInReviewSection(stats)
-                        sectionDivider
-                        recentlyReadSection(stats)
-                        if !stats.activityMap.isEmpty {
-                            sectionDivider
-                            heatmapSection(stats)
-                        }
+
+                        if !stats.recentlyRead.isEmpty { recentlyReadSection(stats) }
                         Spacer(minLength: 40)
                     }
+                    .padding(.top, 24)
                 }
             } else {
                 ProgressView("Loading Stats…")
@@ -44,21 +42,118 @@ struct StatsView: View {
         .task { await loadStats() }
     }
 
-    // MARK: - Reading Goal section
+    // MARK: - Heading
 
-    private var readingGoalSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                sectionHeader("READING GOAL \(goalYear)")
-                Spacer()
-                Button("Change Goal") { goalDraft = "\(goalCount)"; editingGoal = true }
-                    .font(.caption).foregroundStyle(Design.brandGold).buttonStyle(.plain)
-                    .accessibilityLabel("Change reading goal")
-                    .help("Set your annual reading target")
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("YOUR STATS")
+                .font(.system(size: 30, weight: .black))
+                .foregroundStyle(Design.brandGold)
+                .kerning(2)
+            Text("Everything you've read, rated, and collected.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 24)
+    }
+
+    // MARK: - Hero: completion ring + key metrics
+
+    private func heroRow(_ s: LibraryStats) -> some View {
+        HStack(alignment: .top, spacing: 20) {
+            completionRingCard(s)
+                .frame(maxWidth: .infinity)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                metricTile("PAGES READ", value: "\(s.pagesRead)", icon: "book.pages", tint: Design.brandBlue)
+                metricTile("FAVORITES", value: "\(s.favorites)", icon: "heart.fill", tint: .red)
+                metricTile("READING ORDERS", value: "\(s.runsCount)", icon: "list.bullet.rectangle.portrait.fill", tint: Design.brandGold)
+                metricTile("DAY STREAK", value: "\(s.readingStreak)", icon: "flame.fill", tint: .orange)
             }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 24)
+    }
 
-            let pct = goalCount > 0 ? min(1.0, Double(issuesReadThisYear) / Double(goalCount)) : 0
-            VStack(alignment: .leading, spacing: 8) {
+    private func completionRingCard(_ s: LibraryStats) -> some View {
+        DashboardCard {
+            VStack(spacing: 16) {
+                sectionHeader("COLLECTION STATUS")
+
+                ZStack {
+                    Chart {
+                        SectorMark(angle: .value("Finished", max(s.finished, 0)), innerRadius: .ratio(0.68), angularInset: 1.5)
+                            .foregroundStyle(Design.brandGold)
+                            .cornerRadius(3)
+                        SectorMark(angle: .value("In Progress", max(s.inProgress, 0)), innerRadius: .ratio(0.68), angularInset: 1.5)
+                            .foregroundStyle(Design.brandBlue)
+                            .cornerRadius(3)
+                        SectorMark(angle: .value("Unread", max(s.unread, 0)), innerRadius: .ratio(0.68), angularInset: 1.5)
+                            .foregroundStyle(Design.surfaceBg)
+                            .cornerRadius(3)
+                    }
+                    .frame(height: 180)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(s.finished) finished, \(s.inProgress) in progress, \(s.unread) unread, of \(s.totalComics) total")
+
+                    VStack(spacing: 2) {
+                        Text("\(s.totalComics)").font(.system(size: 30, weight: .black)).foregroundStyle(.primary)
+                        Text("COMICS").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).kerning(0.5)
+                    }
+                }
+
+                HStack(spacing: 16) {
+                    legendDot("Finished", Design.brandGold, s.finished)
+                    legendDot("In Progress", Design.brandBlue, s.inProgress)
+                    legendDot("Unread", Design.secondaryLabel, s.unread)
+                }
+            }
+        }
+    }
+
+    private func legendDot(_ label: String, _ color: Color, _ count: Int) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text("\(label) · \(count)").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func metricTile(_ label: String, value: String, icon: String, tint: Color) -> some View {
+        DashboardCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(value)
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text(label)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .kerning(0.5)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label.lowercased()): \(value)")
+    }
+
+    // MARK: - Reading Goal
+
+    private var readingGoalCard: some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    sectionHeader("READING GOAL \(goalYear)")
+                    Spacer()
+                    Button("Change Goal") { goalDraft = "\(goalCount)"; editingGoal = true }
+                        .font(.caption).foregroundStyle(Design.brandGold).buttonStyle(.plain)
+                        .accessibilityLabel("Change reading goal")
+                        .help("Set your annual reading target")
+                }
+
+                let pct = goalCount > 0 ? min(1.0, Double(issuesReadThisYear) / Double(goalCount)) : 0
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(issuesReadThisYear)")
                         .font(.system(size: 36, weight: .black)).foregroundStyle(Design.brandGold)
@@ -104,223 +199,156 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - Heading
+    // MARK: - By Publisher
 
-    private var heading: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("YOUR STATS")
-                .font(.system(size: 28, weight: .black))
-                .foregroundStyle(Design.brandGold)
-                .kerning(2)
-            Text("Everything you've read, rated, and collected.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 20)
-    }
-
-    private var sectionDivider: some View {
-        Rectangle().fill(Design.borderColor).frame(height: 1)
-            .padding(.horizontal, 24).padding(.vertical, 20)
-    }
-
-    // MARK: - Stat cards
-
-    private func statCards(_ s: LibraryStats) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 140, maximum: 220))],
-            spacing: 12
-        ) {
-            statCard("COMICS IN LIBRARY", value: "\(s.totalComics)")
-            statCard("COMPLETED",         value: "\(s.finished)")
-            statCard("IN PROGRESS",       value: "\(s.inProgress)")
-            statCard("PAGES READ",        value: "\(s.pagesRead)")
-            statCard("FAVORITES",         value: "\(s.favorites)")
-            statCard("NARRATIVE RUNS",    value: "\(s.runsCount)")
-            if s.readingStreak > 0 {
-                statCard("DAY STREAK 🔥",  value: "\(s.readingStreak)")
-            }
-        }
-        .padding(.horizontal, 24)
-    }
-
-    private func statCard(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(value)
-                .font(.system(size: 38, weight: .black))
-                .foregroundStyle(Design.brandGold)
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-            Text(label)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.secondary)
-                .kerning(0.5)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Design.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
-        .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label.lowercased().replacingOccurrences(of: " 🔥", with: "")): \(value)")
-    }
-
-    // MARK: - By Publisher (colored badge + horizontal bar, matches Python)
-
-    private func publisherSection(_ s: LibraryStats) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("BY PUBLISHER")
-
-            let maxCount = s.publisherBreakdown.first?.count ?? 1
-            ForEach(s.publisherBreakdown.prefix(8), id: \.publisher) { item in
-                HStack(spacing: 12) {
-                    PublisherBadge(publisher: item.publisher)
-                        .frame(width: 56, alignment: .leading)
-
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Design.surfaceBg)
-                                .frame(height: 10)
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(LinearGradient(
-                                    colors: [Design.brandGold, Color(red: 0.976, green: 0.863, blue: 0.384)],
-                                    startPoint: .leading, endPoint: .trailing
-                                ))
-                                .frame(
-                                    width: max(4, geo.size.width * CGFloat(item.count) / CGFloat(maxCount)),
-                                    height: 10
-                                )
+    private func publisherCard(_ s: LibraryStats) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 14) {
+                sectionHeader("BY PUBLISHER")
+                Chart(s.publisherBreakdown.prefix(6), id: \.publisher) { item in
+                    BarMark(
+                        x: .value("Comics", item.count),
+                        y: .value("Publisher", item.publisher)
+                    )
+                    .foregroundStyle(Design.publisherColor(item.publisher))
+                    .cornerRadius(4)
+                    .annotation(position: .trailing) {
+                        Text("\(item.count)").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis { AxisMarks { value in
+                    AxisValueLabel {
+                        if let pub = value.as(String.self) {
+                            Text(pub).font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    .frame(height: 10)
-                    .accessibilityHidden(true)
-
-                    Text("\(item.count)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
-                }
+                } }
+                .frame(height: CGFloat(min(s.publisherBreakdown.count, 6)) * 34 + 10)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(item.publisher): \(item.count) comics")
+                .accessibilityLabel(s.publisherBreakdown.prefix(6).map { "\($0.publisher): \($0.count)" }.joined(separator: ", "))
             }
         }
     }
 
     // MARK: - Top Series
 
-    private func topSeriesSection(_ s: LibraryStats) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("TOP SERIES").padding(.bottom, 14)
+    private func topSeriesCard(_ s: LibraryStats) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 4) {
+                sectionHeader("TOP SERIES").padding(.bottom, 10)
 
-            ForEach(s.topSeries.prefix(8), id: \.series) { item in
-                HStack(spacing: 10) {
-                    PublisherBadge(publisher: item.publisher)
+                ForEach(Array(s.topSeries.prefix(5).enumerated()), id: \.element.series) { idx, item in
+                    HStack(spacing: 10) {
+                        Text("\(idx + 1)")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(Design.brandGold)
+                            .frame(width: 18)
+                        PublisherBadge(publisher: item.publisher)
+                        Text(item.series)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(item.count)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 7)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(item.series) by \(item.publisher): \(item.count) issues")
 
-                    Text(item.series)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    Text("\(item.count)")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                    if idx < min(s.topSeries.count, 5) - 1 {
+                        Rectangle().fill(Design.borderColor).frame(height: 1).accessibilityHidden(true)
+                    }
                 }
-                .padding(.vertical, 8)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(item.series) by \(item.publisher): \(item.count) issues")
 
-                Rectangle().fill(Design.borderColor).frame(height: 1).accessibilityHidden(true)
+                if s.topSeries.isEmpty {
+                    Text("No series yet — import some comics to see this fill in.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
             }
         }
     }
 
-    // MARK: - Recently Read
+    // MARK: - Collection Growth
 
-    private func recentlyReadSection(_ s: LibraryStats) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("RECENTLY READ").padding(.bottom, 14)
+    private func growthCard(_ s: LibraryStats) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 14) {
+                sectionHeader("COLLECTION GROWTH")
+                Text("Comics added, last 6 months")
+                    .font(.caption2).foregroundStyle(.tertiary)
 
-            ForEach(s.recentlyRead) { comic in
-                HStack(spacing: 12) {
-                    MiniComicCard(comic: comic)
-                        .frame(width: 46, height: 66)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(comic.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-
-                        PublisherBadge(publisher: comic.publisher)
-
-                        if comic.isFinished {
-                            Text("Read")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else if comic.progress > 0 {
-                            Text("p. \(comic.progress + 1)/\(comic.pageCount)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Spacer()
-
-                    if let lr = comic.lastRead {
-                        Text(String(lr.prefix(10)))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                Chart(s.collectionGrowth) { point in
+                    BarMark(
+                        x: .value("Month", point.label),
+                        y: .value("Added", point.count)
+                    )
+                    .foregroundStyle(Design.brandBlue.gradient)
+                    .cornerRadius(4)
                 }
-                .padding(.vertical, 8)
-
-                Rectangle().fill(Design.borderColor).frame(height: 1)
+                .chartYAxis { AxisMarks(position: .leading) }
+                .frame(height: 140)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(s.collectionGrowth.map { "\($0.label): \($0.count) added" }.joined(separator: ", "))
             }
         }
-        .padding(.horizontal, 24)
     }
 
     // MARK: - Reading Activity heatmap
 
-    private func heatmapSection(_ s: LibraryStats) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("READING ACTIVITY")
-            HeatmapView(activityMap: s.activityMap, days: 365)
-                .frame(height: 7 * (12 + 2))
+    private func activityCard(_ s: LibraryStats) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionHeader("READING ACTIVITY")
+                HeatmapView(activityMap: s.activityMap, days: 365)
+                    .frame(height: 7 * (12 + 2))
+            }
         }
-        .padding(.horizontal, 24)
+    }
+
+    // MARK: - Recently Read (horizontal shelf)
+
+    private func recentlyReadSection(_ s: LibraryStats) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader("RECENTLY READ").padding(.horizontal, 24)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(s.recentlyRead) { comic in
+                        VStack(alignment: .leading, spacing: 6) {
+                            MiniComicCard(comic: comic)
+                                .frame(width: 100, height: 144)
+
+                            Text(comic.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(2)
+                                .frame(width: 100, alignment: .leading)
+
+                            if comic.isFinished {
+                                Text("Read").font(.caption2).foregroundStyle(.secondary)
+                            } else if comic.progress > 0 {
+                                Text("p. \(comic.progress + 1)/\(comic.pageCount)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 100)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(.horizontal, 24)
+            }
+        }
     }
 
     // MARK: - Helpers
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 13, weight: .black))
+            .font(.system(size: 12, weight: .black))
             .foregroundStyle(.secondary)
-            .kerning(1.5)
-    }
-
-    // MARK: - Year in Review
-
-    @ViewBuilder
-    private func yearInReviewSection(_ s: LibraryStats) -> some View {
-        let yr = Calendar.current.component(.year, from: Date())
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("\(yr) IN REVIEW")
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 180))], spacing: 10) {
-                statCard("READ THIS YEAR", value: "\(issuesReadThisYear)")
-                if let topPub = s.publisherBreakdown.first {
-                    statCard("TOP PUBLISHER", value: topPub.publisher.uppercased())
-                }
-                if let topSeries = s.topSeries.first {
-                    statCard("TOP SERIES", value: topSeries.series)
-                }
-                if s.readingStreak > 0 {
-                    statCard("BEST STREAK", value: "\(s.readingStreak) days")
-                }
-            }
-        }
-        .padding(.horizontal, 24)
+            .kerning(1.2)
     }
 
     private func loadStats() async {
@@ -334,6 +362,22 @@ struct StatsView: View {
         stats               = s
         goalCount           = goal
         issuesReadThisYear  = read
+    }
+}
+
+// MARK: - Dashboard card container (shared visual language for every Stats tile)
+
+private struct DashboardCard<Content: View>: View {
+    var padding: CGFloat = 20
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Design.cardBg)
+            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+            .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
     }
 }
 
@@ -397,4 +441,3 @@ struct HeatmapView: View {
         }
     }
 }
-

@@ -65,7 +65,7 @@ private struct iPadSidebar: View {
                 }
             }
             Section("Discover") {
-                ForEach([AppDestination.runs, .stats, .history, .creators], id: \.self) { s in
+                ForEach([AppDestination.runs, .stats, .history], id: \.self) { s in
                     Label(s.title, systemImage: s.icon).tag(s)
                 }
                 if !vm.duplicateGroups.isEmpty {
@@ -140,9 +140,6 @@ private struct iPadContentColumn: View {
             case .history:
                 ReadingHistoryView().environmentObject(vm)
                     .navigationTitle("History")
-            case .creators:
-                CreatorBrowseView().environmentObject(vm)
-                    .navigationTitle("Creators")
             case .duplicates:
                 DuplicatesView().environmentObject(vm)
                     .navigationTitle("Possible Duplicates")

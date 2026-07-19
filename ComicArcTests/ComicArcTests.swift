@@ -7,7 +7,7 @@ final class ComicArcTests: XCTestCase {
 
     func test_destination_codable_simpleCase() throws {
         for dest: AppDestination in [.library, .continueReading, .favorites, .readingList,
-                                      .runs, .stats, .history, .creators, .settings] {
+                                      .runs, .stats, .history, .settings] {
             let decoded = try roundTrip(dest)
             XCTAssertEqual(dest, decoded, "Codable round-trip failed for \(dest)")
         }
@@ -41,7 +41,7 @@ final class ComicArcTests: XCTestCase {
     func test_destination_icon_nonEmpty() {
         let all: [AppDestination] = [.library, .continueReading, .favorites, .readingList,
                                       .publisher(""), .tag(""), .runs, .stats, .history,
-                                      .creators, .settings]
+                                      .settings]
         for dest in all {
             XCTAssertFalse(dest.icon.isEmpty, "icon empty for \(dest)")
         }
@@ -88,7 +88,6 @@ final class ComicArcTests: XCTestCase {
             (.runs,            .runs),
             (.stats,           .stats),
             (.history,         .history),
-            (.creators,        .creators),
         ]
         for (dest, expected) in mapping {
             vm.select(dest)
@@ -130,7 +129,7 @@ final class ComicArcTests: XCTestCase {
         let vm = LibraryViewModel.shared
         vm.select(.tag("horror"))
         XCTAssertFalse(vm.useGroupedView)
-        for dest: AppDestination in [.library, .continueReading, .favorites, .readingList, .runs, .stats, .history, .creators, .settings] {
+        for dest: AppDestination in [.library, .continueReading, .favorites, .readingList, .runs, .stats, .history, .settings] {
             vm.select(dest)
             XCTAssertTrue(vm.useGroupedView, "useGroupedView should be true after selecting \(dest)")
         }

@@ -91,14 +91,13 @@ When a story spans multiple series, Reading Orders let you build a single readin
 - Drag-and-drop to reorder; per-issue notes for context
 - Resume picks up exactly where you left off and auto-advances to the next issue
 
-### Stats, History & Creators
+### Stats & History
 
 Also shared across both platforms:
 
 - Totals: issues, pages read, time in-app, favorites, completed runs
 - Publisher breakdown chart
 - Reading history timeline
-- Creator browser — explore your library by writer or artist
 
 ---
 
@@ -114,7 +113,7 @@ Both apps share the same core (navigation, database, scanner, reading-order/stat
 | CBR | ✅ (bundled `unar`) | ❌ *(no shell access in the iOS sandbox)* |
 | Search, publisher & tag browsing | ✅ | ✅ |
 | Bulk select, reassign, duplicates | ✅ | ✅ |
-| Reading Orders, Stats, History, Creators | ✅ | ✅ |
+| Reading Orders, Stats, History | ✅ | ✅ |
 | Backup export/import | ✅ | ✅ |
 | Double-page spread, RTL, color filters, in-reader bookmarks | ✅ | 🚧 *(not yet — touch reader is swipe/zoom/autoplay for now)* |
 | Keyboard shortcuts | ✅ (full) | ✅ (Magic Keyboard: scan, navigate, back) |
