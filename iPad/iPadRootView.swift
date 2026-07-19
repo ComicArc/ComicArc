@@ -156,8 +156,20 @@ private struct iPadContentColumn: View {
                 Button(action: { vm.scan() }) {
                     Image(systemName: "arrow.clockwise")
                 }
-                .disabled(vm.isScanning)
+                .disabled(vm.isScanning || vm.isResyncing)
                 .accessibilityLabel("Rescan Library")
+            }
+            // Previously only reachable inside Settings — one tap away now, matching macOS.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: { vm.resyncLibrary() }) {
+                    if vm.isResyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .disabled(vm.isScanning || vm.isResyncing || vm.libraryPath.isEmpty)
+                .accessibilityLabel("Resync Library")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 iPadImportButton()

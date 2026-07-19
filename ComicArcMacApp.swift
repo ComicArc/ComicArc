@@ -2,9 +2,11 @@ import SwiftUI
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        UserDefaults.standard.bool(forKey: "quitOnLastWindowClose")
-    }
+    // Closing the window should mean the app is actually closed — no lingering in the
+    // background/Dock with the watcher, scanner, and DB connection all still alive. This
+    // used to be a hidden, defaulted-off Settings toggle, so closing the window did nothing
+    // for most people; now it always fully quits, running the same cleanup as Cmd+Q below.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     // Quitting should mean quitting: stop the file watcher, cancel any in-flight scan
     // (and kill the `unar` subprocess it may be blocked on) and cleanly close the

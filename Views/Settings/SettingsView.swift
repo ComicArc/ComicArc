@@ -14,7 +14,6 @@ struct SettingsView: View {
     @AppStorage("autoplaySpeed")    private var autoplaySpeed: Double = 6.0
     @AppStorage("progressFormat")   private var progressFormatRaw = ProgressFormat.fraction.rawValue
     @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
-    @AppStorage("quitOnLastWindowClose") private var quitOnLastWindowClose = false
 
     private var progressFormat: Binding<ProgressFormat> {
         Binding(get: { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction },
@@ -75,11 +74,6 @@ struct SettingsView: View {
                         Text("\(vm.scanState.done) / \(vm.scanState.total) — \(vm.scanState.added) added")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                }
-
-                Section("Behavior") {
-                    Toggle("Quit when last window closes", isOn: $quitOnLastWindowClose)
-                        .help("Quit ComicArc when you close the main window")
                 }
 
                 Section("Reader") {

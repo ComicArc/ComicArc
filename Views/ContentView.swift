@@ -12,6 +12,9 @@ struct ContentView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.windowService) private var windowService
     @Environment(\.fileService)   private var fileService
+    #if os(macOS)
+    @Environment(\.openSettings)  private var openSettings
+    #endif
 
     @AppStorage("tutorialSeen") private var tutorialSeen = false
     @State private var showTutorial = false
@@ -157,17 +160,20 @@ struct ContentView: View {
             scanToolbarItem
         }
 
+        // Resync library (rescan + re-derive metadata) — the fix for "ordering/metadata
+        // looks wrong" was previously only reachable by opening Settings and finding a
+        // buried button, or knowing a menu-bar shortcut existed. Now it's one click from
+        // the main window at all times.
+        ToolbarItem(id: "resync", placement: .primaryAction) {
+            resyncToolbarItem
+        }
+
         // Import files
         ToolbarItem(id: "import", placement: .primaryAction) {
             Button { importFiles() } label: {
                 Label("Import", systemImage: "square.and.arrow.down")
             }
             .help("Import comic files (⌘O)")
-        }
-
-        // Separator
-        ToolbarItem(id: "sep1", placement: .primaryAction) {
-            Divider().frame(height: 16)
         }
 
         // Grid density (library only)
@@ -185,6 +191,17 @@ struct ContentView: View {
                 .help(vm.bulkMode ? "Exit selection mode" : "Select multiple comics (⌘E)")
             }
         }
+
+        // Settings — previously only reachable via the app menu (ComicArc ▸ Settings…) or
+        // ⌘,, neither of which is obvious to someone used to an in-app settings screen.
+        #if os(macOS)
+        ToolbarItem(id: "settings", placement: .primaryAction) {
+            Button { openSettings() } label: {
+                Image(systemName: "gearshape")
+            }
+            .help("Settings (⌘,)")
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -199,10 +216,29 @@ struct ContentView: View {
             }
         } else {
             Button { vm.scan() } label: {
-                Label("Scan", systemImage: "folder.badge.magnifyingglass")
+                // "folder.badge.magnifyingglass" isn't a real SF Symbol — it silently
+                // rendered as a blank circle with no glyph at all, making Scan look broken
+                // and indistinguishable from Resync right next to it.
+                Label("Scan", systemImage: "magnifyingglass")
             }
             .help("Scan library folder for new comics (⇧⌘R)")
             .disabled(vm.libraryPath.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var resyncToolbarItem: some View {
+        if vm.isResyncing {
+            HStack(spacing: 5) {
+                ProgressView().scaleEffect(0.65).tint(Design.brandGold)
+                Text("Resyncing…").font(.caption2).foregroundStyle(.secondary)
+            }
+        } else {
+            Button { vm.resyncLibrary() } label: {
+                Label("Resync", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .help("Rescan and re-derive metadata for every comic — fixes wrong reading order or metadata (⌥⇧⌘R)")
+            .disabled(vm.libraryPath.isEmpty || vm.isScanning)
         }
     }
 
@@ -245,6 +281,9 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
 
     var body: some View {
         List {
@@ -281,6 +320,19 @@ struct SidebarView: View {
                            trailingText: "\(vm.duplicateGroups.count)")
                 }
             }
+
+            // Settings was previously only reachable via the app menu or ⌘, — neither
+            // obvious to someone expecting an in-app settings screen. This opens the same
+            // Settings window as the toolbar gear icon and ⌘,.
+            #if os(macOS)
+            Section {
+                Button { openSettings() } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+            }
+            #endif
         }
         .listStyle(.sidebar)
         .navigationTitle("ComicArc")
