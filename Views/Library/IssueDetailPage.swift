@@ -387,8 +387,8 @@ struct IssueDetailPage: View {
         }
         .padding(16)
         .background(Color.orange.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.2)))
+        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+        .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Color.orange.opacity(0.2)))
     }
 
     private var runsSection: some View {
@@ -458,18 +458,7 @@ struct IssueDetailPage: View {
     }
 
     private func tagChip(_ tag: Tag) -> some View {
-        HStack(spacing: 4) {
-            Text(tag.name).font(.caption)
-            Button { removeTag(tag) } label: {
-                Image(systemName: "xmark").font(.system(size: 9))
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-            .accessibilityLabel("Remove tag \(tag.name)")
-        }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(Design.brandBlue.opacity(0.14))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Design.brandBlue.opacity(0.3)))
+        TagChip(name: tag.name) { removeTag(tag) }
     }
 
     private var progressLabel: String {

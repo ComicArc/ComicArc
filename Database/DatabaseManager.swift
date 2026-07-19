@@ -810,22 +810,38 @@ final class DatabaseManager: @unchecked Sendable {
 
     /// Groups of comics sharing the same publisher+series+issue number — likely the same issue
     /// imported twice under different filenames (a rescan, a re-rip, a variant cover, etc.).
+    // One joined query instead of a "find the duplicate keys, then one round-trip per key"
+    // N+1 pattern — this runs after every scan/import/reassign/delete/rename, serialized on
+    // the same DB queue as everything else, so a library with many duplicate groups no
+    // longer means many sequential prepared-statement round trips blocking that queue.
     func duplicateGroups() -> [[Comic]] {
         queue.sync {
-            let keys = rows("""
-                SELECT publisher, series, issue_number, COUNT(*) c
-                FROM comics
-                WHERE deleted_at IS NULL AND issue_number IS NOT NULL AND issue_number != ''
-                GROUP BY publisher, series, issue_number
-                HAVING c > 1
-                ORDER BY publisher, series, CAST(issue_number AS INTEGER)
-            """) { (pub: self.colText($0, 0) ?? "", ser: self.colText($0, 1) ?? "", num: self.colText($0, 2) ?? "") }
+            let flat = rows("""
+                \(comicSelect)
+                JOIN (
+                    SELECT publisher, series, issue_number
+                    FROM comics
+                    WHERE deleted_at IS NULL AND issue_number IS NOT NULL AND issue_number != ''
+                    GROUP BY publisher, series, issue_number
+                    HAVING COUNT(*) > 1
+                ) dup ON dup.publisher = c.publisher AND dup.series = c.series AND dup.issue_number = c.issue_number
+                WHERE c.deleted_at IS NULL
+                ORDER BY c.publisher, c.series, CAST(c.issue_number AS INTEGER)
+            """, map: comicRow)
 
-            guard !keys.isEmpty else { return [] }
-            return keys.map { key in
-                rows("\(comicSelect) WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ? AND c.issue_number = ?",
-                     args: [key.pub, key.ser, key.num], map: comicRow)
+            guard !flat.isEmpty else { return [] }
+            var groups: [[Comic]] = []
+            var currentKey: (String, String, String)? = nil
+            for comic in flat {
+                let key = (comic.publisher, comic.series, comic.issueNumber ?? "")
+                if currentKey == nil || currentKey! != key {
+                    groups.append([comic])
+                    currentKey = key
+                } else {
+                    groups[groups.count - 1].append(comic)
+                }
             }
+            return groups
         }
     }
 

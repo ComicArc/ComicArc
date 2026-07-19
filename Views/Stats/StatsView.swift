@@ -159,8 +159,8 @@ struct StatsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(Design.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Design.borderColor, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+        .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label.lowercased().replacingOccurrences(of: " 🔥", with: "")): \(value)")
     }

@@ -33,7 +33,11 @@ enum Design {
 
     // Brand — warmer amber gold, richer blue
     static let secondaryLabel = Color.secondary
-    static let brandBlue      = Color(red: 0.173, green: 0.431, blue: 0.847)  // #2C6ED8
+    // Matches Assets.xcassets/AccentColor exactly — this and Color.accentColor were two
+    // different blues (#2C6ED8 vs the asset's #2665BB) used interchangeably throughout the
+    // app for the same "selected/active" meaning, so the same UI concept rendered in two
+    // slightly different shades depending on which screen happened to reference which name.
+    static let brandBlue      = Color(red: 0.149, green: 0.396, blue: 0.733)  // #2665BB
     static let brandGold      = Color(red: 0.918, green: 0.659, blue: 0.082)  // #EAA815 — warmer
 
     // Gold gradient (use for prominent elements)
@@ -166,6 +170,34 @@ struct StarRating: View {
                     .accessibilityAddTraits(.isButton)
             }
         }
+    }
+}
+
+// MARK: - Tag chip (used wherever a comic's tags are shown — was three near-identical,
+// independently-drifted implementations across Mac's series detail, Mac's issue detail, and
+// iPad's comic detail: different colors, paddings, remove-icon glyphs, and only iPad
+// prefixed the name with "#". One shared component now.)
+
+struct TagChip: View {
+    let name: String
+    var onRemove: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("#\(name)").font(.caption)
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill").font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove tag \(name)")
+            }
+        }
+        .foregroundStyle(Design.brandBlue)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Design.brandBlue.opacity(0.14))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Design.brandBlue.opacity(0.3)))
     }
 }
 

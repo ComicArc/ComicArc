@@ -667,11 +667,57 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
-    func toggleFavorite(_ comic: Comic)    { db.setFavorite(comic.id, !comic.isFavorite); reload() }
-    func toggleReadingList(_ comic: Comic) { db.setInReadingList(comic.id, !comic.inReadingList); reload() }
-    func setRating(_ comic: Comic, rating: Int) { db.setRating(comic.id, rating: rating); reload() }
-    func markRead(_ comic: Comic)   { db.updateProgress(comicId: comic.id, page: max(0, comic.pageCount - 1)); reload() }
-    func markUnread(_ comic: Comic) { db.updateProgress(comicId: comic.id, page: 0); reload() }
+    // Patches the comic in place (same approach as updateProgress below) instead of
+    // reload()'s full debounced SQL requery + resort of the whole filtered library — these
+    // four are the most frequently-tapped actions in the app (grid context menus, star
+    // ratings, detail pages), and with a large library reload() on every single tap was a
+    // visible stutter. When the current section's membership actually depends on the field
+    // being changed (Favorites/Reading List/Continue Reading), the comic is additionally
+    // removed from the in-memory list so it doesn't linger somewhere it should have
+    // disappeared from — every other section (Library, a publisher, a tag, a series) never
+    // filters on these fields, so a plain in-place update is already fully correct there.
+    private func patchComicLocally(_ comicId: Int64, removeIfNoLongerVisible: Bool = false, _ mutate: (inout Comic) -> Void) {
+        guard let idx = comics.firstIndex(where: { $0.id == comicId }) else { return }
+        mutate(&comics[idx])
+        if selectedComic?.id == comicId { mutate(&selectedComic!) }
+        if removeIfNoLongerVisible { comics.remove(at: idx) }
+    }
+
+    func toggleFavorite(_ comic: Comic) {
+        let newValue = !comic.isFavorite
+        db.setFavorite(comic.id, newValue)
+        patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .favorites && !newValue) {
+            $0.isFavorite = newValue
+        }
+    }
+
+    func toggleReadingList(_ comic: Comic) {
+        let newValue = !comic.inReadingList
+        db.setInReadingList(comic.id, newValue)
+        patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .readingList && !newValue) {
+            $0.inReadingList = newValue
+        }
+    }
+
+    func setRating(_ comic: Comic, rating: Int) {
+        db.setRating(comic.id, rating: rating)
+        patchComicLocally(comic.id) { $0.rating = rating }
+    }
+
+    func markRead(_ comic: Comic) {
+        let page = max(0, comic.pageCount - 1)
+        db.updateProgress(comicId: comic.id, page: page)
+        patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .continueReading) {
+            $0.progress = page
+        }
+    }
+
+    func markUnread(_ comic: Comic) {
+        db.updateProgress(comicId: comic.id, page: 0)
+        patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .continueReading) {
+            $0.progress = 0
+        }
+    }
     func markRead(_ comics: [Comic]) {
         db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
         reload()

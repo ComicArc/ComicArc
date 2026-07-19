@@ -210,16 +210,7 @@ struct ComicDetailView: View {
     }
 
     private func tagChip(_ tag: Tag) -> some View {
-        HStack(spacing: 4) {
-            Text(tag.name).font(.caption)
-            Button { removeTag(tag) } label: {
-                Image(systemName: "xmark").font(.system(size: 8))
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Color.accentColor.opacity(0.12))
-        .clipShape(Capsule())
+        TagChip(name: tag.name) { removeTag(tag) }
     }
 
     // MARK: - Shelves

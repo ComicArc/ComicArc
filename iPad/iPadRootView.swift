@@ -271,8 +271,8 @@ private struct iPadComicGrid: View {
                         iPadComicTile(comic: comic)
                             .onTapGesture { selectedComic = comic }
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.accentColor, lineWidth: selectedComic?.id == comic.id ? 2 : 0)
+                                RoundedRectangle(cornerRadius: Design.cardCorner)
+                                    .stroke(Design.brandBlue, lineWidth: selectedComic?.id == comic.id ? 2 : 0)
                             )
                     }
                 }
@@ -295,13 +295,12 @@ private struct iPadComicTile: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                 } else {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.secondary.opacity(0.15))
+                    Design.cardBg
                         .overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))
                 }
             }
             .frame(width: 140, height: 200)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .comicCardStyle()
 
             Text(comic.title)
                 .font(.caption.weight(.medium))
@@ -310,7 +309,7 @@ private struct iPadComicTile: View {
 
             if comic.progress > 0 {
                 ProgressView(value: Double(comic.progress), total: max(1, Double(comic.pageCount)))
-                    .tint(.accentColor)
+                    .tint(Design.brandBlue)
             }
         }
         .frame(width: 140)
@@ -346,13 +345,13 @@ private struct iPadComicHero: View {
                 if let img = thumbnail {
                     Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
                 } else {
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: Design.cardCorner)
                         .fill(Color.secondary.opacity(0.15))
                         .overlay(Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(.secondary))
                 }
             }
             .frame(width: 140, height: 200)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
             .shadow(radius: 4)
             .padding(.leading)
 
@@ -414,17 +413,7 @@ private struct iPadComicMeta: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(tags) { tag in
-                                HStack(spacing: 4) {
-                                    Text("#\(tag.name)").font(.caption)
-                                    Button { removeTag(tag) } label: {
-                                        Image(systemName: "xmark.circle.fill").font(.caption2)
-                                    }
-                                    .accessibilityLabel("Remove tag \(tag.name)")
-                                }
-                                .padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(Color.accentColor.opacity(0.12))
-                                .foregroundStyle(Color.accentColor)
-                                .clipShape(Capsule())
+                                TagChip(name: tag.name) { removeTag(tag) }
                             }
                         }
                         .padding(.horizontal)
