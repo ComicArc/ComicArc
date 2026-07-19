@@ -15,15 +15,20 @@ final class LibraryScanner: @unchecked Sendable {
 
     // CBR is extracted via the `unar` command-line tool (macOS only) — it isn't readable
     // in the iOS sandbox, so folder scanning must skip it there rather than import comics
-    // that will always show 0 pages.
-    static let supportedExtensions: Set<String> = {
+    // that will always show 0 pages. On macOS it's additionally gated by the "CBR Support"
+    // Settings toggle (default true — absent/unset means "on", matching the toggle's own
+    // @AppStorage default) so a user without `unar` installed can turn off CBR scanning
+    // instead of having every CBR file sit at 0 pages with no explanation.
+    static var supportedExtensions: Set<String> {
         #if os(macOS)
-        ["cbz", "cbr", "pdf", "jpg", "jpeg", "png"]
+        let cbrEnabled = UserDefaults.standard.object(forKey: "cbrEnabled") == nil
+            || UserDefaults.standard.bool(forKey: "cbrEnabled")
+        return cbrEnabled ? ["cbz", "cbr", "pdf", "jpg", "jpeg", "png"] : ["cbz", "pdf", "jpg", "jpeg", "png"]
         #else
         ["cbz", "pdf", "jpg", "jpeg", "png"]
         #endif
-    }()
-    private let supported = LibraryScanner.supportedExtensions
+    }
+    private var supported: Set<String> { Self.supportedExtensions }
 
     struct ScanState: Sendable {
         var running = false; var total = 0; var done = 0; var added = 0
@@ -157,12 +162,29 @@ final class LibraryScanner: @unchecked Sendable {
 
     // MARK: - File hash
 
+    // Used to detect "this file moved" (same hash, different path) during a rescan, so a
+    // moved/renamed comic doesn't get treated as deleted+re-added and lose its progress,
+    // rating, tags, etc. Hashing only a 64KB prefix (as this used to) is cheap but real
+    // comic libraries commonly contain files that share tooling-generated headers — an
+    // identical embedded cover/ComicInfo.xml prefix from the same scan batch is enough to
+    // collide two genuinely different issues onto the same hash. Folding in the total file
+    // size and a chunk from near the end costs one extra seek and stays cheap even for a
+    // library with tens of thousands of files, while making an accidental collision between
+    // two different comics implausible.
     private func fileHash(_ path: String) -> String? {
         guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
         defer { fh.closeFile() }
-        let data = fh.readData(ofLength: 65536)
-        guard !data.isEmpty else { return nil }
-        return SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+        let prefix = fh.readData(ofLength: 65536)
+        guard !prefix.isEmpty else { return nil }
+        let size = fh.seekToEndOfFile()
+        let tailStart = size > 65536 ? size - 65536 : 0
+        fh.seek(toFileOffset: tailStart)
+        let tail = fh.readDataToEndOfFile()
+        var hasher = SHA256()
+        hasher.update(data: prefix)
+        hasher.update(data: withUnsafeBytes(of: size) { Data($0) })
+        hasher.update(data: tail)
+        return hasher.finalize().compactMap { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Page count
@@ -200,10 +222,17 @@ final class LibraryScanner: @unchecked Sendable {
     private let cbrListingLock = NSLock()
     private var cbrListingCache: [String: [String]] = [:]
 
+    // Guards against a mislabeled or malicious oversized archive hanging the scan queue on
+    // `lsar`/`unar` — a multi-GB file with a `.cbr` extension shouldn't be able to stall
+    // scanning the rest of the library.
+    private static let maxCBRSizeBytes: UInt64 = 50 * 1024 * 1024
+
     private func cbrImageListing(_ path: String) -> [String] {
         cbrListingLock.lock()
         if let cached = cbrListingCache[path] { cbrListingLock.unlock(); return cached }
         cbrListingLock.unlock()
+        let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
+        guard UInt64(size) <= Self.maxCBRSizeBytes else { return [] }
         guard let lsar = which("lsar") else { return [] }
         let listing = shell(lsar, args: [path])
         let images = listing.split(separator: "\n")
@@ -253,10 +282,15 @@ final class LibraryScanner: @unchecked Sendable {
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
         let libURL = URL(fileURLWithPath: libraryPath).standardized
+        // A trailing separator on the prefix is required: without it, "/Comics" would
+        // hasPrefix-match a sibling folder like "/Comics Backup" or "/ComicsOld", walking
+        // it as though it were inside the library and inventing bogus publisher/series
+        // names from a folder tree the user never configured.
+        let libPrefix = libURL.path.hasSuffix("/") ? libURL.path : libURL.path + "/"
         let dirURL = url.standardized.deletingLastPathComponent()
         var folders: [String] = []
         var cur = dirURL
-        while cur.standardized.path.hasPrefix(libURL.path) && cur.standardized != libURL {
+        while cur.standardized.path.hasPrefix(libPrefix) && cur.standardized != libURL {
             folders.insert(cur.lastPathComponent, at: 0)
             cur = cur.deletingLastPathComponent()
         }
@@ -271,6 +305,19 @@ final class LibraryScanner: @unchecked Sendable {
 
     private func isCleanCharacterName(_ name: String) -> Bool {
         !name.contains(",") && !name.contains("[") && !name.contains("(") && name.count <= 60
+    }
+
+    /// Recomputes file_hash for every comic using the current fileHash() algorithm. Needed
+    /// once after fileHash()'s formula changes (e.g. this one now folds in file size and a
+    /// tail chunk, not just a 64KB prefix) — otherwise "detect a moved/renamed file" silently
+    /// stops working for every comic already in the library, since a freshly-computed hash
+    /// would never match what's stored from before the change.
+    func rehashAll() {
+        let comics = DatabaseManager.shared.allComicPaths()
+        for (id, path) in comics {
+            guard let hash = fileHash(path) else { continue }
+            DatabaseManager.shared.updateFileHash(id: id, hash: hash)
+        }
     }
 
     func reparseAllMeta(libraryPath: String) {

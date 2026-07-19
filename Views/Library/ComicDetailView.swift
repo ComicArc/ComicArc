@@ -343,7 +343,12 @@ struct ComicDetailView: View {
         let series  = current.series
         let pub     = current.publisher
         reviewDraft = current.review ?? ""
-        ThumbnailCache.shared.thumbnail(for: current) { thumbnail = $0 }
+        // Guard against a slow load for a comic the user has since navigated away from
+        // overwriting the thumbnail of whatever is now actually being displayed.
+        ThumbnailCache.shared.thumbnail(for: current) { img in
+            guard comicId == self.current.id else { return }
+            self.thumbnail = img
+        }
         Task.detached(priority: .userInitiated) {
             let t   = DatabaseManager.shared.tags(for: comicId)
             let r   = DatabaseManager.shared.runsContaining(comicId: comicId)

@@ -461,7 +461,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     func comic(id: Int64) -> Comic? {
         queue.sync {
-            rows("\(comicSelect) WHERE c.id = ?", args: [id], map: comicRow).first
+            rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [id], map: comicRow).first
         }
     }
 
@@ -598,6 +598,14 @@ final class DatabaseManager: @unchecked Sendable {
                 INSERT INTO ratings (comic_id, rating) VALUES (?,?)
                 ON CONFLICT(comic_id) DO UPDATE SET rating = excluded.rating
             """, args: [comicId, rating])
+        }
+    }
+
+    func setComicNotes(_ comicId: Int64, notes: String?) {
+        let text = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        queue.sync {
+            _ = run("UPDATE comics SET notes = ? WHERE id = ?",
+                    args: [(text?.isEmpty == false) ? text : nil, comicId])
         }
     }
 
@@ -841,7 +849,7 @@ final class DatabaseManager: @unchecked Sendable {
                        SUM(CASE WHEN c.page_count > 1 AND COALESCE(rp.current_page,0) >= c.page_count - 1 THEN 1 ELSE 0 END) as read_ct
                 FROM runs r
                 LEFT JOIN run_items ri ON ri.run_id = r.id
-                LEFT JOIN comics c    ON c.id = ri.comic_id
+                LEFT JOIN comics c    ON c.id = ri.comic_id AND c.deleted_at IS NULL
                 LEFT JOIN reading_progress rp ON rp.comic_id = c.id
                 GROUP BY r.id
                 ORDER BY r.created_at DESC
@@ -860,6 +868,16 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync { run("INSERT INTO runs (title, description) VALUES (?,?)", args: [title, description]) }
     }
 
+    /// Used by backup restore to avoid creating a duplicate run when the same backup is
+    /// imported more than once. Not used by the normal "create a run" flow, which
+    /// legitimately allows two runs sharing a title.
+    func runId(withTitle title: String) -> Int64? {
+        queue.sync {
+            let id = scalarInt("SELECT id FROM runs WHERE title = ? LIMIT 1", args: [title])
+            return id > 0 ? Int64(id) : nil
+        }
+    }
+
     func deleteRun(_ runId: Int64) {
         queue.sync { _ = run("DELETE FROM runs WHERE id=?", args: [runId]) }
     }
@@ -875,7 +893,7 @@ final class DatabaseManager: @unchecked Sendable {
                    COALESCE(rp.current_page, 0), rp.last_read,
                    COALESCE(r.rating, 0), (f.comic_id IS NOT NULL), (rl.comic_id IS NOT NULL)
             FROM run_items ri
-            JOIN comics c ON ri.comic_id = c.id
+            JOIN comics c ON ri.comic_id = c.id AND c.deleted_at IS NULL
             LEFT JOIN reading_progress rp ON c.id = rp.comic_id
             LEFT JOIN ratings r           ON c.id = r.comic_id
             LEFT JOIN favorites f         ON c.id = f.comic_id
@@ -885,7 +903,7 @@ final class DatabaseManager: @unchecked Sendable {
             return rows(sql, args: [runId]) { s -> RunItem in
                 let comic = Comic(
                     id: colInt64(s, 3), title: colText(s, 4) ?? "", filePath: colText(s, 5) ?? "",
-                    publisher: colText(s, 6) ?? "", character: colText(s, 7), series: colText(s, 8) ?? "",
+                    publisher: colText(s, 6) ?? "Unknown", character: colText(s, 7), series: colText(s, 8) ?? "General",
                     issueNumber: colText(s, 9), pageCount: colInt(s, 10), writer: colText(s, 11),
                     penciller: colText(s, 12), year: sqlite3_column_type(s, 13) != SQLITE_NULL ? colInt(s, 13) : nil,
                     storyArc: colText(s, 14), languageIso: colText(s, 15), notes: colText(s, 16),
@@ -1094,6 +1112,12 @@ final class DatabaseManager: @unchecked Sendable {
                     is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
                     + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
             """)
+        }
+    }
+
+    func updateFileHash(id: Int64, hash: String) {
+        queue.sync {
+            _ = run("UPDATE comics SET file_hash = ? WHERE id = ?", args: [hash, id])
         }
     }
 

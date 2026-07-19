@@ -24,6 +24,10 @@ struct iPadReaderView: View {
     @State private var autoplay = false
     @State private var countdownProgress: Double = 0
     @Environment(\.scenePhase) private var scenePhase
+    // The reader's own width, not the device screen's — UIScreen.main.bounds.width is wrong
+    // in Split View/Slide Over, where the app's window is narrower than the full screen,
+    // making the tap zones for prev/next page misaligned with what's actually on screen.
+    @State private var viewWidth: CGFloat = 0
 
     init(comic: Comic, onClose: @escaping () -> Void) {
         self.comic = comic
@@ -45,10 +49,23 @@ struct iPadReaderView: View {
 
             overlayControls
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { viewWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in viewWidth = w }
+            }
+        )
         .statusBarHidden(!showBars)
         .persistentSystemOverlays(showBars ? .visible : .hidden)
         .onAppear { scheduleHide() }
-        .onDisappear { saveProgress() }
+        .onDisappear {
+            saveProgress()
+            // Otherwise up to 30 full-resolution decoded pages from this comic stay
+            // resident until unrelated LRU pressure evicts them — worth freeing eagerly
+            // on iOS, where a backgrounded app can be jetsam-killed for memory pressure.
+            PageCache.shared.evict(comicId: comic.id)
+        }
         // iOS can suspend or kill the app without ever calling onDisappear (a phone call,
         // the app switcher, a low-memory kill while backgrounded) — flush progress the
         // moment the scene stops being active rather than only when the view tears down.
@@ -101,7 +118,7 @@ struct iPadReaderView: View {
         SpatialTapGesture()
             .onEnded { value in
                 let x = value.location.x
-                let width = UIScreen.main.bounds.width
+                let width = viewWidth > 0 ? viewWidth : UIScreen.main.bounds.width
                 if x < width * 0.25 {
                     // Left tap zone: previous page
                     if currentPage > 0 { currentPage -= 1 }
@@ -186,7 +203,7 @@ struct iPadReaderView: View {
                 Image(systemName: autoplay ? "pause.circle.fill" : "play.circle")
                     .font(.title3)
                     .foregroundStyle(autoplay ? Design.brandGold : .white)
-                    .padding(.leading, 10).padding(.trailing, 12)
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .disabled(scrollMode)
             .opacity(scrollMode ? 0.35 : 1)
@@ -254,10 +271,20 @@ struct iPadReaderView: View {
         guard autoplay, !scrollMode else { return }
         let steps = 60
         for i in 0..<steps {
-            guard autoplay else { countdownProgress = 0; return }
+            guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
             await MainActor.run { countdownProgress = Double(i) / Double(steps) }
-            try? await Task.sleep(for: .milliseconds(Int(autoplaySpeed * 1000) / steps))
+            do {
+                try await Task.sleep(for: .milliseconds(Int(autoplaySpeed * 1000) / steps))
+            } catch {
+                // Cancelled — e.g. the user manually swiped to another page. `try?` here
+                // would swallow the CancellationError and let the loop spin through its
+                // remaining iterations instantly, still advancing the page at the end and
+                // silently skipping an extra page on top of the manual swipe.
+                countdownProgress = 0
+                return
+            }
         }
+        guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
         await MainActor.run {
             countdownProgress = 0
             if currentPage < pageCount - 1 { currentPage += 1 }

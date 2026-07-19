@@ -158,6 +158,7 @@ final class LibraryViewModel: ObservableObject {
         reload()
         startWatcher()
         reparseMetaIfNeeded()
+        rehashLibraryIfNeeded()
         refreshDuplicates()
 
         // Restore library drill-down state (group/series) after initial data load
@@ -210,6 +211,18 @@ final class LibraryViewModel: ObservableObject {
             LibraryScanner.shared.reparseAllMeta(libraryPath: path)
             UserDefaults.standard.set(true, forKey: key)
             DispatchQueue.main.async { self?.reload() }
+        }
+    }
+
+    // One-time migration: recompute every comic's file_hash with the current algorithm.
+    // See LibraryScanner.rehashAll() — bump the version key if fileHash()'s formula changes.
+    func rehashLibraryIfNeeded() {
+        let key = "fileHashRehashV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        guard !libraryPath.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            LibraryScanner.shared.rehashAll()
+            UserDefaults.standard.set(true, forKey: key)
         }
     }
 
@@ -342,6 +355,10 @@ final class LibraryViewModel: ObservableObject {
         selectedComic     = nil
         bulkMode          = false
         selectedComicIds.removeAll()
+        // A macOS main-menu shortcut (Cmd+1…8) still fires even while the Series Manager
+        // sheet is open. Since it's bound to selectedSeries, leaving it presented after that
+        // becomes nil shows a permanently blank sheet the user can only escape via Cancel.
+        showSeriesManager = false
         if case .tag = item { useGroupedView = false } else { useGroupedView = true }
         saveNavigationState()
         reload()
@@ -363,9 +380,14 @@ final class LibraryViewModel: ObservableObject {
 
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
         let pub = activePublisher
+        reloadGeneration += 1
+        let gen = reloadGeneration
         Task.detached(priority: .userInitiated) { [db] in
             let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
             await MainActor.run {
+                // A newer navigation (drilled elsewhere, or backed out) happened while this
+                // query was in flight — applying it now would resurrect an abandoned screen.
+                guard gen == self.reloadGeneration else { return }
                 self.selectedGroup = group
                 if series.count == 1 {
                     self.selectedSeries = series[0].series
@@ -391,9 +413,14 @@ final class LibraryViewModel: ObservableObject {
             comics = []
             if let group = selectedGroup {
                 let pub = activePublisher
+                reloadGeneration += 1
+                let gen = reloadGeneration
                 Task.detached(priority: .userInitiated) { [db] in
                     let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
-                    await MainActor.run { self.seriesGroups = series }
+                    await MainActor.run {
+                        guard gen == self.reloadGeneration else { return }
+                        self.seriesGroups = series
+                    }
                 }
             } else {
                 loadCharacterGroups()
@@ -512,6 +539,10 @@ final class LibraryViewModel: ObservableObject {
     func closeReader() { readerComic = nil }
 
     func clearLibrary(resetPreferences: Bool = false) {
+        // An in-flight scan writing to the comics table concurrently with clearAll() could
+        // repopulate rows right after the clear, or race with the thumbnail cache wipe below.
+        LibraryScanner.shared.cancel()
+        isScanning = false
         db.clearAll()
         ThumbnailCache.shared.clearAll()
         CSSearchableIndex.default().deleteAllSearchableItems { _ in }

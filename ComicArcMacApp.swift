@@ -65,7 +65,7 @@ struct ComicArcApp: App {
             CommandMenu("Library") {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(vm.libraryPath.isEmpty)
+                    .disabled(vm.libraryPath.isEmpty || vm.isScanning || vm.isResyncing)
                 Button("Resync Library") { vm.resyncLibrary() }
                     .keyboardShortcut("r", modifiers: [.command, .shift, .option])
                     .disabled(vm.libraryPath.isEmpty || vm.isResyncing || vm.isScanning)

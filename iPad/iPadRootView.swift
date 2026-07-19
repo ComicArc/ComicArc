@@ -21,6 +21,13 @@ struct iPadRootView: View {
         .navigationSplitViewStyle(.balanced)
         .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library…")
         .onChange(of: vm.destination) { selectedComic = nil }
+        // Single shared reader-presentation point (matches Mac's ContentView) so every path
+        // that opens a comic — the detail column's Read button, a grid tile's context menu —
+        // goes through the same vm.readerComic instead of each needing its own local state.
+        .fullScreenCover(item: $vm.readerComic) { comic in
+            iPadReaderView(comic: comic, onClose: { vm.closeReader() })
+                .environmentObject(vm)
+        }
     }
 }
 
@@ -164,7 +171,6 @@ private struct iPadContentColumn: View {
 private struct iPadDetailColumn: View {
     let comic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
-    @State private var openReader = false
 
     var body: some View {
         Group {
@@ -174,7 +180,7 @@ private struct iPadDetailColumn: View {
                         iPadComicHero(comic: comic)
 
                         HStack(spacing: 12) {
-                            Button(action: { openReader = true }) {
+                            Button(action: { vm.openReader(comic) }) {
                                 Label(comic.isStarted ? "Continue" : "Read", systemImage: "book.fill")
                                     .frame(maxWidth: .infinity)
                             }
@@ -217,10 +223,6 @@ private struct iPadDetailColumn: View {
                 }
                 .navigationTitle(comic.title)
                 .navigationBarTitleDisplayMode(.large)
-                .fullScreenCover(isPresented: $openReader) {
-                    iPadReaderView(comic: comic, onClose: { openReader = false })
-                        .environmentObject(vm)
-                }
             } else {
                 ContentUnavailableView("Select a Comic",
                                        systemImage: "book.closed",
@@ -362,9 +364,22 @@ private struct iPadComicHero: View {
 
 private struct iPadComicMeta: View {
     let comic: Comic
+    @EnvironmentObject var vm: LibraryViewModel
+    @State private var tags: [Tag] = []
+    @State private var newTagText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Divider().padding(.horizontal)
+            HStack {
+                Label("Rating", systemImage: "star").foregroundStyle(.secondary)
+                Spacer()
+                StarRatingLarge(rating: comic.rating) { star in
+                    vm.setRating(comic, rating: star == comic.rating ? 0 : star)
+                }
+            }
+            .padding()
+
             if comic.progress > 0 {
                 metaRow("Progress",
                         value: "Page \(comic.progress) of \(comic.pageCount)",
@@ -379,28 +394,42 @@ private struct iPadComicMeta: View {
             if let pencil = comic.penciller, !pencil.isEmpty { metaRow("Penciller", value: pencil,  icon: "paintbrush") }
             if let arc    = comic.storyArc, !arc.isEmpty     { metaRow("Story Arc", value: arc,     icon: "books.vertical") }
 
-            if !comic.tags.isEmpty {
-                Divider().padding(.horizontal)
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Tags", systemImage: "tag").font(.subheadline).foregroundStyle(.secondary)
-                        .padding(.horizontal)
+            Divider().padding(.horizontal)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Tags", systemImage: "tag").font(.subheadline).foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                if !tags.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(comic.tags, id: \.self) { tag in
-                                Text("#\(tag)")
-                                    .font(.caption)
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(Color.accentColor.opacity(0.12))
-                                    .foregroundStyle(Color.accentColor)
-                                    .clipShape(Capsule())
+                            ForEach(tags) { tag in
+                                HStack(spacing: 4) {
+                                    Text("#\(tag.name)").font(.caption)
+                                    Button { removeTag(tag) } label: {
+                                        Image(systemName: "xmark.circle.fill").font(.caption2)
+                                    }
+                                    .accessibilityLabel("Remove tag \(tag.name)")
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(Color.accentColor.opacity(0.12))
+                                .foregroundStyle(Color.accentColor)
+                                .clipShape(Capsule())
                             }
                         }
                         .padding(.horizontal)
                     }
                 }
-                .padding(.vertical, 10)
+                HStack(spacing: 6) {
+                    TextField("Add tag…", text: $newTagText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { addTag() }
+                    Button("Add") { addTag() }
+                        .disabled(newTagText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(.horizontal)
             }
+            .padding(.vertical, 10)
         }
+        .task(id: comic.id) { loadTags() }
     }
 
     @ViewBuilder
@@ -412,6 +441,29 @@ private struct iPadComicMeta: View {
             Text(value).foregroundStyle(.primary)
         }
         .padding()
+    }
+
+    private func loadTags() {
+        let comicId = comic.id
+        Task.detached(priority: .userInitiated) {
+            let t = DatabaseManager.shared.tags(for: comicId)
+            await MainActor.run { tags = t }
+        }
+    }
+
+    private func addTag() {
+        let name = newTagText.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        vm.addTag(name: name, to: comic)
+        newTagText = ""
+        loadTags()
+        vm.reload()
+    }
+
+    private func removeTag(_ tag: Tag) {
+        vm.removeTag(tagId: tag.id, from: comic)
+        loadTags()
+        vm.reload()
     }
 }
 

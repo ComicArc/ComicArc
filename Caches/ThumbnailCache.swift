@@ -69,16 +69,17 @@ final class ThumbnailCache: @unchecked Sendable {
         return img
     }
 
+    // Only ever called from a background queue (prewarm) — bridges to the same inFlight-
+    // coordinated path `thumbnail(for:completion:)` uses, so a prewarm pass and a visible
+    // grid cell requesting the same comic's cover don't independently extract and write the
+    // same disk file at once. Would deadlock if called from the main thread, since the
+    // completion it waits on is always dispatched onto main.
     func thumbnailSync(for comic: Comic) -> PlatformImage? {
-        let key = NSNumber(value: comic.id)
-        if let cached = cache.object(forKey: key) { return cached }
-        let diskURL = coversDir.appendingPathComponent("\(comic.id).jpg")
-        if let img = validatedDiskImage(at: diskURL) { cache.setObject(img, forKey: key, cost: img.byteSize); return img }
-        try? FileManager.default.removeItem(at: diskURL)
-        let img = extract(from: comic.filePath)
-        let thumb = img.flatMap { PlatformImage.resized(source: $0, to: thumbSize) }
-        if let thumb { cache.setObject(thumb, forKey: key, cost: thumb.byteSize); save(thumb, to: diskURL) }
-        return thumb
+        let sema = DispatchSemaphore(value: 0)
+        var result: PlatformImage?
+        thumbnail(for: comic) { img in result = img; sema.signal() }
+        sema.wait()
+        return result
     }
 
     // Returns the image only if the file exists and is non-zero in size.

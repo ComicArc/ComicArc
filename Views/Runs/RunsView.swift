@@ -534,6 +534,21 @@ struct RunItemRow: View {
         .accessibilityValue(item.comic.isFinished ? "Read" : item.comic.isStarted ? "In progress" : "Unread")
         .accessibilityHint("Double-tap to open")
         .accessibilityAddTraits(.isButton)
+        // Collapsing the row into one element (above) hides the visible Notes button and
+        // context-menu actions from VoiceOver entirely unless re-exposed here.
+        .accessibilityAction(named: item.notes.isEmpty ? "Add Notes" : "Edit Notes") {
+            notesText = item.notes
+            showNotes = true
+        }
+        .accessibilityAction(named: item.comic.isFinished ? "Mark as Unread" : "Mark as Read") {
+            if item.comic.isFinished { LibraryViewModel.shared.markUnread(item.comic) }
+            else { LibraryViewModel.shared.markRead(item.comic) }
+            onChange()
+        }
+        .accessibilityAction(named: "Remove from Reading Order") {
+            LibraryViewModel.shared.removeFromRun(runId: runId, comicIds: [item.comic.id])
+            onChange()
+        }
         .onAppear { ThumbnailCache.shared.thumbnail(for: item.comic) { thumbnail = $0 } }
     }
 

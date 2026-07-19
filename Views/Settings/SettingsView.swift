@@ -6,7 +6,11 @@ struct SettingsView: View {
 
     @AppStorage("libraryPath")      private var libraryPath      = ""
     @AppStorage("scrollMode")       private var scrollMode       = false
-    @AppStorage("cbrEnabled")       private var cbrEnabled       = false
+    // Default true: CBR was unconditionally supported before this toggle was wired up to
+    // anything, so a false default would silently stop scanning CBR files for every
+    // existing user the moment this ships, since nobody would have had a reason to turn on
+    // a toggle that, until now, did nothing.
+    @AppStorage("cbrEnabled")       private var cbrEnabled       = true
     @AppStorage("autoplaySpeed")    private var autoplaySpeed: Double = 6.0
     @AppStorage("progressFormat")   private var progressFormatRaw = ProgressFormat.fraction.rawValue
     @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
@@ -22,6 +26,7 @@ struct SettingsView: View {
     @State private var showClearConfirm      = false
     @State private var showOnboardingConfirm = false
     @State private var backupErrorMessage: String?
+    @State private var restartWatcherWorkItem: DispatchWorkItem?
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -39,10 +44,19 @@ struct SettingsView: View {
                         Button("Browse…") { pickFolder() }
                     }
                     .onChange(of: libraryPath) { _, newPath in
-                        var isDir: ObjCBool = false
-                        guard FileManager.default.fileExists(atPath: newPath, isDirectory: &isDir),
-                              isDir.boolValue else { return }
-                        vm.restartWatcher()
+                        // Debounced: typing/editing a path can pass through several valid
+                        // intermediate directories (e.g. "/Users" before "/Users/x/Comics"),
+                        // and without this each one would synchronously stop+recreate the
+                        // FSEvents watcher mid-keystroke.
+                        restartWatcherWorkItem?.cancel()
+                        let work = DispatchWorkItem {
+                            var isDir: ObjCBool = false
+                            guard FileManager.default.fileExists(atPath: newPath, isDirectory: &isDir),
+                                  isDir.boolValue else { return }
+                            vm.restartWatcher()
+                        }
+                        restartWatcherWorkItem = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                     }
 
                     Button("Scan Now") { vm.scan() }

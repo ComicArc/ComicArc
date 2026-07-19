@@ -44,8 +44,8 @@ enum BackupService {
 
                     return ["comics": comicsJSON, "runs": runsJSON]
                 }.value
-                guard let data = try? JSONSerialization.data(withJSONObject: backup, options: .prettyPrinted) else { return }
                 do {
+                    let data = try JSONSerialization.data(withJSONObject: backup, options: .prettyPrinted)
                     try data.write(to: url, options: .atomic)
                     fileService.shareFile(url)
                 } catch {
@@ -84,6 +84,7 @@ enum BackupService {
                         if let rl = item["in_reading_list"] as? Bool { db.setInReadingList(comicId, rl) }
                         if let p = item["progress"] as? Int, p > 0 { db.updateProgress(comicId: comicId, page: p) }
                         if let rv = item["review"] as? String, !rv.isEmpty { db.setComicReview(comicId, review: rv) }
+                        if let n = item["notes"] as? String, !n.isEmpty { db.setComicNotes(comicId, notes: n) }
                         if let tags = item["tags"] as? [String] {
                             for name in tags { db.addTag(name: name, to: comicId) }
                         }
@@ -104,7 +105,11 @@ enum BackupService {
                                 .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
                                 .compactMap { i in (i["file_path"] as? String).flatMap { comicIdByPath[$0] } }
                             guard !orderedComicIds.isEmpty else { continue }
-                            let runId = db.createRun(title: title, description: r["description"] as? String ?? "")
+                            // Importing the same backup twice (a retry, or restoring on a
+                            // second device then again on a third) shouldn't duplicate every
+                            // run — reuse an existing run with the same title instead.
+                            let runId = db.runId(withTitle: title)
+                                ?? db.createRun(title: title, description: r["description"] as? String ?? "")
                             db.addToRun(runId: runId, comicIds: orderedComicIds)
                             db.reorderRun(runId: runId, orderedIds: orderedComicIds)
                             if let rating = r["rating"] as? Int {

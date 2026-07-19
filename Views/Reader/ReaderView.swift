@@ -72,6 +72,7 @@ struct ReaderView: View {
     // Reader features
     @State private var doublePage        = false
     @State private var currentPageIsSpread = false  // updated by PagedModeView after each load
+    @State private var saveProgressWorkItem: DispatchWorkItem?
     @State private var autoplay          = false
     @State private var countdownProgress = 0.0
     @AppStorage("autoplaySpeed") private var autoplayInterval: Double = 6.0
@@ -208,6 +209,10 @@ struct ReaderView: View {
             saveProgress(); logSession(); hideTask?.cancel()
             windowService.showCursor()
             windowService.exitImmersiveMode()
+            // Otherwise up to 30 full-resolution decoded pages from this comic stay
+            // resident in PageCache until unrelated LRU pressure from other comics
+            // eventually pushes them out.
+            PageCache.shared.evict(comicId: comic.id)
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
         .sheet(isPresented: $showShortcuts) { shortcutsSheet }
@@ -466,7 +471,7 @@ struct ReaderView: View {
                     Slider(
                         value: Binding(
                             get: { Double(currentPage) },
-                            set: { currentPage = Int($0.rounded()); saveProgress() }
+                            set: { currentPage = Int($0.rounded()); saveProgressDebounced() }
                         ),
                         in: 0...Double(max(1, comic.pageCount - 1)),
                         step: 1
@@ -672,6 +677,16 @@ struct ReaderView: View {
         ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
     }
 
+    // Dragging the page scrubber fires a set() on every intermediate value — saving on each
+    // one is a synchronous SQLite write per tick across potentially hundreds of pages in one
+    // gesture. Debounced so only the value the drag actually settles on gets written.
+    private func saveProgressDebounced() {
+        saveProgressWorkItem?.cancel()
+        let work = DispatchWorkItem { saveProgress() }
+        saveProgressWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
     private func logSession() {
         ReadingSessionService.shared.logSession(comicId: comic.id, from: sessionStartPage, to: currentPage)
     }
@@ -680,10 +695,20 @@ struct ReaderView: View {
         guard autoplay, !scrollMode else { return }
         let steps = 60
         for i in 0..<steps {
-            guard autoplay else { countdownProgress = 0; return }
+            guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
             await MainActor.run { countdownProgress = Double(i) / Double(steps) }
-            try? await Task.sleep(for: .milliseconds(Int(autoplayInterval * 1000) / steps))
+            do {
+                try await Task.sleep(for: .milliseconds(Int(autoplayInterval * 1000) / steps))
+            } catch {
+                // Cancelled — e.g. the user manually turned the page. `try?` here would
+                // swallow the CancellationError and let the loop spin through its remaining
+                // iterations instantly, still calling nextPage() at the end and silently
+                // skipping an extra page on top of the manual turn.
+                countdownProgress = 0
+                return
+            }
         }
+        guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
         await MainActor.run {
             countdownProgress = 0
             if currentPage < comic.pageCount - 1 { nextPage() }
@@ -742,9 +767,19 @@ struct PagedModeView: View {
                 if isLoading {
                     ProgressView().tint(.white)
                 } else if effectiveDoublePage, let left = imageLeft {
+                    // imageLeft is always the earlier page (currentPage) and imageRight the
+                    // later one (currentPage + 1). In RTL/manga reading order the eye should
+                    // encounter the later page first, so the physical left/right placement
+                    // needs to mirror — otherwise a spread always renders in LTR order even
+                    // with RTL enabled, breaking artwork that's meant to be read right-to-left.
                     HStack(spacing: 1) {
-                        pageImage(left, size: geo.size)
-                        if let right = imageRight { pageImage(right, size: geo.size) }
+                        if rtl {
+                            if let right = imageRight { pageImage(right, size: geo.size) }
+                            pageImage(left, size: geo.size)
+                        } else {
+                            pageImage(left, size: geo.size)
+                            if let right = imageRight { pageImage(right, size: geo.size) }
+                        }
                     }
                 } else if let img = imageLeft {
                     pageImage(img, size: geo.size)
@@ -800,11 +835,20 @@ struct PagedModeView: View {
         isLoading = true
         imageLeft = nil; imageRight = nil
         PageCache.shared.load(comic: comic, page: page) { img in
+            // PageCache dispatches decodes onto a concurrent queue, so completion order
+            // across overlapping requests isn't guaranteed — a fast scrub through many
+            // pages can start several loads before any complete. Without this check, a
+            // slow, now-abandoned page's decode finishing after a newer one would silently
+            // overwrite what the scrubber says is the current page.
+            guard page == self.currentPage else { return }
             self.imageLeft  = img
             self.isLoading  = false
             self.isSpread   = self.isSpreadPage
             if self.effectiveDoublePage && page + 1 < self.comic.pageCount {
-                PageCache.shared.load(comic: self.comic, page: page + 1) { self.imageRight = $0 }
+                PageCache.shared.load(comic: self.comic, page: page + 1) { img2 in
+                    guard page == self.currentPage else { return }
+                    self.imageRight = img2
+                }
             }
         }
         PageCache.shared.prefetch(comic: comic, around: page, count: 4)
