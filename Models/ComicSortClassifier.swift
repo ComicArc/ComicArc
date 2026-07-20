@@ -36,8 +36,15 @@ enum ComicSortClassifier {
     /// are pushed into a distinct upper band, ordered the same way within it.
     static let specialBandOffset = 1_000_000
 
+    /// Mainline positions are spaced 100 apart (rather than 1) specifically to leave room
+    /// for positionSpecialsChronologically(DatabaseManager.swift) to interpolate a dated
+    /// special issue's position between two consecutive mainline issues without collision —
+    /// e.g. issue #12 at 1200 and #13 at 1300 leaves room for an annual at 1250. A dense
+    /// (gap-of-1) scheme would make every chronological insertion "no room" by construction.
+    static let mainlinePositionStride = 100
+
     static func seededPosition(issueNumber: String?, title: String, series: String, numericIssueOrId: Int) -> Int {
         let band = isSpecialIssue(issueNumber: issueNumber, title: title, series: series) ? specialBandOffset : 0
-        return band + numericIssueOrId
+        return band + numericIssueOrId * mainlinePositionStride
     }
 }

@@ -358,6 +358,7 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN language_iso TEXT")
         exec("ALTER TABLE comics ADD COLUMN deleted_at TIMESTAMP")
         exec("ALTER TABLE comics ADD COLUMN meta_edited INTEGER NOT NULL DEFAULT 0")
+        exec("ALTER TABLE comics ADD COLUMN cover_month INTEGER")
 
         // Mainline issues seed into the low range sorted by issue number (or insertion order
         // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
@@ -367,11 +368,13 @@ final class DatabaseManager: @unchecked Sendable {
         exec("""
         UPDATE comics SET position =
             is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
-            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
+            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
         WHERE position IS NULL
         """)
 
         resortSpecialIssuesIfNeeded()
+        widenMainlinePositionStrideIfNeeded()
+        positionSpecialsChronologically()
     }
 
     // One-time re-seed for libraries that were scanned before special-issue-aware sorting
@@ -386,9 +389,117 @@ final class DatabaseManager: @unchecked Sendable {
         exec("""
         UPDATE comics SET position =
             is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
-            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
+            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
         """)
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('specialIssueSortV1')")
+    }
+
+    // Re-seeds position with a wider stride between mainline issues (100 apart instead of 1)
+    // so positionSpecialsChronologically() below has room to interpolate a dated annual
+    // between two consecutive issues. Libraries that already ran specialIssueSortV1 before
+    // this stride existed would otherwise be stuck on the old dense scheme forever, since
+    // that migration never re-runs. One-time and separately gated via its own migration
+    // marker — same tradeoff specialIssueSortV1 above already accepted (a blanket re-seed
+    // can clobber a manual reorder's dense position values), but it only happens once per
+    // library, not on every launch.
+    private func widenMainlinePositionStrideIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'positionStride100V1'") > 0
+        guard !alreadyRun else { return }
+        exec("""
+        UPDATE comics SET position =
+            is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+            + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
+        """)
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('positionStride100V1')")
+    }
+
+    // migrate()'s NULL-position seeding only covers rows that already existed at app launch —
+    // every comic inserted by a scan afterward starts with position = NULL (see _insertRow)
+    // and would otherwise stay that way, falling back to COALESCE(position, id) everywhere
+    // position is read (roughly insertion order, not special-aware) until the next app
+    // restart re-runs migrate(). Called after every scan so newly-imported comics — including
+    // any new specials that positionSpecialsChronologically() needs a real position to move —
+    // get seeded immediately instead of waiting for a relaunch.
+    func seedMissingPositions() {
+        queue.sync {
+            exec("""
+            UPDATE comics SET position =
+                is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+                + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
+            WHERE position IS NULL
+            """)
+        }
+    }
+
+    // Places a dated special issue (annual/one-shot/etc., per is_special_issue) between the
+    // two mainline issues in its series that chronologically bracket it, using cover year +
+    // month from ComicInfo.xml — e.g. an Annual cover-dated August 2005 sitting between
+    // Batman #12 (June 2005) and #13 (September 2005). This is the reconciliation between an
+    // earlier bug fix (specials were interleaving with mainline issues essentially at random,
+    // fixed by always sorting them after every mainline issue — see resortSpecialIssuesIfNeeded)
+    // and a later request to place annuals chronologically: a *confident* chronological
+    // placement is strictly better than always-last, but a guess with no real date data would
+    // reintroduce exactly the bug that was fixed. So this only overrides the default when:
+    //   1. the special itself has both year and cover_month parsed from ComicInfo.xml, and
+    //   2. at least two dated mainline issues in the same series bracket that date (never
+    //      guess "goes after the last known issue" — that's already what always-last gives), and
+    //   3. there's still room between those two mainline positions (mainlinePositionStride
+    //      leaves 100 of headroom per issue specifically for this; a manually-reordered series
+    //      collapses back to a dense 0,1,2... sequence via reorderComics(), which has no room —
+    //      so a user's manual order is left alone rather than being fought on every scan).
+    // Not a one-time migration: called after every scan and metadata refresh so newly-added
+    // or newly-dated specials keep getting placed as more of the library gains date metadata.
+    func positionSpecialsChronologically() {
+        queue.sync {
+            struct Row { let id: Int64; let seriesKey: String; let special: Bool
+                         let year: Int?; let month: Int?; let position: Int }
+            var rows: [Row] = []
+            let sql = """
+            SELECT id, publisher || ':' || series,
+                   is_special_issue(issue_number, title, series), year, cover_month,
+                   COALESCE(position, id)
+            FROM comics WHERE deleted_at IS NULL
+            """
+            var raw: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(Row(
+                    id: sqlite3_column_int64(stmt, 0),
+                    seriesKey: String(cString: sqlite3_column_text(stmt, 1)),
+                    special: sqlite3_column_int(stmt, 2) != 0,
+                    year:  sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil,
+                    month: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 4)) : nil,
+                    position: Int(sqlite3_column_int64(stmt, 5))
+                ))
+            }
+            sqlite3_finalize(stmt)
+
+            var updates: [(Int64, Int)] = []
+            for (_, group) in Dictionary(grouping: rows, by: \.seriesKey) {
+                let mainlineDated = group
+                    .filter { !$0.special && $0.year != nil && $0.month != nil }
+                    .sorted { $0.position < $1.position }
+                guard mainlineDated.count >= 2 else { continue }
+
+                for special in group where special.special {
+                    guard let y = special.year, let m = special.month else { continue }
+                    let specialKey = y * 100 + m
+                    guard let afterIdx = mainlineDated.firstIndex(where: { $0.year! * 100 + $0.month! > specialKey }),
+                          afterIdx > 0 else { continue }
+                    let before = mainlineDated[afterIdx - 1]
+                    let after  = mainlineDated[afterIdx]
+                    guard after.position - before.position > 1 else { continue }
+                    updates.append((special.id, before.position + (after.position - before.position) / 2))
+                }
+            }
+            guard !updates.isEmpty else { return }
+            exec("BEGIN")
+            for (id, pos) in updates {
+                _ = run("UPDATE comics SET position = ? WHERE id = ?", args: [pos, id])
+            }
+            exec("COMMIT")
+        }
     }
 
     // MARK: - Comics
@@ -433,7 +544,14 @@ final class DatabaseManager: @unchecked Sendable {
         var id: String { rawValue }
         var clause: String {
             switch self {
-            case .publisher: return "c.publisher, c.series, is_special_issue(c.issue_number, c.title, c.series), COALESCE(CAST(NULLIF(c.issue_number,'') AS INTEGER), c.id), c.title"
+            // Reads the same `position` column positionSpecialsChronologically() maintains,
+            // rather than re-deriving "specials always last" live from is_special_issue() —
+            // that live formula can't express a dated annual sitting *between* two mainline
+            // issues, only always-after-everything. position already encodes both cases
+            // (mainline issues by number, specials either chronologically interpolated when
+            // dated or in the always-last band otherwise), so this is the single source of
+            // truth for reading order rather than two formulas that could drift apart.
+            case .publisher: return "c.publisher, c.series, COALESCE(c.position, is_special_issue(c.issue_number, c.title, c.series) * \(ComicSortClassifier.specialBandOffset) + c.id), c.title"
             case .title:     return "c.title"
             case .dateAdded: return "c.added_at DESC"
             case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
@@ -499,6 +617,7 @@ final class DatabaseManager: @unchecked Sendable {
         let title: String, filePath: String, publisher: String, character: String?
         let series: String, issueNumber: String?, pageCount: Int, writer: String?
         let penciller: String?, year: Int?, storyArc: String?, languageIso: String?, fileHash: String?
+        var coverMonth: Int? = nil
     }
 
     func insert(comic: (title: String, filePath: String, publisher: String, character: String?,
@@ -519,7 +638,7 @@ final class DatabaseManager: @unchecked Sendable {
             for c in comics {
                 _insertRow(c.title, c.filePath, c.publisher, c.character,
                            c.series, c.issueNumber, c.pageCount, c.writer,
-                           c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash)
+                           c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash, c.coverMonth)
             }
             exec("COMMIT")
         }
@@ -528,16 +647,16 @@ final class DatabaseManager: @unchecked Sendable {
     private func _insertRow(_ title: String, _ filePath: String, _ publisher: String, _ character: String?,
                              _ series: String, _ issueNumber: String?, _ pageCount: Int, _ writer: String?,
                              _ penciller: String?, _ year: Int?, _ storyArc: String?, _ languageIso: String?,
-                             _ fileHash: String?) {
+                             _ fileHash: String?, _ coverMonth: Int? = nil) {
         _ = run("""
         INSERT OR IGNORE INTO comics
             (title, file_path, publisher, character, series, issue_number,
-             page_count, writer, penciller, year, story_arc, language_iso, file_hash)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, args: [title, filePath, publisher, character,
                     series, issueNumber, pageCount, writer,
                     penciller, year.map { Int64($0) }, storyArc,
-                    languageIso, fileHash])
+                    languageIso, fileHash, coverMonth.map { Int64($0) }])
     }
 
     // Comics imported when the archive was unreadable get page_count=0; scanner retries these.
@@ -1164,9 +1283,10 @@ final class DatabaseManager: @unchecked Sendable {
             exec("""
                 UPDATE comics SET position =
                     is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
-                    + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id)
+                    + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
             """)
         }
+        positionSpecialsChronologically()
     }
 
     func updateFileHash(id: Int64, hash: String) {

@@ -114,7 +114,8 @@ final class LibraryScanner: @unchecked Sendable {
                         issueNumber: meta.issueNumber, pageCount: pageCount(fp),
                         writer: meta.writer, penciller: meta.penciller,
                         year: meta.year, storyArc: meta.storyArc,
-                        languageIso: meta.languageIso, fileHash: hash
+                        languageIso: meta.languageIso, fileHash: hash,
+                        coverMonth: meta.coverMonth
                     ))
                     added += 1; knownPaths.insert(fp)
                     if let h = hash { knownHashes.insert(h) }
@@ -147,6 +148,15 @@ final class LibraryScanner: @unchecked Sendable {
                 else { stillCorrupted += 1 }
             }
             setState { $0.recovered = recovered; $0.stillCorrupted = stillCorrupted }
+        }
+
+        // Newly-inserted comics above start with position = NULL (seeded only at next app
+        // launch otherwise — see seedMissingPositions' doc comment); seed them now so any new
+        // annual/special just added gets a real position for the chronological pass below to
+        // move, and so custom-sort views don't fall back to raw insertion order in the meantime.
+        if !state.cancelled {
+            db.seedMissingPositions()
+            db.positionSpecialsChronologically()
         }
 
         setState { $0.running = false }
@@ -277,7 +287,8 @@ final class LibraryScanner: @unchecked Sendable {
     private struct ComicMeta {
         var title: String; var publisher: String; var character: String?
         var series: String; var issueNumber: String?; var writer: String?
-        var penciller: String?; var year: Int?; var storyArc: String?; var languageIso: String?
+        var penciller: String?; var year: Int?; var coverMonth: Int?
+        var storyArc: String?; var languageIso: String?
     }
 
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
@@ -298,10 +309,15 @@ final class LibraryScanner: @unchecked Sendable {
         // and breaks reading order for the whole series.
         let issueNum = extractIssueNumber(from: filename) ?? ci["IssueNumber"]
         let title = filename
+        // Month is only meaningful alongside a year (a bare "Month" with no "Year" can't be
+        // placed on a timeline), and only trusted when in the valid 1-12 range some ComicInfo.xml
+        // writers don't bother validating.
+        let year = ci["Year"].flatMap(Int.init)
+        let month = year != nil ? ci["Month"].flatMap(Int.init).flatMap { (1...12).contains($0) ? $0 : nil } : nil
         return ComicMeta(title: title, publisher: publisher, character: character,
                          series: series, issueNumber: issueNum,
                          writer: ci["Writer"], penciller: ci["Penciller"],
-                         year: ci["Year"].flatMap(Int.init),
+                         year: year, coverMonth: month,
                          storyArc: ci["StoryArc"], languageIso: ci["LanguageISO"])
     }
 
@@ -364,7 +380,7 @@ final class LibraryScanner: @unchecked Sendable {
         var data = Data()
         _ = try? archive.extract(entry, consumer: { data.append($0) })
         let keys: Set<String> = ["Series", "Title", "IssueNumber", "Publisher", "Writer", "Penciller",
-                                  "Year", "StoryArc", "LanguageISO", "Characters"]
+                                  "Year", "Month", "StoryArc", "LanguageISO", "Characters"]
 #if os(macOS)
         guard let root = try? XMLDocument(data: data).rootElement() else { return [:] }
         var result: [String: String] = [:]

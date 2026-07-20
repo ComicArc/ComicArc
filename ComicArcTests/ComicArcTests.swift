@@ -251,6 +251,21 @@ final class ComicArcTests: XCTestCase {
         XCTAssertLessThan(annual1, annual2)
     }
 
+    // Adjacent mainline issues must leave room between their seeded positions — this is the
+    // load-bearing invariant DatabaseManager.positionSpecialsChronologically() depends on to
+    // interpolate a dated annual between two consecutive issues without colliding with either.
+    func test_sortClassifier_seededPosition_adjacentMainlineIssuesLeaveInterpolationRoom() {
+        let issue12 = ComicSortClassifier.seededPosition(
+            issueNumber: "12", title: "Batman #12", series: "Batman", numericIssueOrId: 12)
+        let issue13 = ComicSortClassifier.seededPosition(
+            issueNumber: "13", title: "Batman #13", series: "Batman", numericIssueOrId: 13)
+        XCTAssertGreaterThan(issue13 - issue12, 1,
+            "Adjacent mainline positions must be spaced more than 1 apart so a chronologically-placed annual has room to sit between them")
+        let midpoint = issue12 + (issue13 - issue12) / 2
+        XCTAssertGreaterThan(midpoint, issue12)
+        XCTAssertLessThan(midpoint, issue13)
+    }
+
     // MARK: - Helpers
 
     private func roundTrip<T: Codable>(_ value: T) throws -> T {
