@@ -12,9 +12,6 @@ struct ContentView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.windowService) private var windowService
     @Environment(\.fileService)   private var fileService
-    #if os(macOS)
-    @Environment(\.openSettings)  private var openSettings
-    #endif
 
     @AppStorage("tutorialSeen") private var tutorialSeen = false
     @State private var showTutorial = false
@@ -119,6 +116,8 @@ struct ContentView: View {
             ReadingHistoryView()
         case .duplicates:
             DuplicatesView()
+        case .settings:
+            SettingsView()
         }
     }
 
@@ -201,11 +200,14 @@ struct ContentView: View {
             .allowsHitTesting(show)
         }
 
-        // Settings — previously only reachable via the app menu (ComicArc ▸ Settings…) or
-        // ⌘,, neither of which is obvious to someone used to an in-app settings screen.
+        // Settings now lives as a real in-app page (see detailContent's .settings case)
+        // rather than the floating macOS Settings{} scene — consistent with every other
+        // section (Stats, History, Runs) and reachable the same way: click to navigate,
+        // not a separate window to manage. ⌘, is remapped to the same vm.select(.settings)
+        // below rather than opening the old scene.
         #if os(macOS)
         ToolbarItem(id: "settings", placement: .primaryAction) {
-            Button { openSettings() } label: {
+            Button { vm.select(.settings) } label: {
                 Image(systemName: "gearshape")
             }
             .help("Settings (⌘,)")
@@ -290,9 +292,6 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @EnvironmentObject var vm: LibraryViewModel
-    #if os(macOS)
-    @Environment(\.openSettings) private var openSettings
-    #endif
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
 
@@ -339,16 +338,12 @@ struct SidebarView: View {
                 }
             }
 
-            // Settings was previously only reachable via the app menu or ⌘, — neither
-            // obvious to someone expecting an in-app settings screen. This opens the same
-            // Settings window as the toolbar gear icon and ⌘,.
+            // Settings renders as a real sidebar destination now (navRow, same as every other
+            // section) rather than a separate row that opened a floating window — highlights
+            // when selected and behaves identically to Stats/History/Runs.
             #if os(macOS)
             Section {
-                Button { openSettings() } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.primary)
+                navRow("Settings", icon: "gearshape", item: .settings)
             }
             #endif
         }

@@ -102,6 +102,7 @@ final class LibraryViewModel: ObservableObject {
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
         case .readingList:     return .readingList
+        case .settings:        return .settings
         default:               return .library
         }
     }
@@ -116,7 +117,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {

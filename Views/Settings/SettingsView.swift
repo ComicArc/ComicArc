@@ -39,6 +39,10 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
+            // Centered with a max width rather than filling the whole pane — a Form this
+            // wide (previously fixed at 520pt for the old floating-window popup) reads as a
+            // wall of controls edge-to-edge on a full-size window; capping it keeps label/
+            // control pairs readable while still using the real estate a fixed popup couldn't.
             Form {
                 Section {
                     Picker("Theme", selection: Binding(
@@ -221,9 +225,12 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .frame(maxWidth: 640)
+            .padding(.vertical, 24)
         }
-        .frame(width: 520)
-        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Design.appBackground)
+        .navigationTitle("Settings")
         .onAppear { if cbrEnabled { checkUnarAsync() } }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
         .confirmationDialog("Clear Library?", isPresented: $showClearConfirm, titleVisibility: .visible) {

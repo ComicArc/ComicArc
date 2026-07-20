@@ -106,6 +106,16 @@ struct ComicArcApp: App {
             CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .printItem) {}
 
+            // Settings is now an in-app page (ContentView's detailContent .settings case)
+            // rather than a separate floating Settings{} scene, so ⌘, and the app-menu
+            // "Settings…" item are redirected to select it instead of opening a new window —
+            // replacing the default .appSettings command group is what keeps macOS from
+            // auto-generating its own "Settings…" item pointing at a scene that no longer exists.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { vm.select(.settings) }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
+
             CommandMenu("Library") {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -156,12 +166,6 @@ struct ComicArcApp: App {
                 Button("Show Tutorial") { NotificationCenter.default.post(name: .showTutorial, object: nil) }
                 Button("Keyboard Shortcuts…") { NotificationCenter.default.post(name: .showReaderShortcuts, object: nil) }
             }
-        }
-        #endif
-
-        #if os(macOS)
-        Settings {
-            SettingsView().environmentObject(vm)
         }
         #endif
     }
