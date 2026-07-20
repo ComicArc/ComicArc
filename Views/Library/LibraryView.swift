@@ -299,6 +299,8 @@ struct ShelfCard: View {
 
 struct CharacterGroupGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @State private var draggedGroup: DatabaseManager.CharacterGroup?
+    @State private var dropTargetGroupId: String?
 
     private let columns = [GridItem(.adaptive(minimum: Design.groupCardWidth,
                                               maximum: Design.groupCardWidth + 20),
@@ -316,8 +318,29 @@ struct CharacterGroupGridView: View {
                 }
                 LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
                     ForEach(vm.characterGroups) { group in
+                        let isTarget = dropTargetGroupId == group.id && draggedGroup?.id != group.id
                         CharacterGroupCard(group: group)
                             .onTapGesture { vm.drillIntoGroup(group) }
+                            .onDrag {
+                                draggedGroup = group
+                                return NSItemProvider(object: NSString(string: group.id))
+                            }
+                            .onDrop(of: [.plainText],
+                                    isTargeted: Binding(
+                                        get: { isTarget },
+                                        set: { active in dropTargetGroupId = active ? group.id : nil }
+                                    )) { _, _ in
+                                guard let from = draggedGroup else { return false }
+                                vm.moveCharacterGroup(from: from, to: group)
+                                draggedGroup = nil; dropTargetGroupId = nil
+                                return true
+                            }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Design.cardCorner + 2)
+                                    .stroke(Design.brandGold, lineWidth: 2.5)
+                                    .opacity(isTarget ? 1 : 0)
+                                    .allowsHitTesting(false)
+                            )
                     }
                 }
                 .padding(Design.gridSpacing)

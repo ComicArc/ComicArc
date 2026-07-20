@@ -13,6 +13,8 @@ struct RunsListView: View {
     @State private var showingCreate  = false
     @State private var newRunTitle    = ""
     @State private var newRunDesc     = ""
+    @State private var draggedRunId:  Int64?
+    @State private var dropTargetRunId: Int64?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,10 +58,32 @@ struct RunsListView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(runs) { run in
+                            let isTarget = dropTargetRunId == run.id && draggedRunId != run.id
                             RunListCard(
                                 run: run,
                                 isSelected: selectedRun?.id == run.id
                             ) { selectedRun = run }
+                            .background(isTarget ? Design.brandGold.opacity(0.12) : Color.clear)
+                            .onDrag {
+                                draggedRunId = run.id
+                                return NSItemProvider(object: NSString(string: String(run.id)))
+                            }
+                            .onDrop(of: [.plainText],
+                                    isTargeted: Binding(
+                                        get: { isTarget },
+                                        set: { active in dropTargetRunId = active ? run.id : nil }
+                                    )) { _, _ in
+                                guard let fromId = draggedRunId,
+                                      let fromIdx = runs.firstIndex(where: { $0.id == fromId }),
+                                      let toIdx = runs.firstIndex(where: { $0.id == run.id }) else { return false }
+                                var list = runs
+                                let moved = list.remove(at: fromIdx)
+                                list.insert(moved, at: toIdx)
+                                runs = list
+                                DatabaseManager.shared.reorderRuns(orderedIds: list.map(\.id))
+                                draggedRunId = nil; dropTargetRunId = nil
+                                return true
+                            }
                             Rectangle().fill(Design.borderColor).frame(height: 1)
                         }
                     }

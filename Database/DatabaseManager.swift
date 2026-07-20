@@ -335,6 +335,14 @@ final class DatabaseManager: @unchecked Sendable {
             PRIMARY KEY (group_name, publisher, series)
         )
         """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS character_order (
+            group_name TEXT NOT NULL,
+            publisher  TEXT NOT NULL,
+            position   INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (group_name, publisher)
+        )
+        """)
 
         // Seed built-in shelves (INSERT OR IGNORE so they only run once)
         let builtins = [("Currently Reading", 0), ("Want to Read", 1), ("Finished", 2), ("DNF", 3)]
@@ -359,6 +367,7 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN deleted_at TIMESTAMP")
         exec("ALTER TABLE comics ADD COLUMN meta_edited INTEGER NOT NULL DEFAULT 0")
         exec("ALTER TABLE comics ADD COLUMN cover_month INTEGER")
+        exec("ALTER TABLE runs   ADD COLUMN position INTEGER")
 
         // Mainline issues seed into the low range sorted by issue number (or insertion order
         // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
@@ -998,7 +1007,7 @@ final class DatabaseManager: @unchecked Sendable {
                 LEFT JOIN comics c    ON c.id = ri.comic_id AND c.deleted_at IS NULL
                 LEFT JOIN reading_progress rp ON rp.comic_id = c.id
                 GROUP BY r.id
-                ORDER BY r.created_at DESC
+                ORDER BY COALESCE(r.position, r.id * -1)
             """
             return rows(sql, map: { s in
                 Run(id: colInt64(s, 0), title: colText(s, 1) ?? "", description: colText(s, 2) ?? "",
@@ -1012,6 +1021,20 @@ final class DatabaseManager: @unchecked Sendable {
     @discardableResult
     func createRun(title: String, description: String) -> Int64 {
         queue.sync { run("INSERT INTO runs (title, description) VALUES (?,?)", args: [title, description]) }
+    }
+
+    // Mirrors reorderComics: called with the *entire* currently-displayed runs list every
+    // time, not just the two swapped, so position is never left partially NULL/non-NULL —
+    // allRuns()'s ORDER BY falls back to newest-first (r.id * -1) only for a library that's
+    // never had a manual drag at all.
+    func reorderRuns(orderedIds: [Int64]) {
+        queue.sync {
+            exec("BEGIN")
+            for (idx, id) in orderedIds.enumerated() {
+                _ = run("UPDATE runs SET position = ? WHERE id = ?", args: [idx, id])
+            }
+            exec("COMMIT")
+        }
     }
 
     /// Used by backup restore to avoid creating a duplicate run when the same backup is
@@ -1395,9 +1418,10 @@ final class DatabaseManager: @unchecked Sendable {
                 LEFT JOIN reading_progress rp ON c.id = rp.comic_id
                 LEFT JOIN series_covers sc ON sc.series = c.series AND sc.publisher = c.publisher
                 LEFT JOIN character_covers cc ON cc.group_name = (\(cleanChar)) AND cc.publisher = c.publisher
+                LEFT JOIN character_order co ON co.group_name = (\(cleanChar)) AND co.publisher = c.publisher
                 WHERE \(conds.joined(separator: " AND "))
                 GROUP BY c.publisher, \(cleanChar)
-                ORDER BY c.publisher, group_name
+                ORDER BY c.publisher, COALESCE(co.position, 999999), group_name
             """
             return rows(sql, args: args) { s in
                 let gn  = colText(s, 0) ?? ""
@@ -1549,6 +1573,20 @@ final class DatabaseManager: @unchecked Sendable {
             for (idx, series) in orderedSeries.enumerated() {
                 _ = run("INSERT OR REPLACE INTO series_order (group_name, publisher, series, position) VALUES (?,?,?,?)",
                         args: [groupName, publisher, series, idx])
+            }
+            exec("COMMIT")
+        }
+    }
+
+    // Same pattern as reorderSeriesGroups, one level up: manual ordering for the
+    // character/collection cards shown before drilling into a specific group's series.
+    func reorderCharacterGroups(publisher: String, orderedGroupNames: [String]) {
+        guard !orderedGroupNames.isEmpty else { return }
+        queue.sync {
+            exec("BEGIN")
+            for (idx, groupName) in orderedGroupNames.enumerated() {
+                _ = run("INSERT OR REPLACE INTO character_order (group_name, publisher, position) VALUES (?,?,?)",
+                        args: [groupName, publisher, idx])
             }
             exec("COMMIT")
         }

@@ -668,6 +668,26 @@ final class LibraryViewModel: ObservableObject {
                                orderedSeries: list.map(\.series))
     }
 
+    // Same pattern as moveSeriesGroup, one level up: reordering the character/collection
+    // cards before drilling into a specific group. Scoped to same-publisher moves only —
+    // characterGroups() can span multiple publishers when no publisher filter is active,
+    // and character_order's position is stored per-publisher, so a cross-publisher drag
+    // wouldn't have a coherent target position to land on.
+    func moveCharacterGroup(from: DatabaseManager.CharacterGroup, to: DatabaseManager.CharacterGroup) {
+        guard from.id != to.id, from.publisher == to.publisher else { return }
+        var list = characterGroups
+        guard let fromIdx = list.firstIndex(where: { $0.id == from.id }) else { return }
+        let moved = list.remove(at: fromIdx)
+        if let toIdx = list.firstIndex(where: { $0.id == to.id }) {
+            list.insert(moved, at: toIdx)
+        } else {
+            list.append(moved)
+        }
+        characterGroups = list
+        let sameGroups = list.filter { $0.publisher == from.publisher }.map(\.groupName)
+        db.reorderCharacterGroups(publisher: from.publisher, orderedGroupNames: sameGroups)
+    }
+
     func setCharacterGroupCover(group: DatabaseManager.CharacterGroup, imageURL: URL) {
         guard let path = ThumbnailCache.shared.saveCustomGroupCover(
             groupName: group.groupName,
