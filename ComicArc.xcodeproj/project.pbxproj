@@ -22,6 +22,7 @@
 
 		B0000000000000000000000E /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000E /* ReaderView.swift */; };
 		B0000000000000000000000F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000F /* SettingsView.swift */; };
+		B00000000000000000000061 /* RenameFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* RenameFilesView.swift */; };
 		B00000000000000000000010 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
 		B00000000000000000000011 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		B00000000000000000000020 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
@@ -62,6 +63,7 @@
 		IB000000000000000000000C /* ComicDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* ComicDetailView.swift */; };
 		IB000000000000000000000D /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000E /* ReaderView.swift */; };
 		IB000000000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000F /* SettingsView.swift */; };
+		IB0000000000000000000061 /* RenameFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* RenameFilesView.swift */; };
 		IB000000000000000000000F /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
 		IB0000000000000000000010 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		IB0000000000000000000011 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
@@ -113,6 +115,7 @@
 
 		A0000000000000000000000E /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		A0000000000000000000000F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000061 /* RenameFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameFilesView.swift; sourceTree = "<group>"; };
 		A00000000000000000000010 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* RunsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000020 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -349,6 +352,7 @@
 			isa = PBXGroup;
 			children = (
 				A0000000000000000000000F /* SettingsView.swift */,
+				A00000000000000000000061 /* RenameFilesView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -531,6 +535,7 @@
 
 				B0000000000000000000000E /* ReaderView.swift in Sources */,
 				B0000000000000000000000F /* SettingsView.swift in Sources */,
+				B00000000000000000000061 /* RenameFilesView.swift in Sources */,
 				B00000000000000000000010 /* StatsView.swift in Sources */,
 				B00000000000000000000011 /* RunsView.swift in Sources */,
 				B00000000000000000000020 /* OnboardingView.swift in Sources */,
@@ -582,6 +587,7 @@
 				IB000000000000000000000C /* ComicDetailView.swift in Sources */,
 				IB000000000000000000000D /* ReaderView.swift in Sources */,
 				IB000000000000000000000E /* SettingsView.swift in Sources */,
+				IB0000000000000000000061 /* RenameFilesView.swift in Sources */,
 				IB000000000000000000000F /* StatsView.swift in Sources */,
 				IB0000000000000000000010 /* RunsView.swift in Sources */,
 				IB0000000000000000000011 /* OnboardingView.swift in Sources */,

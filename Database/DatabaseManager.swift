@@ -440,7 +440,7 @@ final class DatabaseManager: @unchecked Sendable {
     // get seeded immediately instead of waiting for a relaunch.
     func seedMissingPositions() {
         queue.sync {
-            exec("""
+            _ = exec("""
             UPDATE comics SET position =
                 is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
                 + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
@@ -531,7 +531,7 @@ final class DatabaseManager: @unchecked Sendable {
                 guard let minPos = mainline.first?.position, let maxPos = mainline.last?.position,
                       maxPos > minPos, mainline.count >= 2 else { continue }
                 let undated = allSpecials
-                    .filter { !placedIds.contains($0.id) && $0.position >= specialBandOffset }
+                    .filter { !placedIds.contains($0.id) && $0.position >= ComicSortClassifier.specialBandOffset }
                     .sorted { $0.position < $1.position }
                 let n = undated.count
                 guard n > 0 else { continue }
@@ -550,7 +550,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    private var specialBandOffset: Int { ComicSortClassifier.specialBandOffset }
 
     // MARK: - Comics
 
@@ -1390,6 +1389,15 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             _ = run("UPDATE comics SET file_path = ? WHERE file_hash = ? AND deleted_at IS NULL",
                     args: [newPath, hash])
+        }
+    }
+
+    // Used by the "Rename Files to Match Library" tool — the file on disk has already been
+    // moved by the time this is called, this just keeps file_path in sync so the app doesn't
+    // treat the renamed file as missing on the next scan.
+    func updateFilePath(id: Int64, newPath: String) {
+        queue.sync {
+            _ = run("UPDATE comics SET file_path = ? WHERE id = ?", args: [newPath, id])
         }
     }
 

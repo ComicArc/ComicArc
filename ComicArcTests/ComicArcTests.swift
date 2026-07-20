@@ -266,6 +266,44 @@ final class ComicArcTests: XCTestCase {
         XCTAssertLessThan(midpoint, issue13)
     }
 
+    // MARK: - ComicFileNaming: "Rename Files to Match Library" tool
+
+    func test_fileNaming_regularIssue() {
+        let name = ComicFileNaming.idealFilename(
+            series: "Batman", issueNumber: "427", title: "Batman #427", fileExtension: "cbz")
+        XCTAssertEqual(name, "Batman #427.cbz")
+    }
+
+    func test_fileNaming_preservesSpecialKeyword() {
+        let name = ComicFileNaming.idealFilename(
+            series: "Amazing Spider-Man", issueNumber: "1",
+            title: "Amazing Spider-Man Annual #001", fileExtension: "cbz")
+        XCTAssertEqual(name, "Amazing Spider-Man Annual #1.cbz")
+    }
+
+    func test_fileNaming_doesNotDuplicateKeywordAlreadyInSeriesName() {
+        // Series name itself already says "Annual" (a dedicated annual-only series/folder) —
+        // appending it again would produce "... Annual Annual #1".
+        let name = ComicFileNaming.idealFilename(
+            series: "Amazing Spider-Man Annual", issueNumber: "1",
+            title: "Amazing Spider-Man Annual #1", fileExtension: "cbz")
+        XCTAssertEqual(name, "Amazing Spider-Man Annual #1.cbz")
+    }
+
+    func test_fileNaming_sanitizesIllegalPathCharacters() {
+        let name = ComicFileNaming.idealFilename(
+            series: "Batman: Legend Reborn", issueNumber: "1/2",
+            title: "Batman: Legend Reborn #1/2", fileExtension: "cbz")
+        XCTAssertFalse(name.contains("/"))
+        XCTAssertFalse(name.contains(":"))
+    }
+
+    func test_fileNaming_missingIssueNumberFallsBackToSeriesOnly() {
+        let name = ComicFileNaming.idealFilename(
+            series: "Watchmen", issueNumber: nil, title: "Watchmen", fileExtension: "cbz")
+        XCTAssertEqual(name, "Watchmen.cbz")
+    }
+
     // MARK: - Helpers
 
     private func roundTrip<T: Codable>(_ value: T) throws -> T {

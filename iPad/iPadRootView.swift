@@ -42,8 +42,49 @@ struct iPadRootView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .allowsHitTesting(true)
             }
+
+            // Matches Mac ContentView's scan-report banner — this had no iPad presence at
+            // all before (Mac-only), even though the scan itself and vm.showScanReport are
+            // shared. Anchored to the top since the undo toast already owns the bottom.
+            if vm.showScanReport {
+                VStack {
+                    iPadScanReportBanner
+                        .padding(.top, 8)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .animation(Design.springGentle, value: vm.pendingUndo?.message)
+        .animation(Design.springGentle, value: vm.showScanReport)
+    }
+
+    private var iPadScanReportBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Design.brandGold).font(.caption)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Library Updated").font(.caption.bold()).foregroundStyle(.white)
+                Text(iPadScanReportLine).font(.caption2).foregroundStyle(.white.opacity(0.7))
+            }
+            Button { vm.dismissScanReport() } label: {
+                Image(systemName: "xmark").font(.caption2)
+            }
+            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 20)
+    }
+
+    private var iPadScanReportLine: String {
+        let s = vm.scanState
+        var parts: [String] = []
+        if s.added > 0     { parts.append("\(s.added) added") }
+        if s.removed > 0   { parts.append("\(s.removed) missing") }
+        if s.recovered > 0 { parts.append("\(s.recovered) recovered") }
+        if s.stillCorrupted > 0 { parts.append("\(s.stillCorrupted) unreadable") }
+        return parts.joined(separator: ", ")
     }
 
     private func iPadUndoToast(_ action: LibraryViewModel.UndoableAction) -> some View {
@@ -310,6 +351,12 @@ private struct iPadComicGrid: View {
     let comics: [Comic]
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
+    // Mac's LibraryGridView has drag-reorder (onDrag/onDrop); this grid had none at all —
+    // the underlying order already reflects any reordering done on Mac (same DB), but there
+    // was no way to actually author an order from iPad itself. Same gesture works via
+    // long-press-and-drag on iOS too.
+    @State private var draggedId: Int64?
+    @State private var dropTargetId: Int64?
 
     private let columns = [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 16)]
 
@@ -328,12 +375,31 @@ private struct iPadComicGrid: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 16) {
                     ForEach(comics) { comic in
+                        let isTarget = dropTargetId == comic.id && draggedId != comic.id
                         iPadComicTile(comic: comic)
                             .onTapGesture { selectedComic = comic }
                             .overlay(
                                 RoundedRectangle(cornerRadius: Design.cardCorner)
                                     .stroke(Design.brandBlue, lineWidth: selectedComic?.id == comic.id ? 2 : 0)
                             )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Design.cardCorner)
+                                    .stroke(Design.brandGold, lineWidth: isTarget ? 3 : 0)
+                            )
+                            .onDrag {
+                                draggedId = comic.id
+                                return NSItemProvider(object: NSString(string: String(comic.id)))
+                            }
+                            .onDrop(of: [.plainText],
+                                    isTargeted: Binding(
+                                        get: { isTarget },
+                                        set: { active in dropTargetId = active ? comic.id : nil }
+                                    )) { _, _ in
+                                guard let from = draggedId else { return false }
+                                vm.moveComic(id: from, before: comic.id)
+                                draggedId = nil; dropTargetId = nil
+                                return true
+                            }
                     }
                 }
                 .padding()
@@ -556,6 +622,7 @@ struct iPadSettingsView: View {
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
     @AppStorage("libraryPath")   private var libraryPath   = ""
     @State private var showClearConfirm = false
+    @State private var showRenameFiles  = false
     @State private var cacheCleared     = false
     @State private var comicCount       = 0
     @State private var backupErrorMessage: String?
@@ -691,6 +758,18 @@ struct iPadSettingsView: View {
             }
 
             Section {
+                Text("ComicArc reads folders as Publisher / Character / Series, and file names as \"Series #Issue\" (e.g. \"Batman #427.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button {
+                    showRenameFiles = true
+                } label: {
+                    Label("Rename Files to Match Library…", systemImage: "textformat")
+                }
+            } header: {
+                Text("File Organization")
+            }
+
+            Section {
                 HStack {
                     Label("Comics imported", systemImage: "books.vertical")
                     Spacer()
@@ -738,6 +817,7 @@ struct iPadSettingsView: View {
         .alert("Cache cleared", isPresented: $cacheCleared) {
             Button("OK", role: .cancel) {}
         }
+        .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
         .alert("Backup Error", isPresented: Binding(get: { backupErrorMessage != nil }, set: { if !$0 { backupErrorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

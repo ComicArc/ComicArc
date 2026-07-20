@@ -26,6 +26,7 @@ struct SettingsView: View {
 
     @State private var unarAvailable         = false
     @State private var showTrash             = false
+    @State private var showRenameFiles       = false
     @State private var showClearConfirm      = false
     @State private var showOnboardingConfirm = false
     @State private var backupErrorMessage: String?
@@ -179,6 +180,17 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("File Organization") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("ComicArc reads folders as Publisher / Character / Series, and file names as \"Series #Issue\" (e.g. \"Batman #427.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 2)
+                    Button("Rename Files to Match Library…") { showRenameFiles = true }
+                        .help("Preview and apply a batch rename of files whose names don't match their series/issue number")
+                }
+
                 Section("Data") {
                     Button("Export Backup…") { exportBackup() }
                     Button("Import Backup…") { importBackup() }
@@ -233,6 +245,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .onAppear { if cbrEnabled { checkUnarAsync() } }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
+        .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
         .confirmationDialog("Clear Library?", isPresented: $showClearConfirm, titleVisibility: .visible) {
             Button("Clear Library", role: .destructive) { vm.clearLibrary() }
         } message: {
