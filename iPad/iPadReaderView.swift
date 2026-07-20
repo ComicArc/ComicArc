@@ -23,6 +23,7 @@ struct iPadReaderView: View {
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
     @State private var autoplay = false
     @State private var countdownProgress: Double = 0
+    @State private var showFilmstrip = false
     @Environment(\.scenePhase) private var scenePhase
     // The reader's own width, not the device screen's — UIScreen.main.bounds.width is wrong
     // in Split View/Slide Over, where the app's window is narrower than the full screen,
@@ -171,12 +172,49 @@ struct iPadReaderView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             Spacer()
+            if showBars && showFilmstrip {
+                filmstrip
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if showBars {
                 bottomBar
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showBars)
+        .animation(.easeInOut(duration: 0.2), value: showFilmstrip)
+    }
+
+    // Reuses PageCache rather than a separate thumbnail cache — LazyHStack only instantiates
+    // visible cells, so at most a screenful of thumbnails actually decode, well within
+    // PageCache's 30-entry LRU budget alongside the reader's own current-page/prefetch entries.
+    private var filmstrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 6) {
+                    ForEach(0..<pageCount, id: \.self) { idx in
+                        Button {
+                            currentPage = idx
+                            saveProgress()
+                        } label: {
+                            iPadFilmstripThumb(comic: comic, index: idx, isCurrent: idx == currentPage)
+                        }
+                        .buttonStyle(.plain)
+                        .id(idx)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .onAppear { proxy.scrollTo(currentPage, anchor: .center) }
+            .onChange(of: currentPage) { _, page in
+                withAnimation { proxy.scrollTo(page, anchor: .center) }
+            }
+        }
+        .frame(height: 100)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+        )
     }
 
     private var topBar: some View {
@@ -199,6 +237,13 @@ struct iPadReaderView: View {
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.8))
                 .monospacedDigit()
+            Button(action: { withAnimation { showFilmstrip.toggle() } }) {
+                Image(systemName: "square.grid.3x3.fill")
+                    .font(.title3)
+                    .foregroundStyle(showFilmstrip ? Design.brandGold : .white)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(showFilmstrip ? "Hide Page Filmstrip" : "Show Page Filmstrip")
             Button(action: { autoplay.toggle(); if !autoplay { countdownProgress = 0 } }) {
                 Image(systemName: autoplay ? "pause.circle.fill" : "play.circle")
                     .font(.title3)
@@ -319,6 +364,32 @@ private struct ReaderPageView: View {
         }
         .task {
             PageCache.shared.load(comic: comic, page: pageIndex) { img in image = img }
+        }
+    }
+}
+
+private struct iPadFilmstripThumb: View {
+    let comic:     Comic
+    let index:     Int
+    let isCurrent: Bool
+    @State private var image: PlatformImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(platformImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Color.white.opacity(0.08)
+            }
+        }
+        .frame(width: 54, height: 82)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(isCurrent ? Design.brandGold : Color.white.opacity(0.15), lineWidth: isCurrent ? 2 : 1)
+        )
+        .task(id: index) {
+            PageCache.shared.load(comic: comic, page: index) { image = $0 }
         }
     }
 }

@@ -84,6 +84,7 @@ struct ReaderView: View {
 
     // Overlays
     @State private var showShortcuts = false
+    @State private var showFilmstrip = false
     @State private var comicRating:  Int
 
     // Auto-hide bar state
@@ -128,6 +129,10 @@ struct ReaderView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                     Spacer()
+                    if showFilmstrip {
+                        filmstrip
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                     if showBottomBar {
                         bottomBar
                             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -189,6 +194,7 @@ struct ReaderView: View {
         .onKeyPress(KeyEquivalent("b")) { toggleBookmark(); return .handled }
         .onKeyPress(KeyEquivalent("r")) { rtl.toggle(); return .handled }
         .onKeyPress(KeyEquivalent("?")) { showShortcuts.toggle(); return .handled }
+        .onKeyPress(KeyEquivalent("g")) { withAnimation(Design.easeFast) { showFilmstrip.toggle() }; return .handled }
         .onKeyPress(.home) { currentPage = 0; saveProgress(); return .handled }
         .onKeyPress(.end)  { currentPage = max(0, comic.pageCount - 1); saveProgress(); return .handled }
         .onKeyPress(KeyEquivalent("=")) { zoomIn(); return .handled }
@@ -446,6 +452,15 @@ struct ReaderView: View {
                 .accessibilityLabel("Keyboard shortcuts")
                 .help("Keyboard Shortcuts (?)")
 
+                Button { withAnimation(Design.easeFast) { showFilmstrip.toggle() } } label: {
+                    Image(systemName: "square.grid.3x3.fill")
+                        .font(.title2)
+                        .foregroundStyle(showFilmstrip ? Design.brandGold : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showFilmstrip ? "Hide page filmstrip" : "Show page filmstrip")
+                .help(showFilmstrip ? "Hide page filmstrip (G)" : "Show page filmstrip (G)")
+
                 Button { toolbarLocked.toggle() } label: {
                     Image(systemName: toolbarLocked ? "pin.fill" : "pin")
                         .font(.title2)
@@ -556,6 +571,35 @@ struct ReaderView: View {
         .background(.ultraThinMaterial.opacity(0.9))
     }
 
+    // MARK: - Filmstrip
+
+    private var filmstrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 6) {
+                    ForEach(0..<comic.pageCount, id: \.self) { idx in
+                        Button {
+                            currentPage = idx
+                            saveProgress()
+                        } label: {
+                            FilmstripThumb(comic: comic, index: idx, isCurrent: idx == currentPage)
+                        }
+                        .buttonStyle(.plain)
+                        .id(idx)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .onAppear { proxy.scrollTo(currentPage, anchor: .center) }
+            .onChange(of: currentPage) { _, page in
+                withAnimation { proxy.scrollTo(page, anchor: .center) }
+            }
+        }
+        .frame(height: 108)
+        .background(.ultraThinMaterial.opacity(0.9))
+    }
+
     // MARK: - Bookmarks panel
 
     private var bookmarksPanel: some View {
@@ -631,6 +675,7 @@ struct ReaderView: View {
                 ("+ / -",        "Zoom in / out"),
                 ("0",            "Reset zoom"),
                 ("F",            "Toggle fullscreen"),
+                ("G",            "Toggle page filmstrip"),
                 ("Escape / W",   "Close reader"),
                 ("?",            "Show / hide this panel"),
             ]
@@ -862,6 +907,46 @@ struct PagedModeView: View {
             }
         }
         PageCache.shared.prefetch(comic: comic, around: page, count: 4)
+    }
+}
+
+// MARK: - Filmstrip thumbnail
+
+// Reuses PageCache rather than a separate thumbnail cache — LazyHStack only instantiates
+// visible cells, so at most a screenful of thumbnails (~10-12) actually decode, well within
+// PageCache's 30-entry LRU budget alongside the reader's own current-page/prefetch entries.
+private struct FilmstripThumb: View {
+    let comic:     Comic
+    let index:     Int
+    let isCurrent: Bool
+    @State private var image: PlatformImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(platformImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Color.white.opacity(0.08)
+            }
+        }
+        .frame(width: 60, height: 90)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(isCurrent ? Design.brandGold : Color.white.opacity(0.15), lineWidth: isCurrent ? 2 : 1)
+        )
+        .overlay(alignment: .bottomTrailing) {
+            Text("\(index + 1)")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+                .padding(.horizontal, 3).padding(.vertical, 1)
+                .background(.black.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .padding(2)
+        }
+        .task(id: index) {
+            PageCache.shared.load(comic: comic, page: index) { image = $0 }
+        }
     }
 }
 
