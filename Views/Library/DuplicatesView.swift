@@ -51,6 +51,20 @@ private struct DuplicateGroupCard: View {
     @State var comics: [Comic]
     @EnvironmentObject var vm: LibraryViewModel
 
+    // Best-effort quality signal: page count is the strongest proxy for a complete, correctly
+    // extracted copy (a bad rip commonly drops pages or fails extraction partway through);
+    // file size breaks ties between two copies with the same page count, since a larger file
+    // at the same page count usually means higher-resolution scans. Neither is exact — this is
+    // a suggestion the user can override, never an automatic delete.
+    private func fileSize(_ comic: Comic) -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: comic.filePath)[.size] as? Int64) ?? 0
+    }
+    private var recommendedId: Int64? {
+        comics.max { a, b in
+            (a.pageCount, fileSize(a)) < (b.pageCount, fileSize(b))
+        }?.id
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("\(publisher) — \(series) #\(issueNumber)")
@@ -58,13 +72,34 @@ private struct DuplicateGroupCard: View {
 
             HStack(alignment: .top, spacing: 16) {
                 ForEach(comics) { comic in
+                    let isRecommended = comic.id == recommendedId
                     VStack(alignment: .leading, spacing: 6) {
                         MiniComicCard(comic: comic).frame(width: 120, height: 172)
+                            .overlay(alignment: .topTrailing) {
+                                if isRecommended && comics.count > 1 {
+                                    Image(systemName: "star.circle.fill")
+                                        .font(.title3)
+                                        .foregroundStyle(Design.brandGold, .black.opacity(0.6))
+                                        .padding(4)
+                                        .accessibilityLabel("Recommended keeper")
+                                }
+                            }
                         Text(URL(fileURLWithPath: comic.filePath).lastPathComponent)
                             .font(.caption).lineLimit(2)
                             .foregroundStyle(.secondary)
                         Text("\(comic.pageCount) pages")
                             .font(.caption2).foregroundStyle(.tertiary)
+
+                        if isRecommended && comics.count > 1 {
+                            Button {
+                                let others = comics.filter { $0.id != comic.id }
+                                vm.delete(others)
+                                comics = [comic]
+                            } label: {
+                                Label("Keep This, Delete Others", systemImage: "checkmark.circle")
+                            }
+                            .buttonStyle(.borderedProminent).controlSize(.small).tint(Design.brandGold)
+                        }
                         Button(role: .destructive) {
                             vm.delete([comic])
                             comics.removeAll { $0.id == comic.id }
@@ -73,7 +108,7 @@ private struct DuplicateGroupCard: View {
                         }
                         .buttonStyle(.bordered).controlSize(.small)
                     }
-                    .frame(width: 130)
+                    .frame(width: 150)
                 }
             }
         }
