@@ -2,6 +2,15 @@ import SwiftUI
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    // Backs both Dock-icon drag-and-drop and Finder's "Import to ComicArc" service — kept
+    // alive for the app's lifetime since NSApp.servicesProvider holds only a weak-ish
+    // reference in practice (the services dispatch mechanism doesn't retain it for you).
+    private let servicesProvider = ComicArcServicesProvider()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.servicesProvider = servicesProvider
+    }
+
     // Closing the window should mean the app is actually closed — no lingering in the
     // background/Dock with the watcher, scanner, and DB connection all still alive. This
     // used to be a hidden, defaulted-off Settings toggle, so closing the window did nothing
@@ -15,6 +24,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         LibraryViewModel.shared.shutdown()
         return .terminateNow
+    }
+
+    // Covers three routes at once, all funneled through the same AppKit hook: double-clicking
+    // a .cbz/.cbr/.pdf in Finder ("Open With ComicArc"), dragging one onto the Dock icon while
+    // the app is already running or launching it fresh, and `open -a ComicArc file.cbz` from
+    // the command line. Declaring CFBundleDocumentTypes in Info.plist is what makes macOS
+    // route these events here at all — without it this method is simply never called.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let comics = urls.filter { ["cbz", "cbr", "pdf"].contains($0.pathExtension.lowercased()) }
+        guard !comics.isEmpty else { return }
+        LibraryViewModel.shared.importFiles(comics)
+    }
+}
+
+// Handler for the "Import to ComicArc" Finder Services menu item (Info.plist NSServices).
+// Must be an NSObject subclass with an @objc method matching the NSMessage key exactly,
+// suffixed with the standard Services selector shape (pboard:userData:error:) — AppKit
+// invokes this by string-based selector lookup, not a Swift protocol, so the signature has
+// to match exactly or the service silently does nothing when clicked.
+final class ComicArcServicesProvider: NSObject {
+    @objc func importFilesService(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        guard let urls = pboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty else {
+            error.pointee = "No comic files found on the pasteboard"
+            return
+        }
+        let comics = urls.filter { ["cbz", "cbr", "pdf"].contains($0.pathExtension.lowercased()) }
+        guard !comics.isEmpty else {
+            error.pointee = "No .cbz, .cbr, or .pdf files selected"
+            return
+        }
+        DispatchQueue.main.async {
+            LibraryViewModel.shared.importFiles(comics)
+        }
     }
 }
 #endif
