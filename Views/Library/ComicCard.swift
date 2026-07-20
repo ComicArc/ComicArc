@@ -99,7 +99,7 @@ struct ComicCard: View {
         ZStack {
             Design.cardBg
             if let img = thumbnail {
-                Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(.secondary)

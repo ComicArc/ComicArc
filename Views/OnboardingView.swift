@@ -86,7 +86,7 @@ struct OnboardingView: View {
             VStack(spacing: 14) {
                 Text("Welcome to ComicArc")
                     .font(.system(size: 38, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
                     .kerning(0.5)
 
                 Text("Your personal comic library — organized, tracked, and ready to read.")
@@ -117,7 +117,7 @@ struct OnboardingView: View {
                 .foregroundStyle(Design.goldGradient)
             Text(label)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(Design.textPrimary)
             Text(sub)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -140,7 +140,7 @@ struct OnboardingView: View {
 
                 Text("CBR Support")
                     .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
 
                 Text("ComicArc supports CBZ, PDF, and CBR files.\nCBR format requires a small tool called **unar**.")
                     .font(.subheadline)
@@ -159,7 +159,7 @@ struct OnboardingView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(unarInstalled ? "unar is installed" : "unar not found")
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Design.textPrimary)
                         Text(unarInstalled
                              ? "CBR files will open correctly."
                              : "CBR files won't open without it. Install via Homebrew.")
@@ -221,7 +221,7 @@ struct OnboardingView: View {
 
                 Text("Choose Your Comics Folder")
                     .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
                     .kerning(0.5)
 
                 Text("Point ComicArc to the folder where your comics are stored.\nSubfolders are scanned automatically.")
@@ -297,7 +297,7 @@ struct OnboardingView: View {
                         .tint(Design.brandGold)
                     Text("Discovering comics…")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Design.textPrimary)
                     Text(libraryPath)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -311,7 +311,7 @@ struct OnboardingView: View {
                         .foregroundStyle(Design.goldGradient)
                     Text("Scanning Library")
                         .font(.system(size: 32, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Design.textPrimary)
                     VStack(spacing: 8) {
                         ProgressView(value: Double(scanDone), total: Double(max(scanTotal, 1)))
                             .progressViewStyle(.linear)
@@ -346,7 +346,7 @@ struct OnboardingView: View {
             VStack(spacing: 14) {
                 Text("You're All Set!")
                     .font(.system(size: 34, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
                 Text("\(scanDone) comic\(scanDone == 1 ? "" : "s") indexed and ready to read.")
                     .font(.title3).foregroundStyle(.secondary)
             }

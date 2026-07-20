@@ -73,7 +73,7 @@ struct IssueDetailPage: View {
 
             Text(current.title)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(Design.textPrimary)
                 .lineLimit(1)
 
             Spacer()
@@ -236,7 +236,7 @@ struct IssueDetailPage: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(current.title)
                     .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 6) {
@@ -394,7 +394,7 @@ struct IssueDetailPage: View {
     private var runsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Appears in Runs")
-                .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
             ForEach(appearsInRuns) { run in
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet.rectangle")
@@ -414,7 +414,7 @@ struct IssueDetailPage: View {
 
     private func notesSection(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Notes").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+            Text("Notes").font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
             Text(text).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }

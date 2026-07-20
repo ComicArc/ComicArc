@@ -77,6 +77,14 @@ enum Design {
     }
     static var brandGold: Color { AppTheme.current.palette.brandGold }
 
+    // Most headings/titles were hardcoded to .white — correct for every dark theme, but
+    // Sepia is a light theme (cream/parchment background), so white text there was reading
+    // as nearly invisible. Use this instead of .white for any title/label sitting directly
+    // on Design.appBackground/navBackground/cardBg; leave actual .white alone for text drawn
+    // over a fixed dark scrim (a cover image's gradient overlay, the reader's black
+    // background) — those are correct regardless of the app's chosen theme.
+    static var textPrimary: Color { AppTheme.current.isLight ? Color(red: 0.13, green: 0.11, blue: 0.08) : .white }
+
     // Gold gradient (use for prominent elements)
     static var goldGradient: LinearGradient {
         LinearGradient(
@@ -238,7 +246,7 @@ struct TagChip: View {
     }
 }
 
-// MARK: - Publisher badge (colored pill, matches Python app)
+// MARK: - Publisher badge (colored pill)
 
 struct PublisherBadge: View {
     let publisher: String

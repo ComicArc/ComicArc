@@ -86,7 +86,7 @@ struct LibraryFilterBar: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(headingTitle)
                         .font(.system(size: 22, weight: .black))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Design.textPrimary)
                         .kerning(0.5)
                         .lineLimit(1)
 
@@ -220,7 +220,7 @@ struct ContinueReadingShelf: View {
                     .foregroundStyle(Design.brandGold)
                 Text("CONTINUE READING")
                     .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
                     .kerning(1.5)
             }
             .padding(.horizontal, Design.gridSpacing)
@@ -252,7 +252,7 @@ struct ShelfCard: View {
                 ZStack {
                     Design.cardBg
                     if let img = thumbnail {
-                        Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                        Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
                     } else {
                         Image(systemName: "book.closed").foregroundStyle(.secondary)
                     }
@@ -620,7 +620,7 @@ private struct GroupCard: View {
         ZStack {
             Design.cardBg
             if let img = thumbnail {
-                Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
             } else {
                 LinearGradient(colors: [Design.brandBlue, Design.brandBlue.opacity(0.5)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)

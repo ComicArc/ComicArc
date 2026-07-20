@@ -26,7 +26,7 @@ struct SeriesManagerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Manage Series")
                         .font(.system(size: 20, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Design.textPrimary)
                     Text(series)
                         .font(.subheadline).foregroundStyle(.secondary)
                 }

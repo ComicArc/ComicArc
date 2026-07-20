@@ -112,7 +112,7 @@ struct ComicDetailView: View {
     @ViewBuilder
     private var coverThumbnail: some View {
         if let img = thumbnail {
-            Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
                 .frame(width: 110, height: 165).comicCardStyle()
         } else {
             RoundedRectangle(cornerRadius: Design.cardCorner)

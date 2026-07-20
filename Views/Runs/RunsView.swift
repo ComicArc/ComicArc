@@ -21,7 +21,7 @@ struct RunsListView: View {
             HStack {
                 Text("RUNS")
                     .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Design.textPrimary)
                     .kerning(1)
                 Spacer()
                 Button { showingCreate = true } label: {
@@ -160,7 +160,7 @@ struct RunListCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(run.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Design.textPrimary)
                         .lineLimit(1)
 
                     if !run.description.isEmpty {
