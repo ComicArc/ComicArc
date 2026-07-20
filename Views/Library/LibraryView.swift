@@ -367,35 +367,58 @@ struct SeriesGroupGridView: View {
                                     spacing: Design.gridSpacing)]
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
-                ForEach(vm.seriesGroups) { sg in
-                    let isTarget = dropTargetSeries == sg.series && draggedSeries != sg.series
-                    SeriesGroupCard(group: sg)
-                        .onTapGesture { vm.drillIntoSeries(sg) }
-                        .onDrag {
-                            draggedSeries = sg.series
-                            return NSItemProvider(object: NSString(string: sg.series))
-                        }
-                        .onDrop(of: [.plainText],
-                                isTargeted: Binding(
-                                    get: { isTarget },
-                                    set: { active in dropTargetSeries = active ? sg.series : nil }
-                                )) { _, _ in
-                            guard let from = draggedSeries else { return false }
-                            vm.moveSeriesGroup(fromSeries: from, toSeries: sg.series)
-                            draggedSeries = nil; dropTargetSeries = nil
-                            return true
-                        }
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Design.cardCorner + 2)
-                                .stroke(Design.brandGold, lineWidth: 2.5)
-                                .opacity(isTarget ? 1 : 0)
-                                .allowsHitTesting(false)
-                        )
+            if vm.seriesGroups.isEmpty {
+                emptyState
+            } else {
+                LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
+                    ForEach(vm.seriesGroups) { sg in
+                        let isTarget = dropTargetSeries == sg.series && draggedSeries != sg.series
+                        SeriesGroupCard(group: sg)
+                            .onTapGesture { vm.drillIntoSeries(sg) }
+                            .onDrag {
+                                draggedSeries = sg.series
+                                return NSItemProvider(object: NSString(string: sg.series))
+                            }
+                            .onDrop(of: [.plainText],
+                                    isTargeted: Binding(
+                                        get: { isTarget },
+                                        set: { active in dropTargetSeries = active ? sg.series : nil }
+                                    )) { _, _ in
+                                guard let from = draggedSeries else { return false }
+                                vm.moveSeriesGroup(fromSeries: from, toSeries: sg.series)
+                                draggedSeries = nil; dropTargetSeries = nil
+                                return true
+                            }
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Design.cardCorner + 2)
+                                    .stroke(Design.brandGold, lineWidth: 2.5)
+                                    .opacity(isTarget ? 1 : 0)
+                                    .allowsHitTesting(false)
+                            )
+                    }
                 }
+                .padding(Design.gridSpacing)
             }
-            .padding(Design.gridSpacing)
         }
+    }
+
+    // Reachable when every series that used to live under this character/collection group
+    // has had its last comic removed, renamed away, or moved elsewhere — the group card
+    // itself still exists one screen up, but drilling into it now finds nothing. Without
+    // this, the screen was just a blank scroll area with no explanation of what happened.
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "square.stack.3d.up.slash")
+                .font(.system(size: 56)).foregroundStyle(.secondary)
+            Text("No Series Here").font(.title2.bold())
+            Text("The comics that were here have been moved, renamed, or removed.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Back") { vm.navigateBack() }
+                .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
     }
 }
 
