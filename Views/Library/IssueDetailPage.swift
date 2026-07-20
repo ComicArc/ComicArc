@@ -127,7 +127,6 @@ struct IssueDetailPage: View {
 
     private var coverColumn: some View {
         VStack(spacing: 28) {
-            // Cover image
             Group {
                 if let img = thumbnail {
                     Image(platformImage: img)
@@ -156,7 +155,6 @@ struct IssueDetailPage: View {
                     .stroke(Design.borderColor, lineWidth: 1)
             )
 
-            // Progress
             if current.pageCount > 0 {
                 VStack(alignment: .leading, spacing: 6) {
                     ProgressView(value: current.progressPercent)
@@ -175,14 +173,12 @@ struct IssueDetailPage: View {
                 .frame(width: 256)
             }
 
-            // Star rating (large)
             StarRatingLarge(rating: current.rating) { star in
                 let newR = star == current.rating ? 0 : star
                 current.rating = newR
                 vm.setRating(current, rating: newR)
             }
 
-            // Action icons
             HStack(spacing: 28) {
                 iconAction(
                     icon: current.isFavorite ? "heart.fill" : "heart",
@@ -232,7 +228,6 @@ struct IssueDetailPage: View {
 
     private var detailColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Title block
             VStack(alignment: .leading, spacing: 10) {
                 Text(current.title)
                     .font(.system(size: 32, weight: .black, design: .rounded))
@@ -253,7 +248,6 @@ struct IssueDetailPage: View {
 
             divider
 
-            // Metadata grid
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
                 alignment: .leading, spacing: 12
@@ -270,7 +264,6 @@ struct IssueDetailPage: View {
 
             divider
 
-            // Shelves
             sectionBlock("Shelves") {
                 if allShelves.isEmpty {
                     Text("Loading…").font(.caption).foregroundStyle(.tertiary)
@@ -295,7 +288,6 @@ struct IssueDetailPage: View {
 
             divider
 
-            // Tags
             sectionBlock("Tags") {
                 VStack(alignment: .leading, spacing: 10) {
                     if !tags.isEmpty {
@@ -316,7 +308,6 @@ struct IssueDetailPage: View {
 
             divider
 
-            // Review
             sectionBlock("My Review") {
                 VStack(alignment: .leading, spacing: 10) {
                     TextEditor(text: $reviewDraft)

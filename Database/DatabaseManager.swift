@@ -691,7 +691,8 @@ final class DatabaseManager: @unchecked Sendable {
             review: colText(s, 23),
             isFavorite: colBool(s, 21), inReadingList: colBool(s, 22),
             readingOrderPosition: sqlite3_column_type(s, 24) != SQLITE_NULL ? colInt(s, 24) : nil,
-            readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil
+            readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil,
+            readingOrderReason: colText(s, 26)
         )
     }
 
@@ -704,7 +705,7 @@ final class DatabaseManager: @unchecked Sendable {
                COALESCE(r.rating, 0) as rating,
                (f.comic_id IS NOT NULL) as is_favorite,
                (rl.comic_id IS NOT NULL) as in_reading_list,
-               r.review, c.reading_order_position, c.reading_order_confidence
+               r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id

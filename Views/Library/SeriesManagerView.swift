@@ -13,6 +13,12 @@ struct SeriesManagerView: View {
     @State private var coverComicId:   Int64?   = nil
     @State private var selectedIssueId: Int64?  = nil
     @State private var showMergeConfirm = false
+    @State private var showOnlyFlagged  = false
+
+    private var flaggedCount: Int { issues.filter { ($0.readingOrderConfidence ?? 100) < 85 }.count }
+    private var visibleIssues: [Comic] {
+        showOnlyFlagged ? issues.filter { ($0.readingOrderConfidence ?? 100) < 85 } : issues
+    }
 
     init(series: String, publisher: String?) {
         self.series    = series
@@ -106,18 +112,28 @@ struct SeriesManagerView: View {
                     }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(.red.opacity(0.8))
                 }
-                Text("\(issues.count) issues · drag or use ⌘↑/⌘↓ to reorder")
+                Text("\(visibleIssues.count) issues · drag, ⌘↑/⌘↓, or use Move Near… to reorder")
                     .font(.caption).foregroundStyle(.tertiary)
             }
 
+            if flaggedCount > 0 {
+                Toggle(isOn: $showOnlyFlagged) {
+                    Label("Show only possibly misplaced (\(flaggedCount))", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+                .toggleStyle(.switch).controlSize(.mini)
+            }
+
             List(selection: $selectedIssueId) {
-                ForEach(issues) { issue in
+                ForEach(visibleIssues) { issue in
                     issueRow(issue)
                         .listRowBackground(Design.surfaceBg)
                         .listRowSeparatorTint(Design.borderColor)
                         .tag(issue.id)
                 }
                 .onMove { from, to in
+                    guard !showOnlyFlagged else { return }
                     issues.move(fromOffsets: from, toOffset: to)
                     saveOrder()
                 }
@@ -147,9 +163,16 @@ struct SeriesManagerView: View {
                 .frame(width: 36, height: 52)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(issue.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(issue.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    if let confidence = issue.readingOrderConfidence, confidence < 85 {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2).foregroundStyle(.orange)
+                            .help(issue.readingOrderReason ?? "Position estimated with low confidence — worth checking")
+                    }
+                }
                 HStack(spacing: 6) {
                     if let n = issue.issueNumber {
                         Text("Issue #\(n)").font(.caption).foregroundStyle(.secondary)
@@ -169,6 +192,18 @@ struct SeriesManagerView: View {
             Spacer()
 
             HStack(spacing: 4) {
+                Menu {
+                    ForEach(issues.filter { $0.id != issue.id }) { target in
+                        Button(target.title) { moveIssue(issue, afterId: target.id) }
+                    }
+                } label: {
+                    Image(systemName: "arrow.right.to.line")
+                }
+                .menuStyle(.borderlessButton).controlSize(.mini)
+                .frame(width: 22)
+                .help("Move next to another issue")
+                .accessibilityLabel("Move \(issue.title) near another issue")
+
                 Button {
                     moveIssueToTop(issue)
                 } label: {
@@ -260,6 +295,13 @@ struct SeriesManagerView: View {
         let ids = issues.map(\.id)
         vm.reorderComics(orderedIds: ids)
         vm.reload()
+    }
+
+    private func moveIssue(_ issue: Comic, afterId targetId: Int64) {
+        guard let fromIdx = issues.firstIndex(where: { $0.id == issue.id }),
+              let targetIdx = issues.firstIndex(where: { $0.id == targetId }) else { return }
+        issues.move(fromOffsets: IndexSet(integer: fromIdx), toOffset: targetIdx + 1)
+        saveOrder()
     }
 
     private func moveIssueToTop(_ issue: Comic) {

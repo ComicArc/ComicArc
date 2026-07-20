@@ -32,6 +32,7 @@ struct Comic: Identifiable, Equatable, Hashable {
     // (once per app launch/scan). See Models/ReadingOrderEngine.swift.
     var readingOrderPosition: Int? = nil
     var readingOrderConfidence: Int? = nil
+    var readingOrderReason: String? = nil
 
     var fileExtension: String { URL(fileURLWithPath: filePath).pathExtension.lowercased() }
     var isStarted: Bool { progress > 0 }
