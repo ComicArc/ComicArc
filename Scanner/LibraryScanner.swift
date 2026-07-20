@@ -257,10 +257,18 @@ final class LibraryScanner: @unchecked Sendable {
     private let cbrListingLock = NSLock()
     private var cbrListingCache: [String: [String]] = [:]
 
-    // Guards against a mislabeled or malicious oversized archive hanging the scan queue on
-    // `lsar`/`unar` — a multi-GB file with a `.cbr` extension shouldn't be able to stall
-    // scanning the rest of the library.
-    private static let maxCBRSizeBytes: UInt64 = 50 * 1024 * 1024
+    // Was 50MB, added earlier as a guess to guard against a mislabeled/malicious oversized
+    // archive hanging the scan queue. That guess was wrong and broke real comics: 40 of 315
+    // CBRs in a real test library (legitimate scanned trade-paperback collections, 100MB-1GB+)
+    // were silently refusing to open — cbrImageListing returned [] for anything over the cap,
+    // so the reader showed nothing with no error. Measured directly: `lsar` lists a 1GB RAR's
+    // contents in ~0.05s and `unar` extracts a single page from it in ~0.1s, both regardless
+    // of total archive size — RAR's central directory makes both operations effectively
+    // size-independent, so a byte-size gate was solving a problem that doesn't exist for this
+    // format while actively blocking large (but completely normal) collected volumes. Kept as
+    // a much more generous backstop — this is now only a sanity bound against something
+    // truly pathological (a multi-terabyte file renamed to .cbr), not a real-world limit.
+    private static let maxCBRSizeBytes: UInt64 = 5 * 1024 * 1024 * 1024
 
     private func cbrImageListing(_ path: String) -> [String] {
         cbrListingLock.lock()

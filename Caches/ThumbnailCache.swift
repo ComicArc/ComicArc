@@ -137,6 +137,25 @@ final class ThumbnailCache: @unchecked Sendable {
         return diskURL.path
     }
 
+    func saveCustomSeriesCover(series: String, publisher: String, imageURL: URL) -> String? {
+        guard let img = PlatformImage.fromURL(imageURL),
+              let resized = PlatformImage.resized(source: img, to: thumbSize) else { return nil }
+        let safe = "series_\(publisher)_\(series)"
+            .components(separatedBy: .init(charactersIn: "/:"))
+            .joined(separator: "_")
+        let diskURL = coversDir.appendingPathComponent("\(safe).jpg")
+        save(resized, to: diskURL)
+        return diskURL.path
+    }
+
+    func saveCustomRunCover(runId: Int64, imageURL: URL) -> String? {
+        guard let img = PlatformImage.fromURL(imageURL),
+              let resized = PlatformImage.resized(source: img, to: thumbSize) else { return nil }
+        let diskURL = coversDir.appendingPathComponent("run_\(runId).jpg")
+        save(resized, to: diskURL)
+        return diskURL.path
+    }
+
     // MARK: - Extraction
 
     private let imageExts = LibraryScanner.imageExtensions

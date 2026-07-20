@@ -688,6 +688,20 @@ final class LibraryViewModel: ObservableObject {
         db.reorderCharacterGroups(publisher: from.publisher, orderedGroupNames: sameGroups)
     }
 
+    func movePublisher(from: String, to: String) {
+        guard from != to else { return }
+        var list = publishers
+        guard let fromIdx = list.firstIndex(of: from) else { return }
+        let moved = list.remove(at: fromIdx)
+        if let toIdx = list.firstIndex(of: to) {
+            list.insert(moved, at: toIdx)
+        } else {
+            list.append(moved)
+        }
+        publishers = list
+        db.reorderPublishers(orderedPublishers: list)
+    }
+
     func setCharacterGroupCover(group: DatabaseManager.CharacterGroup, imageURL: URL) {
         guard let path = ThumbnailCache.shared.saveCustomGroupCover(
             groupName: group.groupName,
@@ -798,6 +812,24 @@ final class LibraryViewModel: ObservableObject {
     func addToRun(runId: Int64, comicIds: [Int64]) { db.addToRun(runId: runId, comicIds: comicIds) }
     func removeFromRun(runId: Int64, comicIds: [Int64]) { db.removeFromRun(runId: runId, comicIds: comicIds) }
     func reorderRun(runId: Int64, orderedIds: [Int64]) { db.reorderRun(runId: runId, orderedIds: orderedIds) }
+
+    @discardableResult
+    func setRunCover(runId: Int64, imageURL: URL) -> String? {
+        guard let path = ThumbnailCache.shared.saveCustomRunCover(runId: runId, imageURL: imageURL) else { return nil }
+        db.setRunCover(runId: runId, imagePath: path)
+        return path
+    }
+    func clearRunCover(runId: Int64) { db.clearRunCover(runId: runId) }
+
+    func setSeriesCoverImage(series: String, publisher: String, imageURL: URL) {
+        guard let path = ThumbnailCache.shared.saveCustomSeriesCover(series: series, publisher: publisher, imageURL: imageURL) else { return }
+        db.setSeriesCoverImage(series: series, publisher: publisher, imagePath: path)
+        reload()
+    }
+    func clearSeriesCover(_ series: String, publisher: String) {
+        db.clearSeriesCover(series: series, publisher: publisher)
+        reload()
+    }
     func updateRun(id: Int64, title: String, description: String, buyLink: String?) { db.updateRun(id: id, title: title, description: description, buyLink: buyLink) }
     func setRunRating(_ runId: Int64, rating: Int, review: String?) { db.setRunRating(runId, rating: rating, review: review) }
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }

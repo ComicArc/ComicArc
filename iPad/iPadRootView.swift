@@ -37,6 +37,7 @@ private struct iPadSidebar: View {
     @EnvironmentObject var vm: LibraryViewModel
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
+    @State private var draggedPublisher: String?
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -55,10 +56,24 @@ private struct iPadSidebar: View {
             }
             if !vm.publishers.isEmpty {
                 Section("Publishers") {
+                    // onDrag/onDrop (long-press-and-drag) rather than .onMove: .onMove's drag
+                    // handles only appear in List edit mode, which this sidebar doesn't have
+                    // and adding an Edit button just for this felt heavier than reusing the
+                    // same gesture already used for character/series/run reordering elsewhere.
                     ForEach(vm.publishers, id: \.self) { pub in
                         Label(pub, systemImage: "building.columns")
                             .foregroundStyle(Design.publisherColor(pub))
                             .tag(AppDestination.publisher(pub))
+                            .onDrag {
+                                draggedPublisher = pub
+                                return NSItemProvider(object: NSString(string: pub))
+                            }
+                            .onDrop(of: [.plainText], isTargeted: nil) { _, _ in
+                                guard let from = draggedPublisher else { return false }
+                                vm.movePublisher(from: from, to: pub)
+                                draggedPublisher = nil
+                                return true
+                            }
                     }
                 }
             }

@@ -61,7 +61,8 @@ struct RunsListView: View {
                             let isTarget = dropTargetRunId == run.id && draggedRunId != run.id
                             RunListCard(
                                 run: run,
-                                isSelected: selectedRun?.id == run.id
+                                isSelected: selectedRun?.id == run.id,
+                                onCoverChanged: { Task { await loadRuns() } }
                             ) { selectedRun = run }
                             .background(isTarget ? Design.brandGold.opacity(0.12) : Color.clear)
                             .onDrag {
@@ -138,9 +139,11 @@ struct RunsListView: View {
 struct RunListCard: View {
     let run:        Run
     let isSelected: Bool
+    var onCoverChanged: () -> Void = {}
     let onSelect:   () -> Void
 
     @State private var isHovered = false
+    @Environment(\.fileService) private var fileService
 
     var body: some View {
         Button(action: onSelect) {
@@ -148,6 +151,11 @@ struct RunListCard: View {
                 Rectangle()
                     .fill(isSelected ? Design.brandGold : Color.clear)
                     .frame(width: 3)
+
+                coverThumbnail
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .padding(.leading, 10)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(run.title)
@@ -192,6 +200,41 @@ struct RunListCard: View {
         .accessibilityLabel(run.description.isEmpty ? run.title : "\(run.title), \(run.description)")
         .accessibilityValue(run.comicCount > 0 ? "\(run.readCount) of \(run.comicCount) read" : "Empty")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .contextMenu {
+            Button("Custom Cover…") { pickCoverImage() }
+            if run.coverImagePath != nil {
+                Button("Remove Custom Cover") {
+                    LibraryViewModel.shared.clearRunCover(runId: run.id)
+                    onCoverChanged()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverThumbnail: some View {
+        if let path = run.coverImagePath, let img = PlatformImage.fromFile(path) {
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+        } else {
+            ZStack {
+                Design.surfaceBg
+                Image(systemName: "list.bullet.rectangle.portrait")
+                    .font(.system(size: 14)).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func pickCoverImage() {
+        fileService.pickFiles(
+            allowsMultiple: false,
+            message: "Choose a cover image for \(run.title)",
+            prompt: "Set Cover"
+        ) { urls in
+            if let url = urls.first {
+                LibraryViewModel.shared.setRunCover(runId: run.id, imageURL: url)
+                onCoverChanged()
+            }
+        }
     }
 }
 

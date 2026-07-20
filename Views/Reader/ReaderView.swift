@@ -272,8 +272,8 @@ struct ReaderView: View {
         hideTask = w
         // README has always documented this as "fade after five seconds" — the actual value
         // was 3, which reads as too fast for a reading app (controls disappearing mid-glance
-        // at the page counter). Bumped to 6, split the difference toward more forgiving.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: w)
+        // at the page counter). Bumped to 8, matching the explicit request for more time.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: w)
     }
 
     // MARK: - Page content

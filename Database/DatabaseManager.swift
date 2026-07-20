@@ -343,6 +343,12 @@ final class DatabaseManager: @unchecked Sendable {
             PRIMARY KEY (group_name, publisher)
         )
         """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS publisher_order (
+            publisher TEXT PRIMARY KEY,
+            position  INTEGER NOT NULL DEFAULT 0
+        )
+        """)
 
         // Seed built-in shelves (INSERT OR IGNORE so they only run once)
         let builtins = [("Currently Reading", 0), ("Want to Read", 1), ("Finished", 2), ("DNF", 3)]
@@ -368,6 +374,8 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN meta_edited INTEGER NOT NULL DEFAULT 0")
         exec("ALTER TABLE comics ADD COLUMN cover_month INTEGER")
         exec("ALTER TABLE runs   ADD COLUMN position INTEGER")
+        exec("ALTER TABLE series_covers ADD COLUMN image_path TEXT")
+        exec("ALTER TABLE runs   ADD COLUMN cover_image_path TEXT")
 
         // Mainline issues seed into the low range sorted by issue number (or insertion order
         // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
@@ -616,8 +624,26 @@ final class DatabaseManager: @unchecked Sendable {
 
     func publishers() -> [String] {
         queue.sync {
-            rows("SELECT DISTINCT publisher FROM comics WHERE deleted_at IS NULL AND publisher IS NOT NULL ORDER BY publisher",
-                 map: { colText($0, 0) ?? "" })
+            rows("""
+                SELECT DISTINCT c.publisher FROM comics c
+                LEFT JOIN publisher_order po ON po.publisher = c.publisher
+                WHERE c.deleted_at IS NULL AND c.publisher IS NOT NULL
+                ORDER BY COALESCE(po.position, 999999), c.publisher
+                """, map: { colText($0, 0) ?? "" })
+        }
+    }
+
+    // Mirrors reorderCharacterGroups/reorderSeriesGroups — always called with the entire
+    // currently-displayed publisher list so position is never left partially set.
+    func reorderPublishers(orderedPublishers: [String]) {
+        guard !orderedPublishers.isEmpty else { return }
+        queue.sync {
+            exec("BEGIN")
+            for (idx, pub) in orderedPublishers.enumerated() {
+                _ = run("INSERT OR REPLACE INTO publisher_order (publisher, position) VALUES (?,?)",
+                        args: [pub, idx])
+            }
+            exec("COMMIT")
         }
     }
 
@@ -1001,7 +1027,8 @@ final class DatabaseManager: @unchecked Sendable {
             let sql = """
                 SELECT r.id, r.title, COALESCE(r.description,''), COALESCE(r.rating,0), r.review, r.buy_link, r.created_at,
                        COUNT(ri.id) as total,
-                       SUM(CASE WHEN c.page_count > 1 AND COALESCE(rp.current_page,0) >= c.page_count - 1 THEN 1 ELSE 0 END) as read_ct
+                       SUM(CASE WHEN c.page_count > 1 AND COALESCE(rp.current_page,0) >= c.page_count - 1 THEN 1 ELSE 0 END) as read_ct,
+                       r.cover_image_path
                 FROM runs r
                 LEFT JOIN run_items ri ON ri.run_id = r.id
                 LEFT JOIN comics c    ON c.id = ri.comic_id AND c.deleted_at IS NULL
@@ -1013,7 +1040,7 @@ final class DatabaseManager: @unchecked Sendable {
                 Run(id: colInt64(s, 0), title: colText(s, 1) ?? "", description: colText(s, 2) ?? "",
                     rating: colInt(s, 3) > 0 ? colInt(s, 3) : nil,
                     review: colText(s, 4), buyLink: colText(s, 5), createdAt: colText(s, 6) ?? "",
-                    comicCount: colInt(s, 7), readCount: colInt(s, 8))
+                    comicCount: colInt(s, 7), readCount: colInt(s, 8), coverImagePath: colText(s, 9))
             })
         }
     }
@@ -1021,6 +1048,14 @@ final class DatabaseManager: @unchecked Sendable {
     @discardableResult
     func createRun(title: String, description: String) -> Int64 {
         queue.sync { run("INSERT INTO runs (title, description) VALUES (?,?)", args: [title, description]) }
+    }
+
+    func setRunCover(runId: Int64, imagePath: String) {
+        queue.sync { _ = run("UPDATE runs SET cover_image_path = ? WHERE id = ?", args: [imagePath, runId]) }
+    }
+
+    func clearRunCover(runId: Int64) {
+        queue.sync { _ = run("UPDATE runs SET cover_image_path = NULL WHERE id = ?", args: [runId]) }
     }
 
     // Mirrors reorderComics: called with the *entire* currently-displayed runs list every
@@ -1381,6 +1416,7 @@ final class DatabaseManager: @unchecked Sendable {
         let coverId: Int64
         let started: Int
         let finished: Int
+        var coverImagePath: String? = nil
     }
 
     func characterGroups(publisher: String? = nil, search: String? = nil) -> [CharacterGroup] {
@@ -1462,7 +1498,8 @@ final class DatabaseManager: @unchecked Sendable {
                 SELECT c.series, c.publisher, COUNT(*) as cnt,
                        COALESCE(sc.comic_id, MIN(c.id)) as cover_id,
                        SUM(CASE WHEN rp.current_page > 0 THEN 1 ELSE 0 END) as started,
-                       SUM(CASE WHEN c.page_count > 1 AND rp.current_page >= c.page_count - 1 THEN 1 ELSE 0 END) as finished
+                       SUM(CASE WHEN c.page_count > 1 AND rp.current_page >= c.page_count - 1 THEN 1 ELSE 0 END) as finished,
+                       sc.image_path
                 FROM comics c
                 LEFT JOIN reading_progress rp ON c.id = rp.comic_id
                 LEFT JOIN series_covers sc ON sc.series = c.series AND sc.publisher = c.publisher
@@ -1481,7 +1518,8 @@ final class DatabaseManager: @unchecked Sendable {
                 let pub = colText(s, 1) ?? ""
                 return SeriesGroup(id: "\(pub):\(ser)", series: ser, publisher: pub,
                                    count: colInt(s, 2), coverId: colInt64(s, 3),
-                                   started: colInt(s, 4), finished: colInt(s, 5))
+                                   started: colInt(s, 4), finished: colInt(s, 5),
+                                   coverImagePath: colText(s, 6))
             }
         }
     }
@@ -1499,6 +1537,18 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             _ = run("DELETE FROM series_covers WHERE series = ? AND publisher = ?",
                     args: [series, publisher])
+        }
+    }
+
+    // A custom image and "use this issue's cover" are mutually exclusive — setting one clears
+    // the other's comic_id, since a stale comic_id sitting alongside a custom image_path would
+    // leave it ambiguous which one currentSeriesCover()/the cover-loading code should prefer.
+    func setSeriesCoverImage(series: String, publisher: String, imagePath: String) {
+        queue.sync {
+            _ = run("""
+            INSERT INTO series_covers (series, publisher, comic_id, image_path) VALUES (?, ?, NULL, ?)
+            ON CONFLICT(series, publisher) DO UPDATE SET image_path = excluded.image_path, comic_id = NULL
+            """, args: [series, publisher, imagePath])
         }
     }
 

@@ -294,6 +294,8 @@ struct SidebarView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
+    @State private var draggedPublisher: String?
+    @State private var dropTargetPublisher: String?
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -312,7 +314,32 @@ struct SidebarView: View {
             if !vm.publishers.isEmpty {
                 Section("Publishers") {
                     ForEach(vm.publishers, id: \.self) { pub in
+                        let isTarget = dropTargetPublisher == pub && draggedPublisher != pub
                         navRow(pub, publisherColor: Design.publisherColor(pub), item: .publisher(pub))
+                            .onDrag {
+                                draggedPublisher = pub
+                                return NSItemProvider(object: NSString(string: pub))
+                            }
+                            .onDrop(of: [.plainText],
+                                    isTargeted: Binding(
+                                        get: { isTarget },
+                                        set: { active in dropTargetPublisher = active ? pub : nil }
+                                    )) { _, _ in
+                                guard let from = draggedPublisher else { return false }
+                                vm.movePublisher(from: from, to: pub)
+                                draggedPublisher = nil; dropTargetPublisher = nil
+                                return true
+                            }
+                            // An overlay rather than a second .listRowBackground call — navRow
+                            // already sets one for selection highlighting, and a later
+                            // .listRowBackground on the same row would replace it outright
+                            // (List reads only the outermost one), silently breaking the
+                            // selected-row highlight whenever it isn't also a drop target.
+                            .overlay(alignment: .bottom) {
+                                if isTarget {
+                                    Rectangle().fill(Design.brandGold).frame(height: 2)
+                                }
+                            }
                     }
                 }
             }

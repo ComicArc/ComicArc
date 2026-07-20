@@ -47,6 +47,7 @@ struct Run: Identifiable, Equatable, Hashable {
     var createdAt: String
     var comicCount: Int = 0
     var readCount:  Int = 0
+    var coverImagePath: String? = nil
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }

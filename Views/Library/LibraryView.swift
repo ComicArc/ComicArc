@@ -483,11 +483,13 @@ struct CharacterGroupCard: View {
 struct SeriesGroupCard: View {
     let group: DatabaseManager.SeriesGroup
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.fileService) private var fileService
 
     var body: some View {
         GroupCard(title: group.series, subtitle: nil,
                   count: group.count, finished: group.finished, started: group.started,
-                  coverId: group.coverId, placeholderIcon: "book.fill", placeholderIconSize: 40)
+                  coverId: group.coverId, coverImagePath: group.coverImagePath,
+                  placeholderIcon: "book.fill", placeholderIconSize: 40)
         .contextMenu {
             Button("Open Series") { vm.drillIntoSeries(group) }
             Button("Manage Series…") {
@@ -503,6 +505,14 @@ struct SeriesGroupCard: View {
                     await MainActor.run { vm.markRead(comics) }
                 }
             }
+            Divider()
+            // Distinct from "Set Cover" in Manage Series… (which picks among the series' own
+            // existing issue covers) — this lets a custom image (a promo poster, fan art,
+            // whatever) stand in instead of any actual issue's cover.
+            Button("Custom Cover…") { pickCoverImage() }
+            if group.coverImagePath != nil {
+                Button("Remove Custom Cover") { vm.clearSeriesCover(group.series, publisher: group.publisher) }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(group.series), \(group.count) issue\(group.count == 1 ? "" : "s")")
@@ -515,6 +525,18 @@ struct SeriesGroupCard: View {
         if group.finished == group.count { return "Complete" }
         if group.finished > 0 || group.started > 0 { return "\(group.finished) read" }
         return "Unread"
+    }
+
+    private func pickCoverImage() {
+        fileService.pickFiles(
+            allowsMultiple: false,
+            message: "Choose a cover image for \(group.series)",
+            prompt: "Set Cover"
+        ) { urls in
+            if let url = urls.first {
+                vm.setSeriesCoverImage(series: group.series, publisher: group.publisher, imageURL: url)
+            }
+        }
     }
 }
 
