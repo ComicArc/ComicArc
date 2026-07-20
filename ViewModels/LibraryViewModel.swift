@@ -688,6 +688,13 @@ final class LibraryViewModel: ObservableObject {
         }
         comics = list
         db.reorderComics(orderedIds: list.map(\.id))
+        // reorderComics() writes real positions, but every sort order except .manual ignores
+        // the position column entirely and re-derives its own order live — so without this,
+        // a drag "worked" for exactly one frame and then silently reverted on the very next
+        // reload() (switching series and back, a scan completing, anything), which is
+        // indistinguishable from "doesn't stick" to whoever's dragging. Dragging an item is
+        // an unambiguous signal the user wants custom order, so switch to it automatically.
+        if sortOrder != .manual { sortOrder = .manual }
     }
 
     func moveSeriesGroup(fromSeries: String, toSeries: String) {
@@ -753,6 +760,21 @@ final class LibraryViewModel: ObservableObject {
     func clearCharacterGroupCover(group: DatabaseManager.CharacterGroup) {
         db.clearCharacterGroupCover(groupName: group.groupName, publisher: group.publisher)
         reload()
+    }
+
+    // "Choose Existing Cover…" — picks from a comic already in the library (any comic,
+    // not just this group's own issues) rather than requiring an external image file, which
+    // was the only custom-cover option before this. Copies the comic's own rendered cover
+    // rather than pointing at it directly, so clearing that comic's own thumbnail cache
+    // later doesn't silently blank out this group's cover too.
+    func setCharacterGroupCover(group: DatabaseManager.CharacterGroup, usingCoverOf comic: Comic) {
+        let safe = "chargroup_\(group.publisher)_\(group.groupName)"
+            .components(separatedBy: .init(charactersIn: "/:")).joined(separator: "_")
+        Task.detached(priority: .userInitiated) { [db] in
+            guard let path = ThumbnailCache.shared.saveCoverFromComic(comic, destinationName: safe) else { return }
+            db.setCharacterGroupCover(groupName: group.groupName, publisher: group.publisher, imagePath: path)
+            await MainActor.run { LibraryViewModel.shared.reload() }
+        }
     }
 
     // Patches the comic in place (same approach as updateProgress below) instead of
@@ -841,7 +863,14 @@ final class LibraryViewModel: ObservableObject {
     func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
         db.seriesNameCollides(oldName: oldName, publisher: publisher, newName: newName)
     }
-    func reorderComics(orderedIds: [Int64]) { db.reorderComics(orderedIds: orderedIds) }
+    // Same reasoning as moveComic: writing positions means nothing to a sort order that
+    // doesn't read them (every one except .manual re-derives its own order live), so a
+    // reorder from SeriesManagerView's issue list would otherwise silently vanish the next
+    // time the underlying grid reloads under whatever sort was active before the sheet opened.
+    func reorderComics(orderedIds: [Int64]) {
+        db.reorderComics(orderedIds: orderedIds)
+        if sortOrder != .manual { sortOrder = .manual }
+    }
 
     @discardableResult
     func createRun(title: String, description: String) -> Int64 { db.createRun(title: title, description: description) }
@@ -915,9 +944,27 @@ final class LibraryViewModel: ObservableObject {
     }
     func clearRunCover(runId: Int64) { db.clearRunCover(runId: runId) }
 
+    // "Choose Existing Cover…" for a run — picks any comic already in the library instead of
+    // requiring an external image file.
+    func setRunCover(runId: Int64, usingCoverOf comic: Comic, onDone: @escaping () -> Void = {}) {
+        Task.detached(priority: .userInitiated) { [db] in
+            guard let path = ThumbnailCache.shared.saveCoverFromComic(comic, destinationName: "run_\(runId)") else { return }
+            db.setRunCover(runId: runId, imagePath: path)
+            await MainActor.run { onDone() }
+        }
+    }
+
     func setSeriesCoverImage(series: String, publisher: String, imageURL: URL) {
         guard let path = ThumbnailCache.shared.saveCustomSeriesCover(series: series, publisher: publisher, imageURL: imageURL) else { return }
         db.setSeriesCoverImage(series: series, publisher: publisher, imagePath: path)
+        reload()
+    }
+    // "Choose Existing Cover…" for a series — unlike the existing per-issue "Set as Series
+    // Cover" (ComicCard.swift, restricted to that comic's own series), this can pick any
+    // comic in the whole library, since series_covers.comic_id was never actually restricted
+    // to same-series in the schema — GroupCard already resolves any comic id to a thumbnail.
+    func setSeriesCover(series: String, publisher: String, usingCoverOf comic: Comic) {
+        db.setSeriesCover(series: series, publisher: publisher, comicId: comic.id)
         reload()
     }
     func clearSeriesCover(_ series: String, publisher: String) {

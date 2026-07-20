@@ -416,49 +416,46 @@ struct ReaderView: View {
                 .accessibilityLabel("Fit mode: \(fitMode.label)")
                 .help("Fit mode: \(fitMode.label)")
 
+                // Reading direction, double-page, scroll mode, color filter, and pin-toolbar
+                // used to each get their own always-visible icon — 5 separate controls for
+                // things that, since per-series reader preferences shipped this session, get
+                // set once for a series and rarely touched again. Consolidated into one
+                // settings menu so the bar reads as "things you touch every session" (bookmark,
+                // fit, autoplay, filmstrip) vs. "things you set once" (this menu), instead of
+                // eleven flat icons of equal visual weight.
                 Menu {
-                    ForEach(ColorFilter.allCases, id: \.self) { f in
-                        Button { colorFilterRaw = f.rawValue } label: {
-                            Label(f.label, systemImage: f.icon)
+                    Toggle(isOn: $rtl) {
+                        Label(rtl ? "Right-to-Left" : "Left-to-Right", systemImage: "text.justify.right")
+                    }
+                    if !scrollMode {
+                        Toggle(isOn: $doublePage) {
+                            Label("Double-Page Spread", systemImage: "rectangle.split.2x1")
                         }
                     }
-                } label: {
-                    Image(systemName: colorFilter.icon)
-                        .font(.title2)
-                        .foregroundStyle(colorFilter == .none ? .white.opacity(0.85) : Design.brandGold)
-                }
-                .menuStyle(.borderlessButton)
-                .accessibilityLabel("Color filter: \(colorFilter.label)")
-                .help("Color filter: \(colorFilter.label)")
-
-                Divider().frame(height: 16).background(.white.opacity(0.3)).accessibilityHidden(true)
-
-                Button { rtl.toggle() } label: {
-                    Image(systemName: rtl ? "arrow.right.to.line" : "arrow.left.to.line")
-                        .font(.title2)
-                        .foregroundStyle(rtl ? Design.brandGold : .white.opacity(0.85))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(rtl ? "Reading direction: Right to Left — tap for Left to Right" : "Reading direction: Left to Right — tap for Right to Left")
-                .help(rtl ? "Right-to-Left (RTL) — click for LTR" : "Left-to-Right — click for RTL (R)")
-
-                if !scrollMode {
-                    Button { doublePage.toggle() } label: {
-                        Image(systemName: doublePage ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                            .font(.title2).foregroundStyle(doublePage ? Design.brandGold : .white.opacity(0.85))
+                    Toggle(isOn: $scrollMode) {
+                        Label("Scroll Mode", systemImage: "scroll")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(doublePage ? "Double-page spread: on" : "Double-page spread: off")
-                    .help("Double-page spread (D)")
-                }
-
-                Button { scrollMode.toggle() } label: {
-                    Image(systemName: scrollMode ? "doc.text.image" : "scroll")
+                    Divider()
+                    Menu {
+                        ForEach(ColorFilter.allCases, id: \.self) { f in
+                            Button { colorFilterRaw = f.rawValue } label: {
+                                Label(f.label, systemImage: f.icon)
+                            }
+                        }
+                    } label: {
+                        Label("Color Filter: \(colorFilter.label)", systemImage: colorFilter.icon)
+                    }
+                    Divider()
+                    Toggle(isOn: $toolbarLocked) {
+                        Label("Pin Toolbar", systemImage: "pin")
+                    }
+                } label: {
+                    Image(systemName: "gearshape")
                         .font(.title2).foregroundStyle(.white.opacity(0.85))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(scrollMode ? "Switch to page mode" : "Switch to scroll mode")
-                .help(scrollMode ? "Switch to Page Mode" : "Switch to Scroll Mode")
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Reader settings")
+                .help("Reader settings")
 
                 Button { toggleAutoplay() } label: {
                     Image(systemName: autoplay ? "pause.circle.fill" : "play.circle")
@@ -484,15 +481,6 @@ struct ReaderView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(showFilmstrip ? "Hide page filmstrip" : "Show page filmstrip")
                 .help(showFilmstrip ? "Hide page filmstrip (G)" : "Show page filmstrip (G)")
-
-                Button { toolbarLocked.toggle() } label: {
-                    Image(systemName: toolbarLocked ? "pin.fill" : "pin")
-                        .font(.title2)
-                        .foregroundStyle(toolbarLocked ? Design.brandGold : .white.opacity(0.85))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(toolbarLocked ? "Toolbar pinned — tap to auto-hide" : "Pin toolbar")
-                .help(toolbarLocked ? "Toolbar pinned — click to auto-hide" : "Pin toolbar (always visible)")
             }
             .padding()
         }

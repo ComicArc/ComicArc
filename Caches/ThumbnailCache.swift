@@ -156,6 +156,20 @@ final class ThumbnailCache: @unchecked Sendable {
         return diskURL.path
     }
 
+    // Used by the in-app cover picker (choosing an existing comic's cover, rather than an
+    // external image file, for a run/group/series cover) — copies the comic's own already-
+    // rendered thumbnail instead of re-extracting+resizing from its archive. Must be called
+    // off the main thread: thumbnailSync blocks synchronously waiting on a background decode.
+    func saveCoverFromComic(_ comic: Comic, destinationName: String) -> String? {
+        _ = thumbnailSync(for: comic)  // ensures coversDir/<comicId>.jpg exists
+        let source = coversDir.appendingPathComponent("\(comic.id).jpg")
+        guard FileManager.default.fileExists(atPath: source.path) else { return nil }
+        let dest = coversDir.appendingPathComponent("\(destinationName).jpg")
+        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.copyItem(at: source, to: dest)
+        return FileManager.default.fileExists(atPath: dest.path) ? dest.path : nil
+    }
+
     // MARK: - Extraction
 
     private let imageExts = LibraryScanner.imageExtensions

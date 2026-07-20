@@ -218,10 +218,15 @@ struct ContinueReadingShelf: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("CONTINUE READING")
-                .font(.system(size: 13, weight: .black))
-                .foregroundStyle(.white)
-                .kerning(1.5)
+            HStack(spacing: 6) {
+                Image(systemName: "book.open.fill")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("CONTINUE READING")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(.white)
+                    .kerning(1.5)
+            }
             .padding(.horizontal, Design.gridSpacing)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -451,6 +456,7 @@ struct CharacterGroupCard: View {
     let group: DatabaseManager.CharacterGroup
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.fileService) private var fileService
+    @State private var showCoverPicker = false
 
     var body: some View {
         GroupCard(title: group.groupName, subtitle: group.publisher,
@@ -458,9 +464,15 @@ struct CharacterGroupCard: View {
                   coverId: group.coverId, coverImagePath: group.coverImagePath,
                   placeholderIcon: "books.vertical.fill", placeholderIconSize: 48)
         .contextMenu {
-            Button("Set Custom Cover…") { pickCoverImage() }
+            Button("Choose Existing Cover…") { showCoverPicker = true }
+            Button("Custom Image…") { pickCoverImage() }
             if group.coverImagePath != nil {
                 Button("Remove Custom Cover") { vm.clearCharacterGroupCover(group: group) }
+            }
+        }
+        .sheet(isPresented: $showCoverPicker) {
+            CoverPickerSheet(title: "Choose Cover for \(group.groupName)") { comic in
+                vm.setCharacterGroupCover(group: group, usingCoverOf: comic)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -484,6 +496,7 @@ struct SeriesGroupCard: View {
     let group: DatabaseManager.SeriesGroup
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.fileService) private var fileService
+    @State private var showCoverPicker = false
 
     var body: some View {
         GroupCard(title: group.series, subtitle: nil,
@@ -506,12 +519,19 @@ struct SeriesGroupCard: View {
                 }
             }
             Divider()
-            // Distinct from "Set Cover" in Manage Series… (which picks among the series' own
-            // existing issue covers) — this lets a custom image (a promo poster, fan art,
-            // whatever) stand in instead of any actual issue's cover.
-            Button("Custom Cover…") { pickCoverImage() }
+            // "Choose Existing Cover…" can pick any comic in the whole library (not just
+            // this series' own issues, unlike "Set Cover" in Manage Series…); "Custom
+            // Image…" is the fallback for a cover that isn't any comic at all — a promo
+            // poster, fan art, whatever's on disk.
+            Button("Choose Existing Cover…") { showCoverPicker = true }
+            Button("Custom Image…") { pickCoverImage() }
             if group.coverImagePath != nil {
                 Button("Remove Custom Cover") { vm.clearSeriesCover(group.series, publisher: group.publisher) }
+            }
+        }
+        .sheet(isPresented: $showCoverPicker) {
+            CoverPickerSheet(title: "Choose Cover for \(group.series)") { comic in
+                vm.setSeriesCover(series: group.series, publisher: group.publisher, usingCoverOf: comic)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -645,7 +665,6 @@ struct LibraryGridView: View {
     @State private var dropTargetId: Int64? = nil
 
     private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }
-    private var isManualSort: Bool { vm.sortOrder == .manual }
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: density.cardWidth, maximum: density.cardWidth + 8),
@@ -673,7 +692,13 @@ struct LibraryGridView: View {
                             else           { vm.selectedComic = comic }
                         }
                         .onDrag {
-                            guard isManualSort else { return NSItemProvider() }
+                            // Previously gated behind isManualSort — from any other sort
+                            // order (Publisher is the default) this returned an empty
+                            // NSItemProvider, so the drag never even started. From the
+                            // user's side that's indistinguishable from "reordering doesn't
+                            // work" — moveComic() now switches to Custom sort itself, so the
+                            // gesture no longer needs to be pre-conditioned on already being
+                            // in that mode.
                             draggedId = comic.id
                             return NSItemProvider(object: NSString(string: String(comic.id)))
                         }
@@ -682,7 +707,7 @@ struct LibraryGridView: View {
                                     get: { isTarget },
                                     set: { active in dropTargetId = active ? comic.id : nil }
                                 )) { _, _ in
-                            guard isManualSort, let from = draggedId else { return false }
+                            guard let from = draggedId else { return false }
                             vm.moveComic(id: from, before: comic.id)
                             draggedId = nil; dropTargetId = nil
                             return true

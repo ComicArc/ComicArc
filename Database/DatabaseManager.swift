@@ -449,24 +449,34 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Places a dated special issue (annual/one-shot/etc., per is_special_issue) between the
-    // two mainline issues in its series that chronologically bracket it, using cover year +
-    // month from ComicInfo.xml — e.g. an Annual cover-dated August 2005 sitting between
-    // Batman #12 (June 2005) and #13 (September 2005). This is the reconciliation between an
-    // earlier bug fix (specials were interleaving with mainline issues essentially at random,
-    // fixed by always sorting them after every mainline issue — see resortSpecialIssuesIfNeeded)
-    // and a later request to place annuals chronologically: a *confident* chronological
-    // placement is strictly better than always-last, but a guess with no real date data would
-    // reintroduce exactly the bug that was fixed. So this only overrides the default when:
-    //   1. the special itself has both year and cover_month parsed from ComicInfo.xml, and
-    //   2. at least two dated mainline issues in the same series bracket that date (never
-    //      guess "goes after the last known issue" — that's already what always-last gives), and
-    //   3. there's still room between those two mainline positions (mainlinePositionStride
-    //      leaves 100 of headroom per issue specifically for this; a manually-reordered series
-    //      collapses back to a dense 0,1,2... sequence via reorderComics(), which has no room —
-    //      so a user's manual order is left alone rather than being fought on every scan).
+    // Places specials (annual/one-shot/etc., per is_special_issue) somewhere better than
+    // "always last" within their series, in two tiers:
+    //
+    //  Tier 1 — real dates: when a special has both year and cover_month from ComicInfo.xml,
+    //  and at least two mainline issues in the same series also have real dates bracketing
+    //  it, place it exactly between them (e.g. an Annual cover-dated August 2005 between
+    //  Batman #12 (June 2005) and #13 (September 2005)).
+    //
+    //  Tier 2 — proportional fallback: most real-world libraries have NO ComicInfo.xml at
+    //  all (confirmed directly against a real 1478-comic test library: only 10 comics had
+    //  any year metadata, zero had month), so tier 1 almost never fires and every annual
+    //  across a whole series was still landing dumped at the very end after the highest
+    //  mainline issue — not what "chronological where possible" was supposed to mean in
+    //  practice. When a special has no date match, but its series does have annual-style
+    //  sequential numbering (Annual #1, #2, #3...) and at least 2 mainline issues, spread
+    //  the specials proportionally across the mainline issue range by their own sequence
+    //  number — Annual #1 of 4 lands about a quarter of the way through the run, #2 about
+    //  half way, etc. This is a guess, not a real date, but it's a far better guess than
+    //  "every annual after issue #700" and matches how annuals are actually published
+    //  (roughly one per year, spread across a series' run) closely enough to be useful.
+    //
+    // Both tiers respect a manual reorder: reorderComics() collapses a series' positions to
+    // a dense 0,1,2... sequence with no headroom, which both tiers' room checks reject —
+    // once a user has dragged a series into a custom order, this function leaves it alone
+    // rather than fighting it on every scan.
+    //
     // Not a one-time migration: called after every scan and metadata refresh so newly-added
-    // or newly-dated specials keep getting placed as more of the library gains date metadata.
+    // specials, or specials that just gained real date metadata, keep getting repositioned.
     func positionSpecialsChronologically() {
         queue.sync {
             struct Row { let id: Int64; let seriesKey: String; let special: Bool
@@ -494,20 +504,41 @@ final class DatabaseManager: @unchecked Sendable {
 
             var updates: [(Int64, Int)] = []
             for (_, group) in Dictionary(grouping: rows, by: \.seriesKey) {
-                let mainlineDated = group
-                    .filter { !$0.special && $0.year != nil && $0.month != nil }
-                    .sorted { $0.position < $1.position }
-                guard mainlineDated.count >= 2 else { continue }
+                let mainline = group.filter { !$0.special }.sorted { $0.position < $1.position }
+                let mainlineDated = mainline.filter { $0.year != nil && $0.month != nil }
+                let allSpecials = group.filter { $0.special }
 
-                for special in group where special.special {
-                    guard let y = special.year, let m = special.month else { continue }
-                    let specialKey = y * 100 + m
-                    guard let afterIdx = mainlineDated.firstIndex(where: { $0.year! * 100 + $0.month! > specialKey }),
-                          afterIdx > 0 else { continue }
-                    let before = mainlineDated[afterIdx - 1]
-                    let after  = mainlineDated[afterIdx]
-                    guard after.position - before.position > 1 else { continue }
-                    updates.append((special.id, before.position + (after.position - before.position) / 2))
+                // Tier 1: real dates
+                var placedIds = Set<Int64>()
+                if mainlineDated.count >= 2 {
+                    for special in allSpecials {
+                        guard let y = special.year, let m = special.month else { continue }
+                        let specialKey = y * 100 + m
+                        guard let afterIdx = mainlineDated.firstIndex(where: { $0.year! * 100 + $0.month! > specialKey }),
+                              afterIdx > 0 else { continue }
+                        let before = mainlineDated[afterIdx - 1]
+                        let after  = mainlineDated[afterIdx]
+                        guard after.position - before.position > 1 else { continue }
+                        updates.append((special.id, before.position + (after.position - before.position) / 2))
+                        placedIds.insert(special.id)
+                    }
+                }
+
+                // Tier 2: proportional fallback for whatever tier 1 didn't place. Only
+                // engages for specials still sitting in the untouched "always last" band
+                // (specialBandOffset+) — one already moved by tier 1, or by a manual drag,
+                // is left alone.
+                guard let minPos = mainline.first?.position, let maxPos = mainline.last?.position,
+                      maxPos > minPos, mainline.count >= 2 else { continue }
+                let undated = allSpecials
+                    .filter { !placedIds.contains($0.id) && $0.position >= specialBandOffset }
+                    .sorted { $0.position < $1.position }
+                let n = undated.count
+                guard n > 0 else { continue }
+                for (idx, special) in undated.enumerated() {
+                    let fraction = Double(idx + 1) / Double(n + 1)
+                    let target = minPos + Int((Double(maxPos - minPos) * fraction).rounded())
+                    updates.append((special.id, target))
                 }
             }
             guard !updates.isEmpty else { return }
@@ -518,6 +549,8 @@ final class DatabaseManager: @unchecked Sendable {
             exec("COMMIT")
         }
     }
+
+    private var specialBandOffset: Int { ComicSortClassifier.specialBandOffset }
 
     // MARK: - Comics
 

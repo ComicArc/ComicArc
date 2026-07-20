@@ -143,6 +143,7 @@ struct RunListCard: View {
     let onSelect:   () -> Void
 
     @State private var isHovered = false
+    @State private var showCoverPicker = false
     @Environment(\.fileService) private var fileService
 
     var body: some View {
@@ -201,12 +202,18 @@ struct RunListCard: View {
         .accessibilityValue(run.comicCount > 0 ? "\(run.readCount) of \(run.comicCount) read" : "Empty")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
-            Button("Custom Cover…") { pickCoverImage() }
+            Button("Choose Existing Cover…") { showCoverPicker = true }
+            Button("Custom Image…") { pickCoverImage() }
             if run.coverImagePath != nil {
                 Button("Remove Custom Cover") {
                     LibraryViewModel.shared.clearRunCover(runId: run.id)
                     onCoverChanged()
                 }
+            }
+        }
+        .sheet(isPresented: $showCoverPicker) {
+            CoverPickerSheet(title: "Choose Cover for \(run.title)") { comic in
+                LibraryViewModel.shared.setRunCover(runId: run.id, usingCoverOf: comic, onDone: onCoverChanged)
             }
         }
     }
