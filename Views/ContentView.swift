@@ -174,20 +174,28 @@ struct ContentView: View {
             .help("Import comic files (⌘O)")
         }
 
-        // Grid density (library only)
+        // Grid density (library only). Hidden via opacity/disabled rather than omitted
+        // outright — a conditionally-omitted ToolbarItem collapses to zero width, which
+        // visibly shifts every item after it (Bulk select, Settings) left or right every
+        // time you navigate in or out of the library section.
         ToolbarItem(id: "density", placement: .primaryAction) {
-            if isLibrarySection { DensityPicker() }
+            DensityPicker()
+                .opacity(isLibrarySection ? 1 : 0)
+                .disabled(!isLibrarySection)
+                .allowsHitTesting(isLibrarySection)
         }
 
-        // Bulk select (issue level only)
+        // Bulk select (issue level only) — same fixed-width treatment as density above.
         ToolbarItem(id: "bulk", placement: .primaryAction) {
-            if vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil {
-                Button { vm.toggleBulkMode() } label: {
-                    Image(systemName: vm.bulkMode ? "checklist.checked" : "checklist")
-                }
-                .foregroundStyle(vm.bulkMode ? Design.brandBlue : .primary)
-                .help(vm.bulkMode ? "Exit selection mode" : "Select multiple comics (⌘E)")
+            let show = vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil
+            Button { vm.toggleBulkMode() } label: {
+                Image(systemName: vm.bulkMode ? "checklist.checked" : "checklist")
             }
+            .foregroundStyle(vm.bulkMode ? Design.brandBlue : .primary)
+            .help(vm.bulkMode ? "Exit selection mode" : "Select multiple comics (⌘E)")
+            .opacity(show ? 1 : 0)
+            .disabled(!show)
+            .allowsHitTesting(show)
         }
 
         // Settings — previously only reachable via the app menu (ComicArc ▸ Settings…) or
@@ -381,6 +389,11 @@ struct SidebarView: View {
                     Text(t).font(.caption2).foregroundStyle(.tertiary)
                 }
             }
+            // Sidebar rows had no vertical padding of their own, so the clickable/tappable
+            // height was only as tall as the text glyph itself — noticeably smaller than the
+            // comfortable ~28pt row height native Mac sidebars (Mail, Notes, Finder) use.
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .listRowBackground(

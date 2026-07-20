@@ -240,7 +240,10 @@ struct ReaderView: View {
             if !scrollMode { windowService.hideCursorUntilMouseMoves() }
         }
         hideTask = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: w)
+        // README has always documented this as "fade after five seconds" — the actual value
+        // was 3, which reads as too fast for a reading app (controls disappearing mid-glance
+        // at the page counter). Bumped to 6, split the difference toward more forgiving.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: w)
     }
 
     // MARK: - Page content
@@ -471,8 +474,9 @@ struct ReaderView: View {
             .accessibilityLabel(rtl ? "Next page" : "Previous page")
             .help(rtl ? "Next page (→)" : "Previous page (←)")
 
-            Spacer()
-
+            // Previously fixed at 300pt regardless of window width, leaving most of a wide
+            // window's bottom bar empty on either side. Now fills the space actually
+            // available between the two page-turn buttons.
             VStack(spacing: 6) {
                 if comic.pageCount > 1 {
                     Slider(
@@ -483,7 +487,7 @@ struct ReaderView: View {
                         in: 0...Double(max(1, comic.pageCount - 1)),
                         step: 1
                     )
-                    .frame(width: 300)
+                    .frame(maxWidth: .infinity)
                     .tint(Design.brandBlue)
                     .accessibilityLabel("Page scrubber")
                     .accessibilityValue("Page \(currentPage + 1) of \(comic.pageCount)")
@@ -537,8 +541,7 @@ struct ReaderView: View {
                     }
                 }
             }
-
-            Spacer()
+            .padding(.horizontal, 20)
 
             Button { rtl ? prevPage() : nextPage() } label: {
                 Image(systemName: "chevron.right.circle.fill")

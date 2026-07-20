@@ -255,7 +255,9 @@ struct iPadReaderView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(3))
+            // Matches the same bump on macOS — 3 seconds reads as too fast for a reading
+            // app, and the two platforms should feel the same here.
+            try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.25)) { showBars = false }
