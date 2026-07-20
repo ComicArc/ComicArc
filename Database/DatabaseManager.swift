@@ -304,6 +304,17 @@ final class DatabaseManager: @unchecked Sendable {
             PRIMARY KEY (series, publisher)
         )
         """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS series_reader_prefs (
+            series        TEXT NOT NULL,
+            publisher     TEXT NOT NULL,
+            fit_mode      TEXT NOT NULL,
+            rtl           INTEGER NOT NULL,
+            double_spread INTEGER NOT NULL,
+            scroll_mode   INTEGER NOT NULL,
+            PRIMARY KEY (series, publisher)
+        )
+        """)
         exec("CREATE INDEX IF NOT EXISTS idx_history_read_at    ON reading_history(read_at DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_comic    ON bookmarks(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_shelves      ON comic_shelves(comic_id)")
@@ -1356,6 +1367,40 @@ final class DatabaseManager: @unchecked Sendable {
             bindArgs(stmt, args: [series, publisher])
             guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
             return sqlite3_column_int64(stmt, 0)
+        }
+    }
+
+    // MARK: - Series reader preferences
+
+    struct SeriesReaderPrefs {
+        let fitMode:      String
+        let rtl:          Bool
+        let doubleSpread: Bool
+        let scrollMode:   Bool
+    }
+
+    func setSeriesReaderPrefs(series: String, publisher: String, fitMode: String, rtl: Bool, doubleSpread: Bool, scrollMode: Bool) {
+        queue.sync {
+            _ = run("""
+            INSERT OR REPLACE INTO series_reader_prefs (series, publisher, fit_mode, rtl, double_spread, scroll_mode)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, args: [series, publisher, fitMode, rtl ? 1 : 0, doubleSpread ? 1 : 0, scrollMode ? 1 : 0])
+        }
+    }
+
+    func seriesReaderPrefs(series: String, publisher: String) -> SeriesReaderPrefs? {
+        queue.sync {
+            var raw: OpaquePointer?
+            let sql = "SELECT fit_mode, rtl, double_spread, scroll_mode FROM series_reader_prefs WHERE series = ? AND publisher = ?"
+            guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            bindArgs(stmt, args: [series, publisher])
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+            let fitMode = String(cString: sqlite3_column_text(stmt, 0))
+            return SeriesReaderPrefs(fitMode: fitMode,
+                                      rtl:          sqlite3_column_int(stmt, 1) != 0,
+                                      doubleSpread: sqlite3_column_int(stmt, 2) != 0,
+                                      scrollMode:   sqlite3_column_int(stmt, 3) != 0)
         }
     }
 

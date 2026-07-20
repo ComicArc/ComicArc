@@ -19,7 +19,10 @@ struct iPadReaderView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
-    @AppStorage("scrollMode")    private var scrollMode = false
+    // Seeded per-series in init() (falling back to this global default for a series that's
+    // never been read before), then persisted per-series as it changes — matches the macOS
+    // reader's per-series preference behavior.
+    @State private var scrollMode: Bool
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
     @State private var autoplay = false
     @State private var countdownProgress: Double = 0
@@ -34,6 +37,8 @@ struct iPadReaderView: View {
         self.comic = comic
         self.onClose = onClose
         _currentPage = State(initialValue: max(0, comic.progress))
+        let prefs = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
+        _scrollMode = State(initialValue: prefs?.scrollMode ?? UserDefaults.standard.bool(forKey: "scrollMode"))
     }
 
     private var pageCount: Int { comic.pageCount }
@@ -74,6 +79,19 @@ struct iPadReaderView: View {
             if phase != .active { saveProgress() }
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
+        .onChange(of: scrollMode) { _, newValue in
+            // Preserve fit mode / RTL / double-page if the Mac reader already set them for
+            // this series — the iPad reader doesn't expose those toggles, so it should only
+            // ever change the one preference it actually controls.
+            let existing = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
+            DatabaseManager.shared.setSeriesReaderPrefs(
+                series: comic.series, publisher: comic.publisher,
+                fitMode: existing?.fitMode ?? FitMode.fitPage.rawValue,
+                rtl: existing?.rtl ?? false,
+                doubleSpread: existing?.doubleSpread ?? false,
+                scrollMode: newValue
+            )
+        }
     }
 
     // MARK: - Page reader (swipe between pages)

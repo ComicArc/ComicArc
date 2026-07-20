@@ -59,18 +59,22 @@ struct ReaderView: View {
     @State private var currentPage:      Int
     @State private var sessionStartPage: Int
 
-    // Mode toggles (persisted)
-    @AppStorage("scrollMode")           private var scrollMode    = false
-    @AppStorage("readingDirectionRTL")  private var rtl           = false
-    @AppStorage("readerFitMode")        private var fitModeRaw    = FitMode.fitPage.rawValue
+    // Mode toggles — seeded per-series in init() (falling back to these global defaults for
+    // a series that's never been read before), then persisted per-series as the user changes
+    // them, so switching between e.g. a manga (RTL) and a Western comic doesn't require
+    // re-toggling reading direction every time.
     @AppStorage("readerColorFilter")    private var colorFilterRaw = ColorFilter.none.rawValue
+
+    @State private var scrollMode: Bool
+    @State private var rtl:        Bool
+    @State private var fitModeRaw: String
 
     // Derived
     private var fitMode: FitMode         { FitMode(rawValue: fitModeRaw) ?? .fitPage }
     private var colorFilter: ColorFilter { ColorFilter(rawValue: colorFilterRaw) ?? .none }
 
     // Reader features
-    @State private var doublePage        = false
+    @State private var doublePage: Bool
     @State private var currentPageIsSpread = false  // updated by PagedModeView after each load
     @State private var saveProgressWorkItem: DispatchWorkItem?
     @State private var autoplay          = false
@@ -113,6 +117,22 @@ struct ReaderView: View {
         _currentPage      = State(initialValue: max(0, comic.progress))
         _sessionStartPage = State(initialValue: max(0, comic.progress))
         _comicRating      = State(initialValue: comic.rating)
+
+        let defaults = UserDefaults.standard
+        let prefs = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
+        _fitModeRaw = State(initialValue: prefs?.fitMode ?? defaults.string(forKey: "readerFitMode") ?? FitMode.fitPage.rawValue)
+        _rtl        = State(initialValue: prefs?.rtl ?? defaults.bool(forKey: "readingDirectionRTL"))
+        _doublePage = State(initialValue: prefs?.doubleSpread ?? false)
+        _scrollMode = State(initialValue: prefs?.scrollMode ?? defaults.bool(forKey: "scrollMode"))
+    }
+
+    // Called whenever fit mode / RTL / double-page / scroll mode changes, so the next comic
+    // opened from this same series picks up where this one left off.
+    private func saveSeriesPrefs() {
+        DatabaseManager.shared.setSeriesReaderPrefs(
+            series: comic.series, publisher: comic.publisher,
+            fitMode: fitModeRaw, rtl: rtl, doubleSpread: doublePage, scrollMode: scrollMode
+        )
     }
 
     var body: some View {
@@ -202,6 +222,10 @@ struct ReaderView: View {
         .onKeyPress(KeyEquivalent("-")) { zoomOut(); return .handled }
         .onKeyPress(KeyEquivalent("0")) { resetZoom(); return .handled }
         .onChange(of: currentPage)     { _, _ in resetZoom(); loadBookmarks() }
+        .onChange(of: fitModeRaw)      { _, _ in saveSeriesPrefs() }
+        .onChange(of: rtl)             { _, _ in saveSeriesPrefs() }
+        .onChange(of: doublePage)      { _, _ in saveSeriesPrefs() }
+        .onChange(of: scrollMode)      { _, _ in saveSeriesPrefs() }
         .onKeyPress(KeyEquivalent("w"), action: { onClose(); return .handled })
         .onKeyPress(KeyEquivalent("f")) {
             windowService.toggleFullScreen()
