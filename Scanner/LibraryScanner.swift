@@ -32,6 +32,7 @@ final class LibraryScanner: @unchecked Sendable {
 
     struct ScanState: Sendable {
         var running = false; var total = 0; var done = 0; var added = 0
+        var removed = 0; var recovered = 0; var stillCorrupted = 0
         var cancelled = false; var error: String?
     }
 
@@ -131,16 +132,21 @@ final class LibraryScanner: @unchecked Sendable {
         if !state.cancelled && fm.fileExists(atPath: libraryPath) {
             let stale = db.stalePaths().filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
             if !stale.isEmpty { db.softDelete(stale) }
+            setState { $0.removed = stale.count }
         }
 
         // Recovery pass: comics that were inserted with page_count=0 (corrupted at import time)
         // get a second chance now that the file may be readable.
         if !state.cancelled {
+            var recovered = 0
+            var stillCorrupted = 0
             for (id, path) in db.zeroPageCountPaths() {
                 if state.cancelled { break }
                 let count = pageCount(path)
-                if count > 0 { db.updatePageCount(comicId: id, count: count) }
+                if count > 0 { db.updatePageCount(comicId: id, count: count); recovered += 1 }
+                else { stillCorrupted += 1 }
             }
+            setState { $0.recovered = recovered; $0.stillCorrupted = stillCorrupted }
         }
 
         setState { $0.running = false }

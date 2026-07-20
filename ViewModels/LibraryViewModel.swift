@@ -68,6 +68,8 @@ final class LibraryViewModel: ObservableObject {
     }
     @Published var scanState:           LibraryScanner.ScanState = .init()
     @Published var isScanning:          Bool = false
+    @Published var showScanReport:      Bool = false
+    private var scanReportDismissTask: DispatchWorkItem?
     @Published var isResyncing:         Bool = false
     @Published var isLoading:           Bool = false
     @Published var isLibraryAvailable:  Bool = true
@@ -514,6 +516,7 @@ final class LibraryViewModel: ObservableObject {
                     self.indexSpotlight()
                     self.notifyScanComplete(added: state.added)
                     self.refreshDuplicates()
+                    self.presentScanReport(state)
                 }
             }
         }
@@ -809,6 +812,26 @@ final class LibraryViewModel: ObservableObject {
             }
             try? await CSSearchableIndex.default().indexSearchableItems(items)
         }
+    }
+
+    // A scan runs silently on every launch now (not just when the user hits the Scan button),
+    // so without some in-app feedback a real reorganization — files renamed, moved, or gone
+    // missing since last launch — would be invisible unless the user happened to notice the
+    // comic count changed. Only surfaced when there's something worth reporting; a no-op scan
+    // (the common case) stays silent rather than showing "0 added, 0 removed" every launch.
+    private func presentScanReport(_ state: LibraryScanner.ScanState) {
+        guard state.error == nil, !state.cancelled else { return }
+        guard state.added > 0 || state.removed > 0 || state.recovered > 0 || state.stillCorrupted > 0 else { return }
+        scanReportDismissTask?.cancel()
+        showScanReport = true
+        let task = DispatchWorkItem { [weak self] in self?.showScanReport = false }
+        scanReportDismissTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: task)
+    }
+
+    func dismissScanReport() {
+        scanReportDismissTask?.cancel()
+        showScanReport = false
     }
 
     // MARK: - Scan notifications

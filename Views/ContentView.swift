@@ -362,6 +362,8 @@ struct SidebarView: View {
                     scanErrorBanner(err)
                 } else if vm.isScanning {
                     sidebarScanProgress
+                } else if vm.showScanReport {
+                    scanReportBanner
                 }
             }
         }
@@ -457,6 +459,41 @@ struct SidebarView: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
         }
         .background(Design.navBackground)
+    }
+
+    // Summarizes what the most recent scan actually changed — added / removed / recovered /
+    // still-corrupted counts — auto-dismissed by the view model a few seconds after appearing.
+    // Only shown when the scan found something worth reporting (see presentScanReport).
+    private var scanReportBanner: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Design.brandGold).font(.caption)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Library Updated").font(.caption.bold()).foregroundStyle(.primary)
+                    Text(scanReportLine).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { vm.dismissScanReport() } label: {
+                    Image(systemName: "xmark").font(.caption2)
+                }
+                .buttonStyle(.plain).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+        }
+        .background(Design.navBackground)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var scanReportLine: String {
+        let s = vm.scanState
+        var parts: [String] = []
+        if s.added > 0     { parts.append("\(s.added) added") }
+        if s.removed > 0   { parts.append("\(s.removed) missing") }
+        if s.recovered > 0 { parts.append("\(s.recovered) recovered") }
+        if s.stillCorrupted > 0 { parts.append("\(s.stillCorrupted) unreadable") }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder
