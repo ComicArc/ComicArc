@@ -40,10 +40,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            // Centered with a max width rather than filling the whole pane — a Form this
-            // wide (previously fixed at 520pt for the old floating-window popup) reads as a
-            // wall of controls edge-to-edge on a full-size window; capping it keeps label/
-            // control pairs readable while still using the real estate a fixed popup couldn't.
+            // Capped width keeps controls readable on a full-size window instead of stretching edge-to-edge.
             Form {
                 Section {
                     Picker("Theme", selection: Binding(

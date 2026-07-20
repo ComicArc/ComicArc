@@ -47,9 +47,7 @@ struct MiniComicCard: View {
 
 // MARK: - Cover picker (choose an existing comic's cover)
 
-// Reusable "Choose Existing Cover…" sheet — browsing and picking a cover from a comic
-// already in the library, rather than requiring an external image file, which was
-// previously the only option for series/run/group custom covers.
+// Sheet for picking an existing library comic's cover, as an alternative to an external image file.
 struct CoverPickerSheet: View {
     let title: String
     let onPick: (Comic) -> Void

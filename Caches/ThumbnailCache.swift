@@ -7,7 +7,7 @@ final class ThumbnailCache: @unchecked Sendable {
     private init() {
         // 160×240 ARGB ≈ 150 KB per thumbnail; 500 images ≈ 75 MB upper bound.
         cache.countLimit      = 500
-        cache.totalCostLimit  = 80 * 1024 * 1024  // 80 MB (cost set per image below)
+        cache.totalCostLimit  = 80 * 1024 * 1024
     }
 
     private let cache = NSCache<NSNumber, PlatformImage>()
@@ -46,7 +46,6 @@ final class ThumbnailCache: @unchecked Sendable {
                 cache.setObject(img, forKey: key, cost: img.byteSize)
                 result = img
             } else {
-                // Evict any corrupted entry before re-extracting
                 try? FileManager.default.removeItem(at: diskURL)
                 let img = extract(from: comic.filePath)
                 let thumb = img.flatMap { PlatformImage.resized(source: $0, to: thumbSize) }
@@ -82,7 +81,6 @@ final class ThumbnailCache: @unchecked Sendable {
         return result
     }
 
-    // Returns the image only if the file exists and is non-zero in size.
     private func validatedDiskImage(at url: URL) -> PlatformImage? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               (attrs[.size] as? Int ?? 0) > 0 else { return nil }

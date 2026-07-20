@@ -11,10 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.servicesProvider = servicesProvider
     }
 
-    // Closing the window should mean the app is actually closed — no lingering in the
-    // background/Dock with the watcher, scanner, and DB connection all still alive. This
-    // used to be a hidden, defaulted-off Settings toggle, so closing the window did nothing
-    // for most people; now it always fully quits, running the same cleanup as Cmd+Q below.
+    // Closing the window means the app is fully quit — no lingering in the background with
+    // the watcher, scanner, and DB connection still alive.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     // Quitting should mean quitting: stop the file watcher, cancel any in-flight scan

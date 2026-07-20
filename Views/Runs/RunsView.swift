@@ -18,7 +18,6 @@ struct RunsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header bar
             HStack {
                 Text("RUNS")
                     .font(.system(size: 20, weight: .black))
@@ -276,7 +275,6 @@ struct RunDetailView: View {
             runPageHeader
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
-            // Section title: "READING ORDER [count]"
             HStack(spacing: 8) {
                 Text("READING ORDER")
                     .font(.system(size: 13, weight: .black))
@@ -305,7 +303,6 @@ struct RunDetailView: View {
 
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
-            // Items list
             if itemsLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if items.isEmpty {
@@ -357,11 +354,10 @@ struct RunDetailView: View {
         }
     }
 
-    // MARK: - Page header (matches Python run_detail.html .page-header)
+    // MARK: - Page header
 
     private var runPageHeader: some View {
         HStack(alignment: .top, spacing: 20) {
-            // Left: title + description + buy link
             VStack(alignment: .leading, spacing: 8) {
                 Text(currentRun.title)
                     .font(.system(size: 32, weight: .black))
@@ -387,7 +383,6 @@ struct RunDetailView: View {
 
             Spacer(minLength: 10)
 
-            // Right: star rating + action buttons
             VStack(alignment: .trailing, spacing: 10) {
                 StarRating(rating: runRating) { star in
                     let newVal = star == runRating ? 0 : star
@@ -507,7 +502,6 @@ struct RunItemRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Position badge
             Text("#\(item.position + 1)")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -529,14 +523,11 @@ struct RunItemRow: View {
             .frame(width: 36, height: 54)
             .comicCardStyle()
 
-            // Info column
             VStack(alignment: .leading, spacing: 4) {
-                // Title
                 Text(item.comic.title)
                     .font(.body)
                     .lineLimit(1)
 
-                // Publisher + series
                 HStack(spacing: 6) {
                     PublisherBadge(publisher: item.comic.publisher)
                     if item.comic.series != "General" {
@@ -547,14 +538,12 @@ struct RunItemRow: View {
                     }
                 }
 
-                // Progress bar
                 if item.comic.isStarted && !item.comic.isFinished {
                     ProgressView(value: item.comic.progressPercent)
                         .progressViewStyle(.linear)
                         .frame(width: 140)
                 }
 
-                // Notes preview
                 if !item.notes.isEmpty {
                     Text(item.notes)
                         .font(.caption2).foregroundStyle(.tertiary)
@@ -564,7 +553,6 @@ struct RunItemRow: View {
 
             Spacer()
 
-            // Notes button
             Button {
                 notesText = item.notes
                 showNotes = true
@@ -578,7 +566,6 @@ struct RunItemRow: View {
                 notesPopover
             }
 
-            // Drag handle
             Image(systemName: "line.3.horizontal").foregroundStyle(.quaternary)
         }
         .padding(.vertical, 6)

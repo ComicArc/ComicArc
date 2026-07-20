@@ -109,17 +109,14 @@ final class LibraryViewModel: ObservableObject {
     @Published var selectedRun:       Run? = nil
     @Published var readerComic:       Comic? = nil
 
-    // Browse hierarchy state
     @Published var characterGroups:   [DatabaseManager.CharacterGroup] = []
     @Published var seriesGroups:      [DatabaseManager.SeriesGroup] = []
     @Published var selectedGroup:     DatabaseManager.CharacterGroup? = nil
     @Published var useGroupedView:    Bool = true
 
-    // Bulk selection
     @Published var bulkMode:          Bool = false
     @Published var selectedComicIds:  Set<Int64> = []
 
-    // Series manager sheet trigger
     @Published var showSeriesManager: Bool = false
 
     // Possible duplicates (same publisher+series+issue# imported under different filenames)
@@ -201,7 +198,6 @@ final class LibraryViewModel: ObservableObject {
         scan()
         #endif
 
-        // Restore library drill-down state (group/series) after initial data load
         if case .library = destination { restoreLibraryDrillDown() }
     }
 
@@ -303,7 +299,7 @@ final class LibraryViewModel: ObservableObject {
     private var reloadGeneration = 0
 
     func reload() {
-        // Debounce: coalesce rapid consecutive calls into one (16ms window)
+        // Debounce rapid calls
         reloadWorkItem?.cancel()
         let w = DispatchWorkItem { [weak self] in self?._reload() }
         reloadWorkItem = w
@@ -544,7 +540,7 @@ final class LibraryViewModel: ObservableObject {
         let path = libraryPath
         guard !path.isEmpty, !isScanning else { return }
         isScanning = true
-        scanState = .init()   // Clear previous error before starting a fresh scan
+        scanState = .init()
         LibraryScanner.shared.scan(libraryPath: path) { [weak self] state in
             DispatchQueue.main.async {
                 guard let self else { return }

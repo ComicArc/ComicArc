@@ -24,8 +24,8 @@ final class DatabaseManager: @unchecked Sendable {
         exec("PRAGMA journal_mode = WAL")
         exec("PRAGMA synchronous = NORMAL")
         exec("PRAGMA cache_size = -8000")
-        exec("PRAGMA journal_size_limit = 67108864")  // cap WAL at 64 MB
-        exec("PRAGMA mmap_size = 268435456")           // 256 MB memory-mapped I/O for fast reads
+        exec("PRAGMA journal_size_limit = 67108864")
+        exec("PRAGMA mmap_size = 268435456")
         registerCustomFunctions()
         recoverIfCorrupted(dbURL: dbURL)
         migrate()
@@ -59,7 +59,6 @@ final class DatabaseManager: @unchecked Sendable {
            String(cString: p) == "ok" { ok = true }
         guard !ok else { return }
 
-        // Corruption detected — try the backup
         let bakURL = Self.dataDir.appendingPathComponent("comics.db.bak")
         guard FileManager.default.fileExists(atPath: bakURL.path) else { return }
         sqlite3_close(db); db = nil
@@ -350,14 +349,12 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
 
-        // Seed built-in shelves (INSERT OR IGNORE so they only run once)
         let builtins = [("Currently Reading", 0), ("Want to Read", 1), ("Finished", 2), ("DNF", 3)]
         for (name, pos) in builtins {
             exec("INSERT OR IGNORE INTO shelves (name, is_builtin, position) VALUES ('\(name)', 1, \(pos))")
 
         }
 
-        // Versioned new columns
         exec("ALTER TABLE comics ADD COLUMN file_hash TEXT")
         exec("ALTER TABLE runs   ADD COLUMN rating INTEGER")
         exec("ALTER TABLE runs   ADD COLUMN review TEXT")
@@ -857,7 +854,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Batched variant: a single transaction instead of one round-trip per id.
     func setInReadingList(_ ids: [Int64], _ value: Bool) {
         guard !ids.isEmpty else { return }
         queue.sync {

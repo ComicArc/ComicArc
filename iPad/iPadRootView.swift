@@ -260,7 +260,6 @@ private struct iPadContentColumn: View {
                 .disabled(vm.isScanning || vm.isResyncing)
                 .accessibilityLabel("Rescan Library")
             }
-            // Previously only reachable inside Settings — one tap away now, matching macOS.
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { vm.resyncLibrary() }) {
                     if vm.isResyncing {
@@ -351,10 +350,7 @@ private struct iPadComicGrid: View {
     let comics: [Comic]
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
-    // Mac's LibraryGridView has drag-reorder (onDrag/onDrop); this grid had none at all —
-    // the underlying order already reflects any reordering done on Mac (same DB), but there
-    // was no way to actually author an order from iPad itself. Same gesture works via
-    // long-press-and-drag on iOS too.
+    // Drag-reorder here matches Mac's LibraryGridView; same gesture works via long-press on iOS.
     @State private var draggedId: Int64?
     @State private var dropTargetId: Int64?
 

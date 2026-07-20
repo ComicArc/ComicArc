@@ -22,7 +22,6 @@ struct SeriesManagerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Manage Series")
@@ -42,12 +41,10 @@ struct SeriesManagerView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Rename section
                     renameSection
 
                     sectionDivider
 
-                    // Issues list with reorder + per-issue actions
                     issuesSection
                 }
             }
@@ -172,7 +169,6 @@ struct SeriesManagerView: View {
             Spacer()
 
             HStack(spacing: 4) {
-                // Position controls
                 Button {
                     moveIssueToTop(issue)
                 } label: {
@@ -195,7 +191,6 @@ struct SeriesManagerView: View {
 
                 Divider().frame(height: 14)
 
-                // Cover controls
                 if coverComicId == issue.id {
                     Label("Cover", systemImage: "star.fill")
                         .font(.caption2.bold())

@@ -13,7 +13,6 @@ struct iPadReaderView: View {
     @State private var showBars = true
     @State private var hideTask: Task<Void, Never>?
 
-    // Zoom state
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
@@ -139,13 +138,10 @@ struct iPadReaderView: View {
                 let x = value.location.x
                 let width = viewWidth > 0 ? viewWidth : UIScreen.main.bounds.width
                 if x < width * 0.25 {
-                    // Left tap zone: previous page
                     if currentPage > 0 { currentPage -= 1 }
                 } else if x > width * 0.75 {
-                    // Right tap zone: next page
                     if currentPage < pageCount - 1 { currentPage += 1 }
                 } else {
-                    // Center: toggle bars
                     withAnimation(.easeInOut(duration: 0.2)) { showBars.toggle() }
                     if showBars { scheduleHide() } else { hideTask?.cancel() }
                 }
@@ -318,8 +314,7 @@ struct iPadReaderView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task {
-            // Matches the same bump on macOS — 3 seconds reads as too fast for a reading
-            // app, and the two platforms should feel the same here.
+            // Matches the macOS reader's 8-second auto-hide delay so both platforms feel the same.
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled else { return }
             await MainActor.run {

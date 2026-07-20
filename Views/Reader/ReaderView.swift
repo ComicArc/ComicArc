@@ -270,9 +270,7 @@ struct ReaderView: View {
             if !scrollMode { windowService.hideCursorUntilMouseMoves() }
         }
         hideTask = w
-        // README has always documented this as "fade after five seconds" — the actual value
-        // was 3, which reads as too fast for a reading app (controls disappearing mid-glance
-        // at the page counter). Bumped to 8, matching the explicit request for more time.
+        // 8s delay before auto-hiding controls, long enough not to vanish mid-glance at the page counter.
         DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: w)
     }
 
@@ -333,8 +331,6 @@ struct ReaderView: View {
         }
     }
     private func resetZoom() { withAnimation { steadyZoom = 1; panOffset = .zero } }
-
-    // MARK: - Color filter modifier
 
     private var autoplayBar: some View {
         VStack {
@@ -416,13 +412,9 @@ struct ReaderView: View {
                 .accessibilityLabel("Fit mode: \(fitMode.label)")
                 .help("Fit mode: \(fitMode.label)")
 
-                // Reading direction, double-page, scroll mode, color filter, and pin-toolbar
-                // used to each get their own always-visible icon — 5 separate controls for
-                // things that, since per-series reader preferences shipped this session, get
-                // set once for a series and rarely touched again. Consolidated into one
-                // settings menu so the bar reads as "things you touch every session" (bookmark,
-                // fit, autoplay, filmstrip) vs. "things you set once" (this menu), instead of
-                // eleven flat icons of equal visual weight.
+                // Reading direction, double-page, scroll mode, color filter, and pin toolbar
+                // are set once per series and rarely touched again, so they live in one menu
+                // rather than as always-visible icons alongside bookmark/fit/autoplay/filmstrip.
                 Menu {
                     Toggle(isOn: $rtl) {
                         Label(rtl ? "Right-to-Left" : "Left-to-Right", systemImage: "text.justify.right")
@@ -501,9 +493,6 @@ struct ReaderView: View {
             .accessibilityLabel(rtl ? "Next page" : "Previous page")
             .help(rtl ? "Next page (→)" : "Previous page (←)")
 
-            // Previously fixed at 300pt regardless of window width, leaving most of a wide
-            // window's bottom bar empty on either side. Now fills the space actually
-            // available between the two page-turn buttons.
             VStack(spacing: 6) {
                 if comic.pageCount > 1 {
                     Slider(

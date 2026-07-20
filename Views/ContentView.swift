@@ -31,7 +31,6 @@ struct ContentView: View {
             .searchable(text: $vm.searchText, placement: .toolbar, prompt: "Search library…")
             .navigationSplitViewStyle(.balanced)
 
-            // Full-screen reader — covers the entire content area
             if let comic = vm.readerComic {
                 ReaderView(comic: comic) {
                     withAnimation(.easeInOut(duration: 0.25)) { vm.readerComic = nil }
@@ -40,7 +39,6 @@ struct ContentView: View {
                 .zIndex(10)
             }
 
-            // Tutorial overlay
             if showTutorial {
                 TutorialView {
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -73,7 +71,6 @@ struct ContentView: View {
         .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
         .frame(minWidth: 960, minHeight: 640)
         .animation(.easeInOut(duration: 0.2), value: vm.readerComic?.id)
-        // Sidebar hides only when reading; restores when the reader closes
         .onChange(of: vm.readerComic?.id) { _, newId in
             withAnimation(.easeInOut(duration: 0.25)) {
                 columnVisibility = newId != nil ? .detailOnly : .all
@@ -99,7 +96,6 @@ struct ContentView: View {
                     .environmentObject(vm)
             }
         }
-        // Drag files onto window to import
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             Task { await handleWindowDrop(providers) }
             return true
@@ -192,7 +188,6 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var mainToolbar: some CustomizableToolbarContent {
-        // Scan library
         ToolbarItem(id: "scan", placement: .primaryAction) {
             scanToolbarItem
         }
@@ -205,7 +200,6 @@ struct ContentView: View {
             resyncToolbarItem
         }
 
-        // Import files
         ToolbarItem(id: "import", placement: .primaryAction) {
             Button { importFiles() } label: {
                 Label("Import", systemImage: "square.and.arrow.down")
@@ -237,11 +231,8 @@ struct ContentView: View {
             .allowsHitTesting(show)
         }
 
-        // Settings now lives as a real in-app page (see detailContent's .settings case)
-        // rather than the floating macOS Settings{} scene — consistent with every other
-        // section (Stats, History, Runs) and reachable the same way: click to navigate,
-        // not a separate window to manage. ⌘, is remapped to the same vm.select(.settings)
-        // below rather than opening the old scene.
+        // Settings is a real in-app page (see detailContent), not the macOS Settings{}
+        // scene — consistent with Stats/History/Runs.
         #if os(macOS)
         ToolbarItem(id: "settings", placement: .primaryAction) {
             Button { vm.select(.settings) } label: {
@@ -402,9 +393,7 @@ struct SidebarView: View {
                 }
             }
 
-            // Settings renders as a real sidebar destination now (navRow, same as every other
-            // section) rather than a separate row that opened a floating window — highlights
-            // when selected and behaves identically to Stats/History/Runs.
+            // Settings row behaves like every other sidebar destination, not a separate window.
             #if os(macOS)
             Section {
                 navRow("Settings", icon: "gearshape", item: .settings)
@@ -463,9 +452,7 @@ struct SidebarView: View {
                     Text(t).font(.caption2).foregroundStyle(.tertiary)
                 }
             }
-            // Sidebar rows had no vertical padding of their own, so the clickable/tappable
-            // height was only as tall as the text glyph itself — noticeably smaller than the
-            // comfortable ~28pt row height native Mac sidebars (Mail, Notes, Finder) use.
+            // Extra vertical padding so the tap target matches native Mac sidebar row height (~28pt).
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
@@ -520,9 +507,7 @@ struct SidebarView: View {
         .background(Design.navBackground)
     }
 
-    // Summarizes what the most recent scan actually changed — added / removed / recovered /
-    // still-corrupted counts — auto-dismissed by the view model a few seconds after appearing.
-    // Only shown when the scan found something worth reporting (see presentScanReport).
+    // Auto-dismissed a few seconds after appearing; only shown when the scan changed something.
     private var scanReportBanner: some View {
         VStack(spacing: 0) {
             Divider()

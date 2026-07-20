@@ -67,7 +67,6 @@ struct LibraryFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
-                // Breadcrumb back button (when drilled into a group)
                 if vm.selectedGroup != nil && vm.useGroupedView {
                     Button { vm.navigateBack() } label: {
                         HStack(spacing: 4) {
@@ -84,7 +83,6 @@ struct LibraryFilterBar: View {
                     .help("Go back (⌘[)")
                 }
 
-                // Section title + count
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(headingTitle)
                         .font(.system(size: 22, weight: .black))
@@ -102,7 +100,6 @@ struct LibraryFilterBar: View {
 
                 Spacer()
 
-                // Manage Series button — only visible when browsing a specific series
                 if vm.selectedSeries != nil && vm.browseLevel == .issues && vm.selectedComic == nil {
                     Button {
                         vm.showSeriesManager = true
@@ -116,7 +113,6 @@ struct LibraryFilterBar: View {
             }
             .padding(.horizontal, 20).padding(.vertical, 12)
 
-            // Bulk action bar
             if vm.bulkMode && vm.browseLevel == .issues {
                 Divider().overlay(Design.borderColor)
                 bulkBar
@@ -430,10 +426,7 @@ struct SeriesGroupGridView: View {
         }
     }
 
-    // Reachable when every series that used to live under this character/collection group
-    // has had its last comic removed, renamed away, or moved elsewhere — the group card
-    // itself still exists one screen up, but drilling into it now finds nothing. Without
-    // this, the screen was just a blank scroll area with no explanation of what happened.
+    // Reached when every series under this group has been removed/renamed/moved elsewhere.
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "square.stack.3d.up.slash")
@@ -692,13 +685,8 @@ struct LibraryGridView: View {
                             else           { vm.selectedComic = comic }
                         }
                         .onDrag {
-                            // Previously gated behind isManualSort — from any other sort
-                            // order (Publisher is the default) this returned an empty
-                            // NSItemProvider, so the drag never even started. From the
-                            // user's side that's indistinguishable from "reordering doesn't
-                            // work" — moveComic() now switches to Custom sort itself, so the
-                            // gesture no longer needs to be pre-conditioned on already being
-                            // in that mode.
+                            // moveComic() switches to Custom sort itself, so drag works
+                            // regardless of the currently active sort order.
                             draggedId = comic.id
                             return NSItemProvider(object: NSString(string: String(comic.id)))
                         }

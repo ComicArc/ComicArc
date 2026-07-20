@@ -7,7 +7,6 @@ struct ReadingHistoryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
             HStack {
                 Text("READING HISTORY")
                     .font(.system(size: 20, weight: .black))

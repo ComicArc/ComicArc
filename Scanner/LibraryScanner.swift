@@ -54,7 +54,6 @@ final class LibraryScanner: @unchecked Sendable {
     }
 
     func scan(libraryPath: String, onProgress: @escaping (ScanState) -> Void) {
-        // Re-entrancy guard: ignore if already scanning
         guard !state.running else { return }
         queue.async { [self] in self._scan(libraryPath: libraryPath, onProgress: onProgress) }
     }
@@ -64,7 +63,7 @@ final class LibraryScanner: @unchecked Sendable {
 
         let fm = FileManager.default
 
-        // Verify library volume is actually reachable before touching the DB
+        // Bail early if the volume isn't reachable, before any DB writes.
         guard fm.fileExists(atPath: libraryPath),
               let enumerator = fm.enumerator(
                 at: URL(fileURLWithPath: libraryPath),
