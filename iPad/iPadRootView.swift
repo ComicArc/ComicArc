@@ -35,6 +35,13 @@ struct iPadRootView: View {
 
 private struct iPadSidebar: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
+    @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
+
+    private var visibleDiscoverItems: [DiscoverItem] {
+        let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
+        return SidebarCustomization.decodeOrder(discoverOrderRaw).filter { !hidden.contains($0) }
+    }
 
     var body: some View {
         List(selection: Binding(
@@ -65,13 +72,16 @@ private struct iPadSidebar: View {
                 }
             }
             Section("Discover") {
-                ForEach([AppDestination.runs, .stats, .history], id: \.self) { s in
-                    Label(s.title, systemImage: s.icon).tag(s)
-                }
-                if !vm.duplicateGroups.isEmpty {
-                    Label(AppDestination.duplicates.title, systemImage: AppDestination.duplicates.icon)
-                        .tag(AppDestination.duplicates)
-                        .badge(vm.duplicateGroups.count)
+                ForEach(visibleDiscoverItems) { item in
+                    if item == .duplicates {
+                        if !vm.duplicateGroups.isEmpty {
+                            Label(item.title, systemImage: item.icon)
+                                .tag(item.destination)
+                                .badge(vm.duplicateGroups.count)
+                        }
+                    } else {
+                        Label(item.title, systemImage: item.icon).tag(item.destination)
+                    }
                 }
             }
             Section {
@@ -496,9 +506,79 @@ struct iPadSettingsView: View {
     @State private var cacheCleared     = false
     @State private var comicCount       = 0
     @State private var backupErrorMessage: String?
+    @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
+    @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
+    @AppStorage("appTheme") private var appThemeRaw = AppTheme.dark.rawValue
+    @AppStorage("customAccentColorHex") private var customAccentHex: String = ""
 
     var body: some View {
         Form {
+            Section {
+                Picker("Theme", selection: Binding(
+                    get: { AppTheme(rawValue: appThemeRaw) ?? .dark },
+                    set: { appThemeRaw = $0.rawValue }
+                )) {
+                    ForEach(AppTheme.allCases) { theme in
+                        HStack {
+                            Circle().fill(theme.palette.appBackground).frame(width: 14, height: 14)
+                                .overlay(Circle().stroke(Design.borderColor, lineWidth: 1))
+                            Text(theme.title)
+                        }
+                        .tag(theme)
+                    }
+                }
+
+                ColorPicker("Accent Color", selection: Binding(
+                    get: { Color(hex: customAccentHex) ?? AppTheme(rawValue: appThemeRaw)?.palette.brandBlue ?? Design.brandBlue },
+                    set: { customAccentHex = $0.toHexString() ?? "" }
+                ))
+                if !customAccentHex.isEmpty {
+                    Button("Reset to Theme's Accent") { customAccentHex = "" }
+                        .font(.caption).foregroundStyle(Design.brandBlue)
+                }
+
+                Text("Takes effect the next time you launch ComicArc.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Appearance")
+            }
+
+            Section("Sidebar") {
+                Text("Reorder or hide the Discover section. Library, Publishers, and Tags always show.")
+                    .font(.caption).foregroundStyle(.secondary)
+                let order = SidebarCustomization.decodeOrder(discoverOrderRaw)
+                ForEach(Array(order.enumerated()), id: \.element) { idx, item in
+                    HStack {
+                        Label(item.title, systemImage: item.icon)
+                        Spacer()
+                        Button {
+                            var o = order; o.swapAt(idx, idx - 1)
+                            discoverOrderRaw = SidebarCustomization.encode(o)
+                        } label: { Image(systemName: "chevron.up") }
+                        .buttonStyle(.borderless).disabled(idx == 0)
+                        .accessibilityLabel("Move \(item.title) up")
+
+                        Button {
+                            var o = order; o.swapAt(idx, idx + 1)
+                            discoverOrderRaw = SidebarCustomization.encode(o)
+                        } label: { Image(systemName: "chevron.down") }
+                        .buttonStyle(.borderless).disabled(idx == order.count - 1)
+                        .accessibilityLabel("Move \(item.title) down")
+
+                        Toggle("", isOn: Binding(
+                            get: { !SidebarCustomization.decodeHidden(discoverHiddenRaw).contains(item) },
+                            set: { visible in
+                                var hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
+                                if visible { hidden.remove(item) } else { hidden.insert(item) }
+                                discoverHiddenRaw = SidebarCustomization.encode(Array(hidden))
+                            }
+                        ))
+                        .labelsHidden()
+                        .accessibilityLabel("Show \(item.title) in sidebar")
+                    }
+                }
+            }
+
             Section("Reader") {
                 Toggle("Scroll Mode", isOn: $scrollMode)
                 VStack(alignment: .leading, spacing: 4) {

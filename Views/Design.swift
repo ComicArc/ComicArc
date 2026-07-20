@@ -1,4 +1,35 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
+
+// MARK: - Hex color round-trip (for the custom-accent-color picker, which stores its choice
+// as a plain UserDefaults string rather than needing Codable Color support)
+
+extension Color {
+    init?(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
+    }
+
+    /// Best-effort hex encoding via the platform color's RGB components. Only used for a
+    /// user-picked accent color, never round-tripped through system/dynamic colors.
+    func toHexString() -> String? {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+        #if os(macOS)
+        guard let rgb = NSColor(self).usingColorSpace(.deviceRGB) else { return nil }
+        r = rgb.redComponent; g = rgb.greenComponent; b = rgb.blueComponent
+        #else
+        var a: CGFloat = 0
+        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
+        #endif
+        return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+    }
+}
 
 // MARK: - Grid density
 
@@ -24,21 +55,27 @@ enum Design {
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
 
-    // Dark palette — deeper than before for more contrast
-    static let appBackground = Color(red: 0.046, green: 0.048, blue: 0.074)  // #0c0d13
-    static let navBackground = Color(red: 0.065, green: 0.068, blue: 0.102)  // #111118
-    static let cardBg        = Color(red: 0.088, green: 0.092, blue: 0.132)  // #161722
-    static let surfaceBg     = Color(red: 0.108, green: 0.114, blue: 0.162)  // #1c1d2a
-    static let borderColor   = Color.white.opacity(0.09)
+    // Sourced from the user's chosen AppTheme (Settings ▸ Appearance), read once at first
+    // access like every other `static` here — a theme change takes effect on next launch,
+    // which Settings' UI says explicitly rather than leaving it a surprise.
+    static var appBackground: Color { AppTheme.current.palette.appBackground }
+    static var navBackground: Color { AppTheme.current.palette.navBackground }
+    static var cardBg:        Color { AppTheme.current.palette.cardBg }
+    static var surfaceBg:     Color { AppTheme.current.palette.surfaceBg }
+    static var borderColor:   Color { AppTheme.current.palette.borderColor }
 
-    // Brand — warmer amber gold, richer blue
     static let secondaryLabel = Color.secondary
-    // Matches Assets.xcassets/AccentColor exactly — this and Color.accentColor were two
-    // different blues (#2C6ED8 vs the asset's #2665BB) used interchangeably throughout the
-    // app for the same "selected/active" meaning, so the same UI concept rendered in two
-    // slightly different shades depending on which screen happened to reference which name.
-    static let brandBlue      = Color(red: 0.149, green: 0.396, blue: 0.733)  // #2665BB
-    static let brandGold      = Color(red: 0.918, green: 0.659, blue: 0.082)  // #EAA815 — warmer
+    // A custom accent overrides the current theme's own brandBlue when set (Settings ▸
+    // Appearance ▸ Accent Color). Falls back to the theme's palette otherwise — which itself
+    // matches Assets.xcassets/AccentColor exactly for the default Dark theme, so brandBlue
+    // and Color.accentColor stay visually identical unless the user deliberately overrides.
+    static var brandBlue: Color {
+        if let hex = UserDefaults.standard.string(forKey: "customAccentColorHex"), let c = Color(hex: hex) {
+            return c
+        }
+        return AppTheme.current.palette.brandBlue
+    }
+    static var brandGold: Color { AppTheme.current.palette.brandGold }
 
     // Gold gradient (use for prominent elements)
     static var goldGradient: LinearGradient {

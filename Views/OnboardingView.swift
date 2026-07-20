@@ -30,7 +30,7 @@ struct OnboardingView: View {
             }
         }
         .frame(minWidth: 960, minHeight: 640)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
         .task { unarInstalled = checkUnar() }
     }
 

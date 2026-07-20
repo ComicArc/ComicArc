@@ -157,6 +157,15 @@ final class LibraryViewModel: ObservableObject {
         rehashLibraryIfNeeded()
         refreshDuplicates()
 
+        #if os(macOS)
+        // FSEvents only reports changes from the moment the watcher starts (kFSEventStreamEventIdSinceNow)
+        // — it has no memory of what happened while the app wasn't running, so anything added
+        // or removed between quit and relaunch was invisible until the user remembered to hit
+        // Scan. The scan itself is already incremental (only touches paths it doesn't already
+        // know about), so this stays fast on the common case of nothing new having changed.
+        scan()
+        #endif
+
         // Restore library drill-down state (group/series) after initial data load
         if case .library = destination { restoreLibraryDrillDown() }
     }

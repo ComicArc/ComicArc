@@ -55,7 +55,10 @@ struct ContentView: View {
                 .zIndex(20)
             }
         }
-        .preferredColorScheme(.dark)
+        // Every theme but Sepia is dark; forcing .dark unconditionally made Sepia render its
+        // light card/background colors underneath dark-scheme system chrome (text fields,
+        // scrollbars, etc.), which looks broken rather than like a real light theme.
+        .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
         .frame(minWidth: 960, minHeight: 640)
         .animation(.easeInOut(duration: 0.2), value: vm.readerComic?.id)
         // Sidebar hides only when reading; restores when the reader closes
@@ -290,6 +293,13 @@ struct SidebarView: View {
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
+    @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
+    @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
+
+    private var visibleDiscoverItems: [DiscoverItem] {
+        let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
+        return SidebarCustomization.decodeOrder(discoverOrderRaw).filter { !hidden.contains($0) }
+    }
 
     var body: some View {
         List {
@@ -317,12 +327,15 @@ struct SidebarView: View {
             }
 
             Section {
-                navRow("Reading Orders", icon: "list.bullet.rectangle.portrait.fill", item: .runs)
-                navRow("Statistics",     icon: "chart.bar.xaxis",                     item: .stats)
-                navRow("History",        icon: "clock.fill",                          item: .history)
-                if !vm.duplicateGroups.isEmpty {
-                    navRow("Possible Duplicates", icon: "doc.on.doc", item: .duplicates,
-                           trailingText: "\(vm.duplicateGroups.count)")
+                ForEach(visibleDiscoverItems) { discoverItem in
+                    if discoverItem == .duplicates {
+                        if !vm.duplicateGroups.isEmpty {
+                            navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                   trailingText: "\(vm.duplicateGroups.count)")
+                        }
+                    } else {
+                        navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
+                    }
                 }
             }
 

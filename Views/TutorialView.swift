@@ -129,7 +129,7 @@ struct TutorialView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
         .onKeyPress(.escape) { onDismiss(); return .handled }
     }
 
