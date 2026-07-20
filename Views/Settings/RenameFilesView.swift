@@ -203,11 +203,13 @@ struct RenameFilesView: View {
                 }
                 await MainActor.run { applyProgress += 1 }
             }
+            let finalSucceeded = succeeded
+            let finalFailedCount = failed.count
             await MainActor.run {
                 isApplying = false
-                var message = "Renamed \(succeeded) file\(succeeded == 1 ? "" : "s")."
-                if !failed.isEmpty {
-                    message += " \(failed.count) couldn't be renamed (in use or already existed)."
+                var message = "Renamed \(finalSucceeded) file\(finalSucceeded == 1 ? "" : "s")."
+                if finalFailedCount > 0 {
+                    message += " \(finalFailedCount) couldn't be renamed (in use or already existed)."
                 }
                 resultMessage = message
                 vm.reload()

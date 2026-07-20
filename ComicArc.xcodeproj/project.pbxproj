@@ -34,6 +34,7 @@
 		B00000000000000000000040 /* ComicSortClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000040 /* ComicSortClassifier.swift */; };
 		B00000000000000000000050 /* SidebarCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* SidebarCustomization.swift */; };
 		B00000000000000000000060 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060 /* AppTheme.swift */; };
+		B00000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
 		B10000000000000000000001 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
 		B10000000000000000000002 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
 		B10000000000000000000003 /* iPadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* iPadReaderView.swift */; };
@@ -47,6 +48,7 @@
 		B10000000000000000000013 /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
 		B10000000000000000000014 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
 		F10000000000000000000001 /* ComicArcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* ComicArcTests.swift */; };
+		F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* ReadingOrderEngineTests.swift */; };
 		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
 		IP000000000000000000000C /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = IP000000000000000000000B /* ZIPFoundation */; };
 		IB0000000000000000000001 /* Comic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Comic.swift */; };
@@ -75,6 +77,7 @@
 		IB0000000000000000000040 /* ComicSortClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000040 /* ComicSortClassifier.swift */; };
 		IB0000000000000000000050 /* SidebarCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* SidebarCustomization.swift */; };
 		IB0000000000000000000060 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060 /* AppTheme.swift */; };
+		IB0000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
 		IB0000000000000000000017 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
 		IB0000000000000000000018 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
 		IB0000000000000000000019 /* iPadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* iPadReaderView.swift */; };
@@ -127,6 +130,7 @@
 		A00000000000000000000040 /* ComicSortClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicSortClassifier.swift; sourceTree = "<group>"; };
 		A00000000000000000000050 /* SidebarCustomization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarCustomization.swift; sourceTree = "<group>"; };
 		A00000000000000000000060 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		A00000000000000000000062 /* ReadingOrderEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngine.swift; sourceTree = "<group>"; };
 		A00000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000013 /* icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "assets/icon.icns"; sourceTree = "<group>"; };
 		A00000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -146,6 +150,7 @@
 		A10000000000000000000013 /* ReadingSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionService.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* ComicArcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcTests.swift; sourceTree = "<group>"; };
+		F1000000000000000000000D /* ReadingOrderEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngineTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000004 /* ComicArcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComicArcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		IP0000000000000000000001 /* ComicArcIPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcIPadApp.swift; sourceTree = "<group>"; };
 		IP0000000000000000000004 /* ComicArcPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArcPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -255,6 +260,7 @@
 				A00000000000000000000040 /* ComicSortClassifier.swift */,
 				A00000000000000000000050 /* SidebarCustomization.swift */,
 				A00000000000000000000060 /* AppTheme.swift */,
+				A00000000000000000000062 /* ReadingOrderEngine.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -323,6 +329,7 @@
 			isa = PBXGroup;
 			children = (
 				F10000000000000000000002 /* ComicArcTests.swift */,
+				F1000000000000000000000D /* ReadingOrderEngineTests.swift */,
 			);
 			path = ComicArcTests;
 			sourceTree = "<group>";
@@ -547,6 +554,7 @@
 				B00000000000000000000040 /* ComicSortClassifier.swift in Sources */,
 				B00000000000000000000050 /* SidebarCustomization.swift in Sources */,
 				B00000000000000000000060 /* AppTheme.swift in Sources */,
+				B00000000000000000000062 /* ReadingOrderEngine.swift in Sources */,
 				B10000000000000000000031 /* BackupService.swift in Sources */,
 				B10000000000000000000001 /* Platform.swift in Sources */,
 				B10000000000000000000002 /* iPadRootView.swift in Sources */,
@@ -565,6 +573,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F10000000000000000000001 /* ComicArcTests.swift in Sources */,
+				F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -599,6 +608,7 @@
 				IB0000000000000000000040 /* ComicSortClassifier.swift in Sources */,
 				IB0000000000000000000050 /* SidebarCustomization.swift in Sources */,
 				IB0000000000000000000060 /* AppTheme.swift in Sources */,
+				IB0000000000000000000062 /* ReadingOrderEngine.swift in Sources */,
 				IB0000000000000000000031 /* IOSPlatformServices.swift in Sources */,
 				IB0000000000000000000032 /* BackupService.swift in Sources */,
 				IB0000000000000000000017 /* Platform.swift in Sources */,

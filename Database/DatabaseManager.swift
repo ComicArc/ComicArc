@@ -16,9 +16,16 @@ final class DatabaseManager: @unchecked Sendable {
         return dir
     }()
 
-    private init() {
-        let dbURL = Self.dataDir.appendingPathComponent("comics.db")
-        let path  = dbURL.path
+    convenience init() {
+        self.init(dbPath: Self.dataDir.appendingPathComponent("comics.db").path)
+    }
+
+    /// Not private, unlike the no-arg initializer above — lets tests construct an isolated
+    /// instance against a temporary file instead of the real, shared library database.
+    /// `DatabaseManager.shared` always goes through the no-arg initializer and the real path;
+    /// nothing in the app itself ever calls this directly.
+    init(dbPath path: String) {
+        let dbURL = URL(fileURLWithPath: path)
         guard sqlite3_open(path, &db) == SQLITE_OK else { return }
         exec("PRAGMA foreign_keys = ON")
         exec("PRAGMA journal_mode = WAL")
@@ -374,6 +381,27 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE series_covers ADD COLUMN image_path TEXT")
         exec("ALTER TABLE runs   ADD COLUMN cover_image_path TEXT")
 
+        // ReadingOrderEngine columns — kept entirely separate from the existing `position`
+        // column rather than replacing it: the default sort reads
+        // COALESCE(reading_order_position, position, ...), so the new engine's output is live
+        // immediately with no new UI, but a bug in it can never regress the old, still-intact
+        // filename/manual-order path, and either can be disabled independently later.
+        exec("ALTER TABLE comics ADD COLUMN reading_order_position INTEGER")
+        exec("ALTER TABLE comics ADD COLUMN reading_order_confidence INTEGER")
+        exec("ALTER TABLE comics ADD COLUMN reading_order_reason TEXT")
+        exec("ALTER TABLE comics ADD COLUMN alternate_number TEXT")
+        exec("ALTER TABLE comics ADD COLUMN story_arc_number TEXT")
+        exec("ALTER TABLE comics ADD COLUMN cover_day INTEGER")
+        exec("ALTER TABLE comics ADD COLUMN series_group TEXT")
+        exec("""
+        CREATE TABLE IF NOT EXISTS reading_order_overrides (
+            comic_id   INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
+            position   INTEGER NOT NULL,
+            reason     TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
         // Mainline issues seed into the low range sorted by issue number (or insertion order
         // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
         // above that, so they default to the end of the series instead of interleaving with
@@ -389,6 +417,7 @@ final class DatabaseManager: @unchecked Sendable {
         resortSpecialIssuesIfNeeded()
         widenMainlinePositionStrideIfNeeded()
         positionSpecialsChronologically()
+        recomputeReadingOrder()
     }
 
     // One-time re-seed for libraries that were scanned before special-issue-aware sorting
@@ -547,6 +576,103 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    // MARK: - Reading Order Engine
+
+    // Drives `comics.reading_order_position` — entirely separate storage from `position`
+    // above (see the ALTER TABLE comment in migrate()). Fetches every comic's signals, hands
+    // them to the pure ReadingOrderEngine, applies any durable manual override last (locked,
+    // skips the engine result), and writes position/confidence/reason back. Called after every
+    // scan/resync and once at the end of migrate() — same call sites positionSpecialsChronologically()
+    // already uses, left running unchanged alongside this.
+    func recomputeReadingOrder() {
+        queue.sync {
+            struct Row {
+                let id: Int64; let groupKey: String
+                let issueNumber: String?; let title: String; let series: String
+                let year: Int?; let month: Int?; let day: Int?; let storyArc: String?
+            }
+            var rows: [Row] = []
+            let sql = """
+            SELECT id, publisher || ':' || COALESCE(NULLIF(series_group,''), series),
+                   issue_number, title, series, year, cover_month, cover_day, story_arc
+            FROM comics WHERE deleted_at IS NULL
+            """
+            var raw: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(Row(
+                    id: sqlite3_column_int64(stmt, 0),
+                    groupKey: String(cString: sqlite3_column_text(stmt, 1)),
+                    issueNumber: colText(stmt, 2), title: colText(stmt, 3) ?? "", series: colText(stmt, 4) ?? "",
+                    year:  sqlite3_column_type(stmt, 5) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 5)) : nil,
+                    month: sqlite3_column_type(stmt, 6) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 6)) : nil,
+                    day:   sqlite3_column_type(stmt, 7) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 7)) : nil,
+                    storyArc: colText(stmt, 8)
+                ))
+            }
+            sqlite3_finalize(stmt)
+
+            let inputs = rows.map { row in
+                ReadingOrderEngine.ReadingOrderInput(
+                    id: row.id, groupKey: row.groupKey,
+                    legacyNumber: ReadingOrderEngine.parseLegacyNumber(row.issueNumber),
+                    comicType: ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series),
+                    year: row.year, month: row.month, day: row.day, storyArc: row.storyArc,
+                    title: row.title
+                )
+            }
+            let results = ReadingOrderEngine.computeSeriesPositions(inputs)
+
+            // Durable overrides win outright — the engine still computed a position for these
+            // ids above (needed so its per-group interpolation stays coherent), but that result
+            // is discarded here in favor of whatever the user pinned via reorderComics().
+            var overridePositions: [Int64: Int] = [:]
+            let overrideSQL = "SELECT comic_id, position FROM reading_order_overrides"
+            var overrideRaw: OpaquePointer?
+            if sqlite3_prepare_v2(db, overrideSQL, -1, &overrideRaw, nil) == SQLITE_OK, let ostmt = overrideRaw {
+                while sqlite3_step(ostmt) == SQLITE_ROW {
+                    overridePositions[sqlite3_column_int64(ostmt, 0)] = Int(sqlite3_column_int64(ostmt, 1))
+                }
+                sqlite3_finalize(ostmt)
+            }
+
+            exec("BEGIN")
+            for row in rows {
+                if let overridePos = overridePositions[row.id] {
+                    _ = run("""
+                        UPDATE comics SET reading_order_position = ?, reading_order_confidence = 100,
+                               reading_order_reason = 'Manually placed'
+                        WHERE id = ?
+                        """, args: [overridePos, row.id])
+                } else if let result = results[row.id] {
+                    _ = run("""
+                        UPDATE comics SET reading_order_position = ?, reading_order_confidence = ?,
+                               reading_order_reason = ?
+                        WHERE id = ?
+                        """, args: [result.position, result.confidence, result.reason, row.id])
+                }
+            }
+            exec("COMMIT")
+        }
+    }
+
+    /// Durable manual override — written whenever a user drags a comic to reorder it
+    /// (`reorderComics(orderedIds:)` below), so the correction survives every future rescan
+    /// instead of being silently recomputed away the next time `recomputeReadingOrder()` runs.
+    func setReadingOrderOverride(comicId: Int64, position: Int, reason: String = "Manually placed") {
+        queue.sync {
+            _ = run("""
+                INSERT OR REPLACE INTO reading_order_overrides (comic_id, position, reason) VALUES (?, ?, ?)
+                """, args: [comicId, position, reason])
+        }
+    }
+
+    func clearReadingOrderOverride(comicId: Int64) {
+        queue.sync {
+            _ = run("DELETE FROM reading_order_overrides WHERE comic_id = ?", args: [comicId])
+        }
+    }
+
 
     // MARK: - Comics
 
@@ -563,7 +689,9 @@ final class DatabaseManager: @unchecked Sendable {
             progress: colInt(s, 18), lastRead: colText(s, 19),
             rating: colInt(s, 20),
             review: colText(s, 23),
-            isFavorite: colBool(s, 21), inReadingList: colBool(s, 22)
+            isFavorite: colBool(s, 21), inReadingList: colBool(s, 22),
+            readingOrderPosition: sqlite3_column_type(s, 24) != SQLITE_NULL ? colInt(s, 24) : nil,
+            readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil
         )
     }
 
@@ -576,7 +704,7 @@ final class DatabaseManager: @unchecked Sendable {
                COALESCE(r.rating, 0) as rating,
                (f.comic_id IS NOT NULL) as is_favorite,
                (rl.comic_id IS NOT NULL) as in_reading_list,
-               r.review
+               r.review, c.reading_order_position, c.reading_order_confidence
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id
@@ -590,19 +718,18 @@ final class DatabaseManager: @unchecked Sendable {
         var id: String { rawValue }
         var clause: String {
             switch self {
-            // Reads the same `position` column positionSpecialsChronologically() maintains,
-            // rather than re-deriving "specials always last" live from is_special_issue() —
-            // that live formula can't express a dated annual sitting *between* two mainline
-            // issues, only always-after-everything. position already encodes both cases
-            // (mainline issues by number, specials either chronologically interpolated when
-            // dated or in the always-last band otherwise), so this is the single source of
-            // truth for reading order rather than two formulas that could drift apart.
-            case .publisher: return "c.publisher, c.series, COALESCE(c.position, is_special_issue(c.issue_number, c.title, c.series) * \(ComicSortClassifier.specialBandOffset) + c.id), c.title"
+            // Reads reading_order_position first (the new ReadingOrderEngine's output — see
+            // recomputeReadingOrder()), falling back to the older `position` column
+            // (positionSpecialsChronologically()'s output) and finally the live
+            // is_special_issue() formula, in that order. A read-time COALESCE rather than a
+            // write-time merge: the new engine's improved placement is live immediately for
+            // every user with zero new UI, but the two systems stay genuinely decoupled.
+            case .publisher: return "c.publisher, c.series, COALESCE(c.reading_order_position, c.position, is_special_issue(c.issue_number, c.title, c.series) * \(ComicSortClassifier.specialBandOffset) + c.id), c.title"
             case .title:     return "c.title"
             case .dateAdded: return "c.added_at DESC"
             case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
             case .progress:  return "COALESCE(rp.current_page, 0) DESC, c.title"
-            case .manual:    return "COALESCE(c.position, c.id)"
+            case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id)"
             }
         }
     }
@@ -682,6 +809,10 @@ final class DatabaseManager: @unchecked Sendable {
         let series: String, issueNumber: String?, pageCount: Int, writer: String?
         let penciller: String?, year: Int?, storyArc: String?, languageIso: String?, fileHash: String?
         var coverMonth: Int? = nil
+        var coverDay: Int? = nil
+        var alternateNumber: String? = nil
+        var storyArcNumber: String? = nil
+        var seriesGroup: String? = nil
     }
 
     func insert(comic: (title: String, filePath: String, publisher: String, character: String?,
@@ -702,7 +833,8 @@ final class DatabaseManager: @unchecked Sendable {
             for c in comics {
                 _insertRow(c.title, c.filePath, c.publisher, c.character,
                            c.series, c.issueNumber, c.pageCount, c.writer,
-                           c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash, c.coverMonth)
+                           c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash, c.coverMonth,
+                           c.coverDay, c.alternateNumber, c.storyArcNumber, c.seriesGroup)
             }
             exec("COMMIT")
         }
@@ -711,16 +843,20 @@ final class DatabaseManager: @unchecked Sendable {
     private func _insertRow(_ title: String, _ filePath: String, _ publisher: String, _ character: String?,
                              _ series: String, _ issueNumber: String?, _ pageCount: Int, _ writer: String?,
                              _ penciller: String?, _ year: Int?, _ storyArc: String?, _ languageIso: String?,
-                             _ fileHash: String?, _ coverMonth: Int? = nil) {
+                             _ fileHash: String?, _ coverMonth: Int? = nil, _ coverDay: Int? = nil,
+                             _ alternateNumber: String? = nil, _ storyArcNumber: String? = nil,
+                             _ seriesGroup: String? = nil) {
         _ = run("""
         INSERT OR IGNORE INTO comics
             (title, file_path, publisher, character, series, issue_number,
-             page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
+             cover_day, alternate_number, story_arc_number, series_group)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, args: [title, filePath, publisher, character,
                     series, issueNumber, pageCount, writer,
                     penciller, year.map { Int64($0) }, storyArc,
-                    languageIso, fileHash, coverMonth.map { Int64($0) }])
+                    languageIso, fileHash, coverMonth.map { Int64($0) },
+                    coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup])
     }
 
     // Comics imported when the archive was unreadable get page_count=0; scanner retries these.
@@ -1042,7 +1178,22 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             exec("BEGIN")
             for (idx, id) in orderedIds.enumerated() {
-                _ = run("UPDATE comics SET position = ? WHERE id = ?", args: [idx, id])
+                // reading_order_position is also set directly here, not just left to the next
+                // recomputeReadingOrder() pass — the sort clauses read reading_order_position
+                // first, so a stale higher-priority value there would otherwise mask this drag
+                // until the next scan happened to run.
+                _ = run("""
+                    UPDATE comics SET position = ?, reading_order_position = ?,
+                           reading_order_confidence = 100, reading_order_reason = 'Manually placed'
+                    WHERE id = ?
+                    """, args: [idx, idx, id])
+                // Durable override: a manual drag is the strongest possible signal of intent,
+                // so it's recorded the same way in reading_order_overrides — surviving future
+                // rescans instead of being silently recomputed away the next time
+                // recomputeReadingOrder() runs (which happens after every scan).
+                _ = run("""
+                    INSERT OR REPLACE INTO reading_order_overrides (comic_id, position, reason) VALUES (?, ?, 'Manually placed')
+                    """, args: [id, idx])
             }
             exec("COMMIT")
         }
@@ -1373,6 +1524,7 @@ final class DatabaseManager: @unchecked Sendable {
             """)
         }
         positionSpecialsChronologically()
+        recomputeReadingOrder()
     }
 
     func updateFileHash(id: Int64, hash: String) {

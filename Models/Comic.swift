@@ -28,6 +28,11 @@ struct Comic: Identifiable, Equatable, Hashable {
     var inReadingList: Bool = false
     var tags: [String] = []
 
+    // ReadingOrderEngine output — nil until the first recomputeReadingOrder() pass runs
+    // (once per app launch/scan). See Models/ReadingOrderEngine.swift.
+    var readingOrderPosition: Int? = nil
+    var readingOrderConfidence: Int? = nil
+
     var fileExtension: String { URL(fileURLWithPath: filePath).pathExtension.lowercased() }
     var isStarted: Bool { progress > 0 }
     var isFinished: Bool { pageCount > 1 && progress >= pageCount - 1 }

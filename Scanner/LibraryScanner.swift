@@ -114,7 +114,9 @@ final class LibraryScanner: @unchecked Sendable {
                         writer: meta.writer, penciller: meta.penciller,
                         year: meta.year, storyArc: meta.storyArc,
                         languageIso: meta.languageIso, fileHash: hash,
-                        coverMonth: meta.coverMonth
+                        coverMonth: meta.coverMonth, coverDay: meta.coverDay,
+                        alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
+                        seriesGroup: meta.seriesGroup
                     ))
                     added += 1; knownPaths.insert(fp)
                     if let h = hash { knownHashes.insert(h) }
@@ -156,6 +158,7 @@ final class LibraryScanner: @unchecked Sendable {
         if !state.cancelled {
             db.seedMissingPositions()
             db.positionSpecialsChronologically()
+            db.recomputeReadingOrder()
         }
 
         setState { $0.running = false }
@@ -294,8 +297,9 @@ final class LibraryScanner: @unchecked Sendable {
     private struct ComicMeta {
         var title: String; var publisher: String; var character: String?
         var series: String; var issueNumber: String?; var writer: String?
-        var penciller: String?; var year: Int?; var coverMonth: Int?
+        var penciller: String?; var year: Int?; var coverMonth: Int?; var coverDay: Int?
         var storyArc: String?; var languageIso: String?
+        var alternateNumber: String?; var storyArcNumber: String?; var seriesGroup: String?
     }
 
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
@@ -321,11 +325,14 @@ final class LibraryScanner: @unchecked Sendable {
         // writers don't bother validating.
         let year = ci["Year"].flatMap(Int.init)
         let month = year != nil ? ci["Month"].flatMap(Int.init).flatMap { (1...12).contains($0) ? $0 : nil } : nil
+        let day = month != nil ? ci["Day"].flatMap(Int.init).flatMap { (1...31).contains($0) ? $0 : nil } : nil
         return ComicMeta(title: title, publisher: publisher, character: character,
                          series: series, issueNumber: issueNum,
                          writer: ci["Writer"], penciller: ci["Penciller"],
-                         year: year, coverMonth: month,
-                         storyArc: ci["StoryArc"], languageIso: ci["LanguageISO"])
+                         year: year, coverMonth: month, coverDay: day,
+                         storyArc: ci["StoryArc"], languageIso: ci["LanguageISO"],
+                         alternateNumber: ci["AlternateNumber"], storyArcNumber: ci["StoryArcNumber"],
+                         seriesGroup: ci["SeriesGroup"].map(normalizeSeriesName))
     }
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
@@ -387,7 +394,8 @@ final class LibraryScanner: @unchecked Sendable {
         var data = Data()
         _ = try? archive.extract(entry, consumer: { data.append($0) })
         let keys: Set<String> = ["Series", "Title", "IssueNumber", "Publisher", "Writer", "Penciller",
-                                  "Year", "Month", "StoryArc", "LanguageISO", "Characters"]
+                                  "Year", "Month", "Day", "StoryArc", "LanguageISO", "Characters",
+                                  "AlternateNumber", "StoryArcNumber", "SeriesGroup"]
 #if os(macOS)
         guard let root = try? XMLDocument(data: data).rootElement() else { return [:] }
         var result: [String: String] = [:]
