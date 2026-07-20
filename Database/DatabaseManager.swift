@@ -1811,4 +1811,19 @@ final class DatabaseManager: @unchecked Sendable {
         queue.async { _ = self.run("UPDATE comics SET deleted_at = NULL WHERE id = ?", args: [id]) }
     }
 
+    // Synchronous (unlike restoreComic's fire-and-forget queue.async) — callers doing an
+    // undo need the restore to have actually landed before they reload(), or the just-undone
+    // comics would still show as deleted for one more frame.
+    func restore(_ ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        queue.sync {
+            let ph = ids.map { _ in "?" }.joined(separator: ",")
+            var stmt: OpaquePointer?
+            let sql = "UPDATE comics SET deleted_at = NULL WHERE id IN (\(ph))"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            for (i, id) in ids.enumerated() { sqlite3_bind_int64(stmt, Int32(i + 1), id) }
+            sqlite3_step(stmt); sqlite3_finalize(stmt)
+        }
+    }
+
 }

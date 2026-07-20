@@ -9,25 +9,63 @@ struct iPadRootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            iPadSidebar()
-                .navigationTitle("ComicArc")
-        } content: {
-            iPadContentColumn(selectedComic: $selectedComic)
-                .id(vm.destination)
-        } detail: {
-            iPadDetailColumn(comic: selectedComic)
+        ZStack {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                iPadSidebar()
+                    .navigationTitle("ComicArc")
+            } content: {
+                iPadContentColumn(selectedComic: $selectedComic)
+                    .id(vm.destination)
+            } detail: {
+                iPadDetailColumn(comic: selectedComic)
+            }
+            .navigationSplitViewStyle(.balanced)
+            .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library…")
+            .onChange(of: vm.destination) { selectedComic = nil }
+            // Single shared reader-presentation point (matches Mac's ContentView) so every path
+            // that opens a comic — the detail column's Read button, a grid tile's context menu —
+            // goes through the same vm.readerComic instead of each needing its own local state.
+            .fullScreenCover(item: $vm.readerComic) { comic in
+                iPadReaderView(comic: comic, onClose: { vm.closeReader() })
+                    .environmentObject(vm)
+            }
+
+            // Matches Mac ContentView's undo toast — same vm.pendingUndo drives both, since
+            // delete/removeFromRun/deleteRun undo wiring lives in the shared LibraryViewModel
+            // and RunsView (both platforms reuse RunsView's components).
+            if let action = vm.pendingUndo {
+                VStack {
+                    Spacer()
+                    iPadUndoToast(action)
+                        .padding(.bottom, 24)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(true)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
-        .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library…")
-        .onChange(of: vm.destination) { selectedComic = nil }
-        // Single shared reader-presentation point (matches Mac's ContentView) so every path
-        // that opens a comic — the detail column's Read button, a grid tile's context menu —
-        // goes through the same vm.readerComic instead of each needing its own local state.
-        .fullScreenCover(item: $vm.readerComic) { comic in
-            iPadReaderView(comic: comic, onClose: { vm.closeReader() })
-                .environmentObject(vm)
+        .animation(Design.springGentle, value: vm.pendingUndo?.message)
+    }
+
+    private func iPadUndoToast(_ action: LibraryViewModel.UndoableAction) -> some View {
+        HStack(spacing: 14) {
+            Text(action.message)
+                .font(.callout).foregroundStyle(.white)
+                .lineLimit(1)
+            Button("Undo") { vm.performUndo() }
+                .font(.callout.bold())
+                .foregroundStyle(Design.brandGold)
+                .buttonStyle(.plain)
+            Button {
+                vm.dismissUndo()
+            } label: {
+                Image(systemName: "xmark").font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(0.6))
         }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .background(.black.opacity(0.92), in: Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
     }
 }
 

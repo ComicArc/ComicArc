@@ -51,7 +51,22 @@ struct ContentView: View {
                 .transition(.opacity)
                 .zIndex(20)
             }
+
+            // Undo toast — floats above whatever's on screen (Library, Runs, Duplicates all
+            // trigger it) rather than living in the sidebar like the scan-report banner, since
+            // deletions happen throughout the app, not just from sidebar-adjacent actions.
+            if let action = vm.pendingUndo {
+                VStack {
+                    Spacer()
+                    undoToast(action)
+                        .padding(.bottom, 24)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(30)
+                .allowsHitTesting(true)
+            }
         }
+        .animation(Design.springGentle, value: vm.pendingUndo?.message)
         // Every theme but Sepia is dark; forcing .dark unconditionally made Sepia render its
         // light card/background colors underneath dark-scheme system chrome (text fields,
         // scrollbars, etc.), which looks broken rather than like a real light theme.
@@ -89,6 +104,28 @@ struct ContentView: View {
             Task { await handleWindowDrop(providers) }
             return true
         }
+    }
+
+    private func undoToast(_ action: LibraryViewModel.UndoableAction) -> some View {
+        HStack(spacing: 14) {
+            Text(action.message)
+                .font(.callout).foregroundStyle(.white)
+                .lineLimit(1)
+            Button("Undo") { vm.performUndo() }
+                .font(.callout.bold())
+                .foregroundStyle(Design.brandGold)
+                .buttonStyle(.plain)
+            Button {
+                vm.dismissUndo()
+            } label: {
+                Image(systemName: "xmark").font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .background(.black.opacity(0.92), in: Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
     }
 
     // MARK: - Detail content router

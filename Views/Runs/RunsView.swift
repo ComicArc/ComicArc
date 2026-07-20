@@ -320,8 +320,8 @@ struct RunDetailView: View {
                     }
                     .onMove { from, to in reorder(from: from, to: to) }
                     .onDelete { indices in
-                        let ids = indices.map { items[$0].comic.id }
-                        LibraryViewModel.shared.removeFromRun(runId: run.id, comicIds: ids)
+                        let removed = indices.map { items[$0] }
+                        LibraryViewModel.shared.removeFromRunWithUndo(runId: run.id, items: removed, onRestored: loadItems)
                         loadItems()
                     }
                 }
@@ -415,8 +415,7 @@ struct RunDetailView: View {
                     .help("Rate & Review")
 
                     Button(role: .destructive) {
-                        LibraryViewModel.shared.deleteRun(run.id)
-                        NotificationCenter.default.post(name: .runDeleted, object: nil)
+                        LibraryViewModel.shared.deleteRunWithUndo(run)
                         onDelete()
                     } label: {
                         Text("Delete Run")
@@ -592,7 +591,7 @@ struct RunItemRow: View {
             }
             Divider()
             Button("Remove from Reading Order", role: .destructive) {
-                LibraryViewModel.shared.removeFromRun(runId: runId, comicIds: [item.comic.id])
+                LibraryViewModel.shared.removeFromRunWithUndo(runId: runId, items: [item], onRestored: onChange)
                 onChange()
             }
         }
@@ -613,7 +612,7 @@ struct RunItemRow: View {
             onChange()
         }
         .accessibilityAction(named: "Remove from Reading Order") {
-            LibraryViewModel.shared.removeFromRun(runId: runId, comicIds: [item.comic.id])
+            LibraryViewModel.shared.removeFromRunWithUndo(runId: runId, items: [item], onRestored: onChange)
             onChange()
         }
         .onAppear { ThumbnailCache.shared.thumbnail(for: item.comic) { thumbnail = $0 } }

@@ -70,6 +70,38 @@ final class LibraryViewModel: ObservableObject {
     @Published var isScanning:          Bool = false
     @Published var showScanReport:      Bool = false
     private var scanReportDismissTask: DispatchWorkItem?
+
+    // MARK: - Undo
+
+    struct UndoableAction {
+        let message: String
+        let undo: () -> Void
+    }
+    @Published var pendingUndo: UndoableAction?
+    private var undoDismissTask: DispatchWorkItem?
+
+    // Session-only (not persisted across quit/relaunch) — a toast-style undo window rather
+    // than a true undo stack. Deliberately short-lived and visible (not a silent background
+    // capability) so it reads as "you have a few seconds to change your mind," matching how
+    // Mail/Gmail-style undo-send banners work, rather than implying indefinite undo history.
+    func offerUndo(_ message: String, undo: @escaping () -> Void) {
+        undoDismissTask?.cancel()
+        pendingUndo = UndoableAction(message: message, undo: undo)
+        let task = DispatchWorkItem { [weak self] in self?.pendingUndo = nil }
+        undoDismissTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: task)
+    }
+
+    func performUndo() {
+        undoDismissTask?.cancel()
+        pendingUndo?.undo()
+        pendingUndo = nil
+    }
+
+    func dismissUndo() {
+        undoDismissTask?.cancel()
+        pendingUndo = nil
+    }
     @Published var isResyncing:         Bool = false
     @Published var isLoading:           Bool = false
     @Published var isLibraryAvailable:  Bool = true
@@ -498,6 +530,12 @@ final class LibraryViewModel: ObservableObject {
         bulkMode = false
         reload()
         refreshDuplicates()
+        // Already recoverable via Settings ▸ Data ▸ View Trash… — this just saves the trip
+        // for the common case of "oops, wrong selection" noticed immediately.
+        offerUndo("\(ids.count) comic\(ids.count == 1 ? "" : "s") deleted") { [weak self] in
+            self?.db.restore(ids)
+            self?.reload()
+        }
     }
 
     // MARK: - Scan / import
@@ -809,8 +847,64 @@ final class LibraryViewModel: ObservableObject {
     func createRun(title: String, description: String) -> Int64 { db.createRun(title: title, description: description) }
     func deleteRun(_ runId: Int64) { db.deleteRun(runId) }
 
+    // Delete Run has no confirmation dialog in the UI (a plain destructive button in a row
+    // of other buttons, unlike Clear Library which is gated behind one) and deleteRun() is a
+    // hard DELETE that cascades run_items — previously a single misclick permanently lost an
+    // entire curated reading order with zero recovery path. Snapshots everything needed to
+    // fully recreate the run before deleting, offered via the same undo-toast bulkDelete/
+    // delete(_:) use.
+    func deleteRunWithUndo(_ run: Run) {
+        let items = db.runItems(runId: run.id)
+        db.deleteRun(run.id)
+        NotificationCenter.default.post(name: .runDeleted, object: nil)
+        offerUndo("Reading order \"\(run.title)\" deleted") { [weak self] in
+            guard let self else { return }
+            let newId = self.db.createRun(title: run.title, description: run.description)
+            if let buyLink = run.buyLink, !buyLink.isEmpty {
+                self.db.updateRun(id: newId, title: run.title, description: run.description, buyLink: buyLink)
+            }
+            if let rating = run.rating {
+                self.db.setRunRating(newId, rating: rating, review: run.review)
+            }
+            if let cover = run.coverImagePath {
+                self.db.setRunCover(runId: newId, imagePath: cover)
+            }
+            self.db.addToRun(runId: newId, comicIds: items.map(\.comic.id))
+            // addToRun doesn't return the newly-created run_items ids, so notes have to be
+            // matched back up by comic id after the fact via a second fetch.
+            let newItems = self.db.runItems(runId: newId)
+            for item in items where !item.notes.isEmpty {
+                if let match = newItems.first(where: { $0.comic.id == item.comic.id }) {
+                    self.db.setRunItemNotes(match.id, notes: item.notes)
+                }
+            }
+            NotificationCenter.default.post(name: .runDeleted, object: nil)
+        }
+    }
+
     func addToRun(runId: Int64, comicIds: [Int64]) { db.addToRun(runId: runId, comicIds: comicIds) }
     func removeFromRun(runId: Int64, comicIds: [Int64]) { db.removeFromRun(runId: runId, comicIds: comicIds) }
+
+    // Re-adding puts the item(s) back at the end of the run rather than their exact original
+    // position — full position-preserving undo would mean snapshotting every item in the run,
+    // not just the ones removed, which is disproportionate for what's meant to be a quick
+    // "oops" recovery rather than a true undo stack.
+    func removeFromRunWithUndo(runId: Int64, items: [RunItem], onRestored: @escaping () -> Void = {}) {
+        let ids = items.map(\.comic.id)
+        db.removeFromRun(runId: runId, comicIds: ids)
+        let label = items.count == 1 ? "\"\(items[0].comic.title)\" removed" : "\(items.count) comics removed"
+        offerUndo(label) { [weak self] in
+            guard let self else { return }
+            self.db.addToRun(runId: runId, comicIds: ids)
+            let newItems = self.db.runItems(runId: runId)
+            for item in items where !item.notes.isEmpty {
+                if let match = newItems.first(where: { $0.comic.id == item.comic.id }) {
+                    self.db.setRunItemNotes(match.id, notes: item.notes)
+                }
+            }
+            onRestored()
+        }
+    }
     func reorderRun(runId: Int64, orderedIds: [Int64]) { db.reorderRun(runId: runId, orderedIds: orderedIds) }
 
     @discardableResult
@@ -835,10 +929,15 @@ final class LibraryViewModel: ObservableObject {
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }
 
     func delete(_ toDelete: [Comic]) {
-        db.softDelete(toDelete.map(\.id))
+        let ids = toDelete.map(\.id)
+        db.softDelete(ids)
         for c in toDelete { ThumbnailCache.shared.evict(c.id) }
         reload()
         refreshDuplicates()
+        offerUndo(toDelete.count == 1 ? "\"\(toDelete[0].title)\" deleted" : "\(toDelete.count) comics deleted") { [weak self] in
+            self?.db.restore(ids)
+            self?.reload()
+        }
     }
 
     func updateProgress(comic: Comic, page: Int) {
