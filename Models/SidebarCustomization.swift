@@ -13,34 +13,37 @@ import Foundation
 // can back onto the same values via plain @AppStorage(String) and stay in sync automatically;
 // @AppStorage has no built-in support for [String]/Set<String>.
 enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
-    case runs, stats, history, duplicates
+    case runs, stats, history, duplicates, orderHealth
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .runs:       return "Reading Orders"
-        case .stats:      return "Statistics"
-        case .history:    return "History"
-        case .duplicates: return "Possible Duplicates"
+        case .runs:        return "Reading Orders"
+        case .stats:       return "Statistics"
+        case .history:     return "History"
+        case .duplicates:  return "Possible Duplicates"
+        case .orderHealth: return "Order Health"
         }
     }
 
     var icon: String {
         switch self {
-        case .runs:       return "list.bullet.rectangle.portrait.fill"
-        case .stats:      return "chart.bar.xaxis"
-        case .history:    return "clock.fill"
-        case .duplicates: return "doc.on.doc"
+        case .runs:        return "list.bullet.rectangle.portrait.fill"
+        case .stats:       return "chart.bar.xaxis"
+        case .history:     return "clock.fill"
+        case .duplicates:  return "doc.on.doc"
+        case .orderHealth: return "list.number"
         }
     }
 
     var destination: AppDestination {
         switch self {
-        case .runs:       return .runs
-        case .stats:      return .stats
-        case .history:    return .history
-        case .duplicates: return .duplicates
+        case .runs:        return .runs
+        case .stats:       return .stats
+        case .history:     return .history
+        case .duplicates:  return .duplicates
+        case .orderHealth: return .readingOrderManager
         }
     }
 }

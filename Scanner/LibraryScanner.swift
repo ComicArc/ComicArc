@@ -116,7 +116,7 @@ final class LibraryScanner: @unchecked Sendable {
                         languageIso: meta.languageIso, fileHash: hash,
                         coverMonth: meta.coverMonth, coverDay: meta.coverDay,
                         alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
-                        seriesGroup: meta.seriesGroup
+                        seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber
                     ))
                     added += 1; knownPaths.insert(fp)
                     if let h = hash { knownHashes.insert(h) }
@@ -300,6 +300,7 @@ final class LibraryScanner: @unchecked Sendable {
         var penciller: String?; var year: Int?; var coverMonth: Int?; var coverDay: Int?
         var storyArc: String?; var languageIso: String?
         var alternateNumber: String?; var storyArcNumber: String?; var seriesGroup: String?
+        var comicInfoIssueNumber: String?
     }
 
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
@@ -332,7 +333,8 @@ final class LibraryScanner: @unchecked Sendable {
                          year: year, coverMonth: month, coverDay: day,
                          storyArc: ci["StoryArc"], languageIso: ci["LanguageISO"],
                          alternateNumber: ci["AlternateNumber"], storyArcNumber: ci["StoryArcNumber"],
-                         seriesGroup: ci["SeriesGroup"].map(normalizeSeriesName))
+                         seriesGroup: ci["SeriesGroup"].map(normalizeSeriesName),
+                         comicInfoIssueNumber: ci["IssueNumber"])
     }
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {

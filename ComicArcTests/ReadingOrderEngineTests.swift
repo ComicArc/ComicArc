@@ -208,12 +208,13 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     private func insertComic(series: String, publisher: String = "Marvel", issue: String?,
-                              title: String, year: Int? = nil, month: Int? = nil) {
+                              title: String, year: Int? = nil, month: Int? = nil,
+                              comicInfoIssueNumber: String? = nil) {
         db.batchInsert([DatabaseManager.ComicInsert(
             title: title, filePath: "/tmp/\(UUID().uuidString).cbz", publisher: publisher,
             character: nil, series: series, issueNumber: issue, pageCount: 20,
             writer: nil, penciller: nil, year: year, storyArc: nil, languageIso: nil, fileHash: nil,
-            coverMonth: month
+            coverMonth: month, comicInfoIssueNumber: comicInfoIssueNumber
         )])
     }
 
@@ -287,5 +288,164 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         db.recomputeReadingOrder()
         let after = db.allComics(series: "Aquaman", sortOrder: .manual)
         XCTAssertEqual(after.map(\.id), Array(reversed))
+    }
+
+    // MARK: - Reading Order Mode
+
+    func test_mode_filename_fallsBackToLegacyPosition() {
+        for n in 1...3 { insertComic(series: "Nightwing", issue: "\(n)", title: "Nightwing #\(n)") }
+        insertComic(series: "Nightwing", issue: "1", title: "Nightwing Annual #1")
+        db.recomputeReadingOrder(mode: .intelligent)
+        XCTAssertTrue(db.allComics(series: "Nightwing", sortOrder: .manual).allSatisfy { $0.readingOrderPosition != nil })
+
+        db.recomputeReadingOrder(mode: .filename)
+        let comics = db.allComics(series: "Nightwing", sortOrder: .manual)
+        // Filename mode clears reading_order_position entirely so the sort falls through to
+        // the legacy `position` column — nothing here should carry an engine-computed value.
+        XCTAssertTrue(comics.allSatisfy { $0.readingOrderPosition == nil })
+    }
+
+    func test_mode_legacyNumber_ordersByParsedIssueNumberOnly() {
+        insertComic(series: "Shazam", issue: "3", title: "Shazam #3")
+        insertComic(series: "Shazam", issue: "1", title: "Shazam #1")
+        insertComic(series: "Shazam", issue: "2", title: "Shazam #2")
+        db.recomputeReadingOrder(mode: .legacyNumber)
+        let ordered = db.allComics(series: "Shazam", sortOrder: .manual).sorted { $0.readingOrderPosition! < $1.readingOrderPosition! }
+        XCTAssertEqual(ordered.map(\.issueNumber), ["1", "2", "3"])
+    }
+
+    func test_mode_publicationDate_ordersByDateNotNumber() {
+        insertComic(series: "Hawkeye", issue: "5", title: "Hawkeye #5", year: 2020, month: 1)
+        insertComic(series: "Hawkeye", issue: "1", title: "Hawkeye #1", year: 2021, month: 1)
+        db.recomputeReadingOrder(mode: .publicationDate)
+        let ordered = db.allComics(series: "Hawkeye", sortOrder: .manual).sorted { $0.readingOrderPosition! < $1.readingOrderPosition! }
+        // #5 (2020) predates #1 (2021), so date mode should place #5 first despite its higher number.
+        XCTAssertEqual(ordered.first?.issueNumber, "5")
+    }
+
+    func test_mode_comicInfoOrder_usesEmbeddedNumberNotFilename() {
+        // issue_number (filename-derived, per the app's real priority) disagrees with what
+        // ComicInfo.xml says — ComicInfo Order mode must follow the embedded field, not filename.
+        insertComic(series: "Moonknight", issue: "10", title: "A", comicInfoIssueNumber: "2")
+        insertComic(series: "Moonknight", issue: "20", title: "B", comicInfoIssueNumber: "1")
+        db.recomputeReadingOrder(mode: .comicInfoOrder)
+        let ordered = db.allComics(series: "Moonknight", sortOrder: .manual).sorted { $0.readingOrderPosition! < $1.readingOrderPosition! }
+        XCTAssertEqual(ordered.map(\.title), ["B", "A"])
+    }
+
+    // MARK: - Incremental scoping
+
+    func test_recomputeReadingOrder_affectedGroupKeysLeavesOtherSeriesUntouched() {
+        for n in 1...3 { insertComic(series: "Thor", issue: "\(n)", title: "Thor #\(n)") }
+        for n in 1...3 { insertComic(series: "Loki", issue: "\(n)", title: "Loki #\(n)") }
+        db.recomputeReadingOrder()
+        let thorBefore = db.allComics(series: "Thor", sortOrder: .manual).map(\.readingOrderPosition)
+        let lokiBefore = db.allComics(series: "Loki", sortOrder: .manual).map(\.readingOrderPosition)
+
+        db.recomputeReadingOrder(mode: .legacyNumber, affectedGroupKeys: ["Marvel:Thor"])
+
+        let thorAfter = db.allComics(series: "Thor", sortOrder: .manual).map(\.readingOrderPosition)
+        let lokiAfter = db.allComics(series: "Loki", sortOrder: .manual).map(\.readingOrderPosition)
+        XCTAssertNotEqual(thorBefore, thorAfter) // Thor was rescoped into legacyNumber mode
+        XCTAssertEqual(lokiBefore, lokiAfter)    // Loki untouched by the scoped call
+    }
+
+    // MARK: - Series links
+
+    func test_seriesLink_childSortsAfterParent() {
+        for n in 1...3 { insertComic(series: "Amazing Spider-Man", issue: "\(n)", title: "ASM #\(n)") }
+        for n in 1...3 { insertComic(series: "Superior Spider-Man", issue: "\(n)", title: "SSM #\(n)") }
+        db.recomputeReadingOrder()
+
+        db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "Amazing Spider-Man",
+                          childPublisher: "Marvel", childSeries: "Superior Spider-Man")
+        db.recomputeReadingOrder()
+
+        let asmMax = db.allComics(series: "Amazing Spider-Man", sortOrder: .manual).compactMap(\.readingOrderPosition).max()!
+        let ssmMin = db.allComics(series: "Superior Spider-Man", sortOrder: .manual).compactMap(\.readingOrderPosition).min()!
+        XCTAssertGreaterThan(ssmMin, asmMax)
+    }
+
+    func test_seriesLink_threeHopChain() {
+        insertComic(series: "A", issue: "1", title: "A #1")
+        insertComic(series: "B", issue: "1", title: "B #1")
+        insertComic(series: "C", issue: "1", title: "C #1")
+        db.recomputeReadingOrder()
+
+        db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "A", childPublisher: "Marvel", childSeries: "B")
+        db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "B", childPublisher: "Marvel", childSeries: "C")
+        db.recomputeReadingOrder()
+
+        let aPos = db.allComics(series: "A", sortOrder: .manual).first!.readingOrderPosition!
+        let bPos = db.allComics(series: "B", sortOrder: .manual).first!.readingOrderPosition!
+        let cPos = db.allComics(series: "C", sortOrder: .manual).first!.readingOrderPosition!
+        XCTAssertLessThan(aPos, bPos)
+        XCTAssertLessThan(bPos, cPos)
+    }
+
+    func test_seriesLink_unlinkRestoresIndependentOrder() {
+        for n in 1...3 { insertComic(series: "X", issue: "\(n)", title: "X #\(n)") }
+        for n in 1...3 { insertComic(series: "Y", issue: "\(n)", title: "Y #\(n)") }
+        db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "X", childPublisher: "Marvel", childSeries: "Y")
+        db.recomputeReadingOrder()
+        XCTAssertEqual(db.seriesLinks().count, 1)
+
+        db.removeSeriesLink(childPublisher: "Marvel", childSeries: "Y")
+        db.recomputeReadingOrder()
+        XCTAssertEqual(db.seriesLinks().count, 0)
+        // No assertion on exact positions post-unlink — only that the link record itself is gone
+        // and a recompute afterward doesn't crash or leave stale link state behind.
+    }
+
+    func test_addSeriesLink_rejectsSecondParentForSameChild() {
+        insertComic(series: "P1", issue: "1", title: "P1 #1")
+        insertComic(series: "P2", issue: "1", title: "P2 #1")
+        insertComic(series: "Kid", issue: "1", title: "Kid #1")
+        XCTAssertTrue(db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "P1", childPublisher: "Marvel", childSeries: "Kid"))
+        XCTAssertFalse(db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "P2", childPublisher: "Marvel", childSeries: "Kid"))
+        XCTAssertEqual(db.seriesLinks().count, 1)
+    }
+
+    // MARK: - Reading Order Manager / Import Wizard support
+
+    func test_readingOrderTriageSummary_flagsLowConfidenceSeries() {
+        for n in 1...20 { insertComic(series: "Flagged", issue: "\(n)", title: "Flagged #\(n)") }
+        insertComic(series: "Flagged", issue: "1", title: "Flagged Annual #1") // lands at confidence 60
+        db.recomputeReadingOrder()
+
+        let summary = db.readingOrderTriageSummary()
+        let row = summary.first { $0.series == "Flagged" }
+        XCTAssertNotNil(row)
+        XCTAssertEqual(row?.minConfidence, 60)
+        XCTAssertGreaterThanOrEqual(row?.flaggedCount ?? 0, 1)
+    }
+
+    func test_seriesWithMultipleFirstIssues_detectsCollision() {
+        insertComic(series: "Relaunch", issue: "1", title: "Relaunch (2010) #1")
+        insertComic(series: "Relaunch", issue: "1", title: "Relaunch (2020) #1")
+        let hits = db.seriesWithMultipleFirstIssues()
+        XCTAssertTrue(hits.contains { $0.series == "Relaunch" && $0.count == 2 })
+    }
+
+    func test_seriesMissingComicInfo_detectsAbsence() {
+        insertComic(series: "NoMeta", issue: "1", title: "NoMeta #1") // no comicInfoIssueNumber
+        let hits = db.seriesMissingComicInfo()
+        XCTAssertTrue(hits.contains { $0.series == "NoMeta" })
+    }
+
+    func test_libraryHealthAnalyzer_reportIsEmptyForCleanLibrary() {
+        for n in 1...5 { insertComic(series: "Clean", issue: "\(n)", title: "Clean #\(n)", comicInfoIssueNumber: "\(n)") }
+        db.recomputeReadingOrder()
+        let report = LibraryHealthAnalyzer.analyze(db: db)
+        XCTAssertEqual(report.multipleFirstIssues.count, 0)
+        XCTAssertTrue(report.missingComicInfo.isEmpty)
+    }
+
+    func test_libraryHealthAnalyzer_reportFlagsRealIssues() {
+        insertComic(series: "Messy", issue: "1", title: "Messy (v1) #1")
+        insertComic(series: "Messy", issue: "1", title: "Messy (v2) #1")
+        let report = LibraryHealthAnalyzer.analyze(db: db)
+        XCTAssertFalse(report.isEmpty)
+        XCTAssertTrue(report.multipleFirstIssues.contains { $0.series == "Messy" })
     }
 }

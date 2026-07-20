@@ -14,6 +14,7 @@ struct SeriesManagerView: View {
     @State private var selectedIssueId: Int64?  = nil
     @State private var showMergeConfirm = false
     @State private var showOnlyFlagged  = false
+    @State private var showSeriesLinkPicker = false
 
     private var flaggedCount: Int { issues.filter { ($0.readingOrderConfidence ?? 100) < 85 }.count }
     private var visibleIssues: [Comic] {
@@ -37,11 +38,17 @@ struct SeriesManagerView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Link as Continuation…") { showSeriesLinkPicker = true }
+                    .buttonStyle(.bordered)
                 Button("Done") { dismiss() }
                     .goldButton()
             }
             .padding(24)
             .background(Design.navBackground)
+            .sheet(isPresented: $showSeriesLinkPicker) {
+                SeriesLinkPickerView(childSeries: series, childPublisher: publisher ?? "Unknown")
+                    .environmentObject(vm)
+            }
 
             Rectangle().fill(Design.borderColor).frame(height: 1)
 

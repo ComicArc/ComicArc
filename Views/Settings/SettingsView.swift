@@ -24,6 +24,16 @@ struct SettingsView: View {
                 set: { progressFormatRaw = $0.rawValue })
     }
 
+    private var readingOrderModeExplainer: String {
+        switch vm.readingOrderMode {
+        case .filename:        return "Issues sort by their original position, unaffected by any of the modes below."
+        case .legacyNumber:    return "Issues sort strictly by parsed issue number within each series."
+        case .publicationDate: return "Issues sort by cover date within each series."
+        case .comicInfoOrder:  return "Issues sort by the issue number embedded in ComicInfo.xml, where present."
+        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Series Manager always take priority."
+        }
+    }
+
     @State private var unarAvailable         = false
     @State private var showTrash             = false
     @State private var showRenameFiles       = false
@@ -110,6 +120,18 @@ struct SettingsView: View {
                         Text("\(vm.scanState.done) / \(vm.scanState.total) — \(vm.scanState.added) added")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Reading Order") {
+                    Picker("Order Basis", selection: $vm.readingOrderMode) {
+                        ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Text(readingOrderModeExplainer)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Section("Reader") {

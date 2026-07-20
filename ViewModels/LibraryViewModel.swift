@@ -16,37 +16,40 @@ enum AppDestination: Hashable, Codable {
     case stats
     case history
     case duplicates
+    case readingOrderManager
     case settings
 
     var title: String {
         switch self {
-        case .library:          return "All Comics"
-        case .continueReading:  return "Continue Reading"
-        case .favorites:        return "Favorites"
-        case .readingList:      return "Reading List"
-        case .publisher(let p): return p
-        case .tag(let t):       return "#\(t)"
-        case .runs:             return "Reading Orders"
-        case .stats:            return "Statistics"
-        case .history:          return "History"
-        case .duplicates:       return "Possible Duplicates"
-        case .settings:         return "Settings"
+        case .library:              return "All Comics"
+        case .continueReading:      return "Continue Reading"
+        case .favorites:            return "Favorites"
+        case .readingList:          return "Reading List"
+        case .publisher(let p):     return p
+        case .tag(let t):           return "#\(t)"
+        case .runs:                 return "Reading Orders"
+        case .stats:                return "Statistics"
+        case .history:              return "History"
+        case .duplicates:           return "Possible Duplicates"
+        case .readingOrderManager:  return "Order Health"
+        case .settings:             return "Settings"
         }
     }
 
     var icon: String {
         switch self {
-        case .library:         return "books.vertical.fill"
-        case .continueReading: return "book.open.fill"
-        case .favorites:       return "heart.fill"
-        case .readingList:     return "bookmark.fill"
-        case .publisher:       return "building.columns"
-        case .tag:             return "tag"
-        case .runs:            return "list.bullet.rectangle.portrait.fill"
-        case .stats:           return "chart.bar.xaxis"
-        case .history:         return "clock.fill"
-        case .duplicates:      return "doc.on.doc"
-        case .settings:        return "gear"
+        case .library:              return "books.vertical.fill"
+        case .continueReading:      return "book.open.fill"
+        case .favorites:            return "heart.fill"
+        case .readingList:          return "bookmark.fill"
+        case .publisher:            return "building.columns"
+        case .tag:                  return "tag"
+        case .runs:                 return "list.bullet.rectangle.portrait.fill"
+        case .stats:                return "chart.bar.xaxis"
+        case .history:              return "clock.fill"
+        case .duplicates:           return "doc.on.doc"
+        case .readingOrderManager:  return "list.number"
+        case .settings:             return "gear"
         }
     }
 }
@@ -66,9 +69,25 @@ final class LibraryViewModel: ObservableObject {
         DatabaseManager.SortOrder(rawValue: UserDefaults.standard.string(forKey: "comicSortOrder") ?? "") ?? .manual {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "comicSortOrder") }
     }
+    // What basis decides issue-within-series order (Filename/Legacy Number/Publication Date/
+    // ComicInfo Order/Intelligent) — orthogonal to sortOrder above, which controls library
+    // browser grouping. Changing this triggers a full recompute since it's a rare, deliberate
+    // setting change, not a per-scan hot path.
+    @Published var readingOrderMode: DatabaseManager.ReadingOrderMode = .current {
+        didSet {
+            guard oldValue != readingOrderMode else { return }
+            UserDefaults.standard.set(readingOrderMode.rawValue, forKey: "readingOrderMode")
+            Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+                await MainActor.run { self.reload() }
+            }
+        }
+    }
     @Published var scanState:           LibraryScanner.ScanState = .init()
     @Published var isScanning:          Bool = false
     @Published var showScanReport:      Bool = false
+    @Published var showImportWizard:    Bool = false
+    @Published var libraryHealthReport: LibraryHealthReport? = nil
     private var scanReportDismissTask: DispatchWorkItem?
 
     // MARK: - Undo
@@ -128,6 +147,7 @@ final class LibraryViewModel: ObservableObject {
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
+        case .readingOrderManager: return .readingOrderManager
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
         case .readingList:     return .readingList
@@ -146,7 +166,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, readingOrderManager, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -552,6 +572,7 @@ final class LibraryViewModel: ObservableObject {
                     self.notifyScanComplete(added: state.added)
                     self.refreshDuplicates()
                     self.presentScanReport(state)
+                    self.refreshLibraryHealth()
                 }
             }
         }
@@ -574,6 +595,15 @@ final class LibraryViewModel: ObservableObject {
         Task.detached(priority: .utility) { [db] in
             let groups = db.duplicateGroups()
             await MainActor.run { self.duplicateGroups = groups }
+        }
+    }
+
+    // Post-scan diagnostics (Import Wizard) — only surfaces the banner's "Review" button when
+    // there's actually something to review; a clean library keeps today's plain scan banner.
+    func refreshLibraryHealth() {
+        Task.detached(priority: .utility) {
+            let report = LibraryHealthAnalyzer.analyze()
+            await MainActor.run { self.libraryHealthReport = report.isEmpty ? nil : report }
         }
     }
 

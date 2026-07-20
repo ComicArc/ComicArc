@@ -96,6 +96,11 @@ struct ContentView: View {
                     .environmentObject(vm)
             }
         }
+        .sheet(isPresented: $vm.showImportWizard) {
+            if let report = vm.libraryHealthReport {
+                ImportWizardView(report: report).environmentObject(vm)
+            }
+        }
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             Task { await handleWindowDrop(providers) }
             return true
@@ -149,6 +154,8 @@ struct ContentView: View {
             ReadingHistoryView()
         case .duplicates:
             DuplicatesView()
+        case .readingOrderManager:
+            ReadingOrderManagerView()
         case .settings:
             SettingsView()
         }
@@ -519,6 +526,13 @@ struct SidebarView: View {
                     Text(scanReportLine).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if let report = vm.libraryHealthReport, !report.isEmpty {
+                    Button("Review \(report.totalCount) issue\(report.totalCount == 1 ? "" : "s")") {
+                        vm.showImportWizard = true
+                        vm.dismissScanReport()
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                }
                 Button { vm.dismissScanReport() } label: {
                     Image(systemName: "xmark").font(.caption2)
                 }

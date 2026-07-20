@@ -402,6 +402,29 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
 
+        // Raw ComicInfo.xml <IssueNumber>, captured separately from `issue_number` (which
+        // prefers the filename-parsed number, per parseMeta's comment) — needed so the
+        // ComicInfo Order reading mode can sort by what the embedded metadata alone says,
+        // rather than silently degrading into a duplicate of Legacy Number mode.
+        exec("ALTER TABLE comics ADD COLUMN comicinfo_issue_number TEXT")
+
+        // Manual series continuation links (e.g. Amazing Spider-Man #700 -> Superior
+        // Spider-Man #1-31 -> Amazing Spider-Man (2014) #1 as one continuous sequence).
+        // UNIQUE(child) forces a simple forward chain rather than a graph; sequence_order
+        // lets a 3+ series chain be resolved in order.
+        exec("""
+        CREATE TABLE IF NOT EXISTS series_links (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_publisher TEXT NOT NULL,
+            parent_series    TEXT NOT NULL,
+            child_publisher  TEXT NOT NULL,
+            child_series     TEXT NOT NULL,
+            sequence_order   INTEGER NOT NULL,
+            created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(child_publisher, child_series)
+        )
+        """)
+
         // Mainline issues seed into the low range sorted by issue number (or insertion order
         // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
         // above that, so they default to the end of the series instead of interleaving with
@@ -584,77 +607,172 @@ final class DatabaseManager: @unchecked Sendable {
     // skips the engine result), and writes position/confidence/reason back. Called after every
     // scan/resync and once at the end of migrate() — same call sites positionSpecialsChronologically()
     // already uses, left running unchanged alongside this.
-    func recomputeReadingOrder() {
+    /// `affectedGroupKeys: nil` (every existing call site) recomputes the whole library, same
+    /// as before. When provided, only comics whose `publisher:series` groupKey is in the set
+    /// are touched — safe because ReadingOrderEngine groups/interpolates strictly within a
+    /// groupKey, so narrowing to whole affected groups keeps each one's computation coherent.
+    func recomputeReadingOrder(mode: ReadingOrderMode = .current, affectedGroupKeys: Set<String>? = nil) {
         queue.sync {
             struct Row {
-                let id: Int64; let groupKey: String
-                let issueNumber: String?; let title: String; let series: String
+                let id: Int64; let publisher: String; let series: String; let groupKey: String
+                let filePath: String; let issueNumber: String?; let comicInfoIssueNumber: String?
+                let title: String
                 let year: Int?; let month: Int?; let day: Int?; let storyArc: String?
             }
-            var rows: [Row] = []
-            let sql = """
-            SELECT id, publisher || ':' || COALESCE(NULLIF(series_group,''), series),
-                   issue_number, title, series, year, cover_month, cover_day, story_arc
+
+            // A scoped recompute must still see every series in the same link chain as any
+            // requested series, or an offset stamped below could be computed against a parent's
+            // stale/absent position instead of its real one — so widen the scope to the full
+            // chain membership before touching `series_links` (cheap, small table) whenever
+            // links exist at all.
+            var effectiveKeys = affectedGroupKeys
+            if effectiveKeys != nil {
+                let allLinkKeys: [String] = rows(
+                    "SELECT parent_publisher, parent_series FROM series_links UNION SELECT child_publisher, child_series FROM series_links"
+                ) { s in "\(colText(s, 0) ?? ""):\(colText(s, 1) ?? "")" }
+                if !allLinkKeys.isEmpty { effectiveKeys!.formUnion(allLinkKeys) }
+            }
+
+            var sql = """
+            SELECT id, publisher, series, publisher || ':' || COALESCE(NULLIF(series_group,''), series),
+                   file_path, issue_number, comicinfo_issue_number, title, year, cover_month, cover_day, story_arc
             FROM comics WHERE deleted_at IS NULL
             """
-            var raw: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return }
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                rows.append(Row(
-                    id: sqlite3_column_int64(stmt, 0),
-                    groupKey: String(cString: sqlite3_column_text(stmt, 1)),
-                    issueNumber: colText(stmt, 2), title: colText(stmt, 3) ?? "", series: colText(stmt, 4) ?? "",
-                    year:  sqlite3_column_type(stmt, 5) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 5)) : nil,
-                    month: sqlite3_column_type(stmt, 6) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 6)) : nil,
-                    day:   sqlite3_column_type(stmt, 7) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 7)) : nil,
-                    storyArc: colText(stmt, 8)
-                ))
+            var args: [Any?] = []
+            if let keys = effectiveKeys {
+                guard !keys.isEmpty else { return }
+                let placeholders = keys.map { _ in "?" }.joined(separator: ",")
+                sql += " AND (publisher || ':' || COALESCE(NULLIF(series_group,''), series)) IN (\(placeholders))"
+                args = Array(keys).map { $0 as Any? }
             }
-            sqlite3_finalize(stmt)
-
-            let inputs = rows.map { row in
-                ReadingOrderEngine.ReadingOrderInput(
-                    id: row.id, groupKey: row.groupKey,
-                    legacyNumber: ReadingOrderEngine.parseLegacyNumber(row.issueNumber),
-                    comicType: ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series),
-                    year: row.year, month: row.month, day: row.day, storyArc: row.storyArc,
-                    title: row.title
-                )
+            let allRows: [Row] = rows(sql, args: args) { s in
+                Row(id: colInt64(s, 0), publisher: colText(s, 1) ?? "Unknown", series: colText(s, 2) ?? "General",
+                    groupKey: colText(s, 3) ?? "", filePath: colText(s, 4) ?? "",
+                    issueNumber: colText(s, 5), comicInfoIssueNumber: colText(s, 6), title: colText(s, 7) ?? "",
+                    year:  sqlite3_column_type(s, 8) != SQLITE_NULL ? colInt(s, 8) : nil,
+                    month: sqlite3_column_type(s, 9) != SQLITE_NULL ? colInt(s, 9) : nil,
+                    day:   sqlite3_column_type(s, 10) != SQLITE_NULL ? colInt(s, 10) : nil,
+                    storyArc: colText(s, 11))
             }
-            let results = ReadingOrderEngine.computeSeriesPositions(inputs)
 
-            // Durable overrides win outright — the engine still computed a position for these
-            // ids above (needed so its per-group interpolation stays coherent), but that result
-            // is discarded here in favor of whatever the user pinned via reorderComics().
-            var overridePositions: [Int64: Int] = [:]
-            let overrideSQL = "SELECT comic_id, position FROM reading_order_overrides"
-            var overrideRaw: OpaquePointer?
-            if sqlite3_prepare_v2(db, overrideSQL, -1, &overrideRaw, nil) == SQLITE_OK, let ostmt = overrideRaw {
-                while sqlite3_step(ostmt) == SQLITE_ROW {
-                    overridePositions[sqlite3_column_int64(ostmt, 0)] = Int(sqlite3_column_int64(ostmt, 1))
+            var positions: [Int64: (position: Int, confidence: Int, reason: String)] = [:]
+
+            switch mode {
+            case .intelligent:
+                let inputs = allRows.map { row in
+                    ReadingOrderEngine.ReadingOrderInput(
+                        id: row.id, groupKey: row.groupKey,
+                        legacyNumber: ReadingOrderEngine.parseLegacyNumber(row.issueNumber),
+                        comicType: ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series),
+                        year: row.year, month: row.month, day: row.day, storyArc: row.storyArc,
+                        title: row.title
+                    )
                 }
-                sqlite3_finalize(ostmt)
+                let results = ReadingOrderEngine.computeSeriesPositions(inputs)
+                for row in allRows {
+                    if let r = results[row.id] { positions[row.id] = (r.position, r.confidence, r.reason) }
+                }
+            case .filename:
+                break // handled directly in the write loop below (falls through to legacy `position`)
+            case .legacyNumber:
+                for group in Dictionary(grouping: allRows, by: \.groupKey).values {
+                    let ordered = group.sorted {
+                        (ReadingOrderEngine.parseLegacyNumber($0.issueNumber) ?? .infinity, $0.title) <
+                        (ReadingOrderEngine.parseLegacyNumber($1.issueNumber) ?? .infinity, $1.title)
+                    }
+                    for (idx, row) in ordered.enumerated() { positions[row.id] = (idx, 100, "Sorted by legacy issue number") }
+                }
+            case .publicationDate:
+                for group in Dictionary(grouping: allRows, by: \.groupKey).values {
+                    let ordered = group.sorted {
+                        ($0.year ?? 9999, $0.month ?? 13, $0.day ?? 32, $0.title) <
+                        ($1.year ?? 9999, $1.month ?? 13, $1.day ?? 32, $1.title)
+                    }
+                    for (idx, row) in ordered.enumerated() { positions[row.id] = (idx, 100, "Sorted by publication date") }
+                }
+            case .comicInfoOrder:
+                func comicInfoOrderKey(_ row: Row) -> Double {
+                    row.comicInfoIssueNumber.flatMap(ReadingOrderEngine.parseLegacyNumber)
+                        ?? ReadingOrderEngine.parseLegacyNumber(row.issueNumber) ?? .infinity
+                }
+                for group in Dictionary(grouping: allRows, by: \.groupKey).values {
+                    let ordered = group.sorted {
+                        (comicInfoOrderKey($0), $0.title) < (comicInfoOrderKey($1), $1.title)
+                    }
+                    for (idx, row) in ordered.enumerated() {
+                        let reason = row.comicInfoIssueNumber != nil
+                            ? "Sorted by ComicInfo.xml issue number" : "Sorted by legacy issue number (no ComicInfo.xml number)"
+                        positions[row.id] = (idx, 100, reason)
+                    }
+                }
             }
+
+            // Manual series-continuation chains (series_links): stamp a large offset onto every
+            // already-computed position of each child series so it sorts after its parent's,
+            // walked recursively for multi-hop chains. Skipped entirely when no links exist.
+            let links: [(parentKey: String, childKey: String)] = rows(
+                "SELECT parent_publisher, parent_series, child_publisher, child_series FROM series_links ORDER BY sequence_order"
+            ) { s in
+                ("\(colText(s, 0) ?? ""):\(colText(s, 1) ?? "")", "\(colText(s, 2) ?? ""):\(colText(s, 3) ?? "")")
+            }
+            if !links.isEmpty {
+                var idsBySeriesKey: [String: [Int64]] = [:]
+                for row in allRows { idsBySeriesKey["\(row.publisher):\(row.series)", default: []].append(row.id) }
+                var childrenOf: [String: [String]] = [:]
+                var parentOf: [String: String] = [:]
+                for link in links {
+                    childrenOf[link.parentKey, default: []].append(link.childKey)
+                    parentOf[link.childKey] = link.parentKey
+                }
+                let allKeys = Set(parentOf.keys).union(parentOf.values)
+                let roots = allKeys.subtracting(parentOf.keys)
+                var visited: Set<String> = []
+                func walk(_ seriesKey: String, baseOffset: Int) {
+                    guard !visited.contains(seriesKey) else { return } // cycle guard: skip, don't crash
+                    visited.insert(seriesKey)
+                    var maxPos = baseOffset
+                    for id in idsBySeriesKey[seriesKey] ?? [] where positions[id] != nil {
+                        positions[id]!.position += baseOffset
+                        maxPos = max(maxPos, positions[id]!.position)
+                    }
+                    for child in childrenOf[seriesKey] ?? [] { walk(child, baseOffset: maxPos + 1_000_000) }
+                }
+                for root in roots { walk(root, baseOffset: 0) }
+            }
+
+            // Durable overrides win outright regardless of mode — the position above was still
+            // computed for these ids (needed so per-group interpolation/ordering stays coherent),
+            // but is discarded here in favor of whatever the user pinned via reorderComics().
+            let overrideMap = Dictionary(uniqueKeysWithValues: rows(
+                "SELECT comic_id, position FROM reading_order_overrides", map: { (colInt64($0, 0), colInt($0, 1)) }
+            ))
 
             exec("BEGIN")
-            for row in rows {
-                if let overridePos = overridePositions[row.id] {
+            for row in allRows {
+                if let overridePos = overrideMap[row.id] {
                     _ = run("""
                         UPDATE comics SET reading_order_position = ?, reading_order_confidence = 100,
                                reading_order_reason = 'Manually placed'
                         WHERE id = ?
                         """, args: [overridePos, row.id])
-                } else if let result = results[row.id] {
+                } else if mode == .filename {
+                    _ = run("""
+                        UPDATE comics SET reading_order_position = NULL, reading_order_confidence = NULL,
+                               reading_order_reason = NULL
+                        WHERE id = ?
+                        """, args: [row.id])
+                } else if let p = positions[row.id] {
                     _ = run("""
                         UPDATE comics SET reading_order_position = ?, reading_order_confidence = ?,
                                reading_order_reason = ?
                         WHERE id = ?
-                        """, args: [result.position, result.confidence, result.reason, row.id])
+                        """, args: [p.position, p.confidence, p.reason, row.id])
                 }
             }
             exec("COMMIT")
         }
     }
+
 
     /// Durable manual override — written whenever a user drags a comic to reorder it
     /// (`reorderComics(orderedIds:)` below), so the correction survives every future rescan
@@ -670,6 +788,151 @@ final class DatabaseManager: @unchecked Sendable {
     func clearReadingOrderOverride(comicId: Int64) {
         queue.sync {
             _ = run("DELETE FROM reading_order_overrides WHERE comic_id = ?", args: [comicId])
+        }
+    }
+
+    func clearAllReadingOrderOverrides() {
+        queue.sync { _ = run("DELETE FROM reading_order_overrides") }
+    }
+
+    // MARK: - Series links (manual cross-series legacy renumbering)
+
+    struct SeriesLink {
+        let id: Int64
+        let parentPublisher: String; let parentSeries: String
+        let childPublisher: String; let childSeries: String
+        let sequenceOrder: Int
+    }
+
+    func seriesLinks() -> [SeriesLink] {
+        queue.sync {
+            rows("""
+                SELECT id, parent_publisher, parent_series, child_publisher, child_series, sequence_order
+                FROM series_links ORDER BY sequence_order
+                """) { s in
+                SeriesLink(id: colInt64(s, 0), parentPublisher: colText(s, 1) ?? "", parentSeries: colText(s, 2) ?? "",
+                           childPublisher: colText(s, 3) ?? "", childSeries: colText(s, 4) ?? "", sequenceOrder: colInt(s, 5))
+            }
+        }
+    }
+
+    /// A series can be linked as the continuation of at most one parent (UNIQUE(child) in the
+    /// schema) — this keeps chain resolution in recomputeReadingOrder() a simple forward walk
+    /// rather than a graph. sequence_order is assigned by insertion order so multi-hop chains
+    /// (A -> B -> C) resolve in the order they were linked.
+    @discardableResult
+    func addSeriesLink(parentPublisher: String, parentSeries: String, childPublisher: String, childSeries: String) -> Bool {
+        queue.sync {
+            let nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
+            let before = scalarInt("SELECT COUNT(*) FROM series_links WHERE child_publisher=? AND child_series=?",
+                                    args: [childPublisher, childSeries])
+            guard before == 0 else { return false } // already linked to a parent — remove first
+            _ = run("""
+                INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order)
+                VALUES (?, ?, ?, ?, ?)
+                """, args: [parentPublisher, parentSeries, childPublisher, childSeries, nextSeq])
+            return true
+        }
+    }
+
+    func removeSeriesLink(childPublisher: String, childSeries: String) {
+        queue.sync {
+            _ = run("DELETE FROM series_links WHERE child_publisher = ? AND child_series = ?",
+                    args: [childPublisher, childSeries])
+        }
+    }
+
+    /// Every distinct (publisher, series) pair in the library — backs the Series Links picker's
+    /// "pick the parent series" autocomplete.
+    func allSeriesNames() -> [(publisher: String, series: String)] {
+        queue.sync {
+            rows("""
+                SELECT DISTINCT publisher, series FROM comics
+                WHERE deleted_at IS NULL ORDER BY series
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General") }
+        }
+    }
+
+    // MARK: - Reading Order Manager / Import Wizard support queries
+
+    struct SeriesTriageRow {
+        let publisher: String; let series: String
+        let issueCount: Int; let minConfidence: Int; let flaggedCount: Int; let overrideCount: Int
+    }
+
+    /// One row per series, worst-confidence-first — backs the library-wide Reading Order
+    /// Manager triage list. `flaggedCount` reuses the same confidence < 85 threshold
+    /// SeriesManagerView's per-issue badge already uses.
+    func readingOrderTriageSummary() -> [SeriesTriageRow] {
+        queue.sync {
+            rows("""
+                SELECT c.publisher, c.series, COUNT(*),
+                       COALESCE(MIN(c.reading_order_confidence), 100),
+                       SUM(CASE WHEN COALESCE(c.reading_order_confidence, 100) < 85 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN o.comic_id IS NOT NULL THEN 1 ELSE 0 END)
+                FROM comics c
+                LEFT JOIN reading_order_overrides o ON o.comic_id = c.id
+                WHERE c.deleted_at IS NULL
+                GROUP BY c.publisher, c.series
+                ORDER BY MIN(COALESCE(c.reading_order_confidence, 100)) ASC, COUNT(*) DESC
+                """) { s in
+                SeriesTriageRow(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General",
+                                 issueCount: colInt(s, 2), minConfidence: colInt(s, 3),
+                                 flaggedCount: colInt(s, 4), overrideCount: colInt(s, 5))
+            }
+        }
+    }
+
+    /// Series with more than one issue at legacy number 1 (excluding collections/TPBs, which
+    /// aren't part of ongoing issue numbering) — an editorial judgment call the app can't make
+    /// automatically, surfaced by the Import Wizard as a deep-link into SeriesManagerView.
+    func seriesWithMultipleFirstIssues() -> [(publisher: String, series: String, count: Int)] {
+        queue.sync {
+            rows("""
+                SELECT publisher, series, COUNT(*) FROM comics
+                WHERE deleted_at IS NULL AND CAST(NULLIF(issue_number, '') AS REAL) = 1
+                GROUP BY publisher, series HAVING COUNT(*) > 1
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
+        }
+    }
+
+    /// Comics whose issue_number can't be parsed as a legacy number at all (nil, blank, or
+    /// non-numeric with no recognized special-issue keyword) — nothing to auto-fix, but worth
+    /// surfacing since it silently degrades every reading-order mode for that comic.
+    func unparseableIssueNumberComics() -> [Comic] {
+        queue.sync {
+            let candidates = rows("\(comicSelect) WHERE c.deleted_at IS NULL", map: comicRow)
+            return candidates.filter {
+                ReadingOrderEngine.parseLegacyNumber($0.issueNumber) == nil &&
+                ReadingOrderEngine.classify(issueNumber: $0.issueNumber, title: $0.title, series: $0.series).needsPlacement == false
+            }
+        }
+    }
+
+    /// Comics with no embedded ComicInfo.xml at all — report-only (never synthesized, per the
+    /// "never rewrite files" constraint), but explains why some comics can only reach the
+    /// engine's lower confidence tiers.
+    func seriesMissingComicInfo() -> [(publisher: String, series: String, count: Int)] {
+        queue.sync {
+            rows("""
+                SELECT publisher, series, COUNT(*) FROM comics
+                WHERE deleted_at IS NULL AND comicinfo_issue_number IS NULL
+                GROUP BY publisher, series HAVING COUNT(*) > 0
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
+        }
+    }
+
+    /// Series keys currently sitting in the engine's always-last band (confidence 0 — no
+    /// mainline sibling to place against) — these are exactly what `positionSpecialsChronologically()`
+    /// already knows how to reposition, so the Import Wizard's one real one-click fix is just
+    /// calling that existing function for the affected series.
+    func seriesNeedingSpecialReposition() -> [(publisher: String, series: String, count: Int)] {
+        queue.sync {
+            rows("""
+                SELECT publisher, series, COUNT(*) FROM comics
+                WHERE deleted_at IS NULL AND reading_order_confidence = 0
+                GROUP BY publisher, series HAVING COUNT(*) > 0
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
         }
     }
 
@@ -712,6 +975,23 @@ final class DatabaseManager: @unchecked Sendable {
         LEFT JOIN favorites f         ON c.id = f.comic_id
         LEFT JOIN reading_list rl     ON c.id = rl.comic_id
     """
+
+    // Orthogonal to SortOrder below: SortOrder answers "how does the library browser
+    // group/sort" (by publisher/title/date/rating/progress/custom); ReadingOrderMode answers
+    // "what basis decides the order of issues within one series" — it controls what
+    // recomputeReadingOrder() writes into reading_order_position, which SortOrder.publisher
+    // and .manual then read via COALESCE. Persisted the same way LibraryViewModel.sortOrder
+    // is (raw UserDefaults, key "readingOrderMode").
+    enum ReadingOrderMode: String, CaseIterable, Identifiable {
+        case filename = "Filename", legacyNumber = "Legacy Number",
+             publicationDate = "Publication Date", comicInfoOrder = "ComicInfo Order",
+             intelligent = "Intelligent Reading Order"
+        var id: String { rawValue }
+
+        static var current: ReadingOrderMode {
+            ReadingOrderMode(rawValue: UserDefaults.standard.string(forKey: "readingOrderMode") ?? "") ?? .intelligent
+        }
+    }
 
     enum SortOrder: String, CaseIterable, Identifiable {
         case publisher = "Publisher", title = "Title", dateAdded = "Recently Added",
@@ -814,6 +1094,7 @@ final class DatabaseManager: @unchecked Sendable {
         var alternateNumber: String? = nil
         var storyArcNumber: String? = nil
         var seriesGroup: String? = nil
+        var comicInfoIssueNumber: String? = nil
     }
 
     func insert(comic: (title: String, filePath: String, publisher: String, character: String?,
@@ -835,7 +1116,7 @@ final class DatabaseManager: @unchecked Sendable {
                 _insertRow(c.title, c.filePath, c.publisher, c.character,
                            c.series, c.issueNumber, c.pageCount, c.writer,
                            c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash, c.coverMonth,
-                           c.coverDay, c.alternateNumber, c.storyArcNumber, c.seriesGroup)
+                           c.coverDay, c.alternateNumber, c.storyArcNumber, c.seriesGroup, c.comicInfoIssueNumber)
             }
             exec("COMMIT")
         }
@@ -846,18 +1127,18 @@ final class DatabaseManager: @unchecked Sendable {
                              _ penciller: String?, _ year: Int?, _ storyArc: String?, _ languageIso: String?,
                              _ fileHash: String?, _ coverMonth: Int? = nil, _ coverDay: Int? = nil,
                              _ alternateNumber: String? = nil, _ storyArcNumber: String? = nil,
-                             _ seriesGroup: String? = nil) {
+                             _ seriesGroup: String? = nil, _ comicInfoIssueNumber: String? = nil) {
         _ = run("""
         INSERT OR IGNORE INTO comics
             (title, file_path, publisher, character, series, issue_number,
              page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
-             cover_day, alternate_number, story_arc_number, series_group)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, args: [title, filePath, publisher, character,
                     series, issueNumber, pageCount, writer,
                     penciller, year.map { Int64($0) }, storyArc,
                     languageIso, fileHash, coverMonth.map { Int64($0) },
-                    coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup])
+                    coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup, comicInfoIssueNumber])
     }
 
     // Comics imported when the archive was unreadable get page_count=0; scanner retries these.
