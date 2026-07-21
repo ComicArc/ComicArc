@@ -743,25 +743,32 @@ final class DatabaseManager: @unchecked Sendable {
     /// library by normalized series name + publisher. Only ever touches links this function
     /// created itself (source = 'gcd') — a manual link the user made always takes precedence
     /// and is never overwritten or removed here.
-    func autoPopulateSeriesLinksFromGCD() {
-        let bonds = OfflineMetadataStore.shared.allSeriesBonds()
+    func autoPopulateSeriesLinksFromGCD(store: OfflineMetadataStore = .shared) {
+        let bonds = store.allSeriesBonds()
         guard !bonds.isEmpty else { return }
         queue.sync {
-            struct LibSeries { let publisher: String; let series: String; let normName: String }
+            struct LibSeries { let publisher: String; let series: String }
             let librarySeries: [LibSeries] = rows(
                 "SELECT DISTINCT publisher, series FROM comics WHERE deleted_at IS NULL"
-            ) { s in
-                let series = colText(s, 1) ?? "General"
-                return LibSeries(publisher: colText(s, 0) ?? "Unknown", series: series,
-                                  normName: OfflineMetadataStore.normalizeSeriesName(series))
-            }
+            ) { s in LibSeries(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General") }
             guard librarySeries.count > 1 else { return }
-            var byNormName: [String: [LibSeries]] = [:]
-            for s in librarySeries { byNormName[s.normName, default: []].append(s) }
+
+            // Same name-resolution rules as lookupIssue (exact normalized match, or a local
+            // abbreviation like "ASM" matching the GCD name's computed initials), plus a
+            // publisher check here as a safety net since there's no issue number to
+            // corroborate against — an abbreviation coincidentally matching the wrong
+            // publisher's series would otherwise be indistinguishable from a real one.
+            func resolve(gcdName: String, gcdPublisher: String) -> LibSeries? {
+                let candidates = librarySeries.filter {
+                    OfflineMetadataStore.seriesNamesMatch(local: $0.series, gcdName: gcdName) &&
+                    OfflineMetadataStore.normalizePublisher($0.publisher) == OfflineMetadataStore.normalizePublisher(gcdPublisher)
+                }
+                return candidates.count == 1 ? candidates.first : nil
+            }
 
             for bond in bonds {
-                guard let origin = byNormName[OfflineMetadataStore.normalizeSeriesName(bond.originName)]?.first,
-                      let target = byNormName[OfflineMetadataStore.normalizeSeriesName(bond.targetName)]?.first,
+                guard let origin = resolve(gcdName: bond.originName, gcdPublisher: bond.originPublisher),
+                      let target = resolve(gcdName: bond.targetName, gcdPublisher: bond.targetPublisher),
                       origin.publisher != target.publisher || origin.series != target.series else { continue }
                 let alreadyLinked = scalarInt(
                     "SELECT COUNT(*) FROM series_links WHERE child_publisher = ? AND child_series = ?",

@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import ComicArc
 
 final class ReadingOrderEngineTests: XCTestCase {
@@ -393,5 +394,76 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         let report = LibraryHealthAnalyzer.analyze(db: db)
         XCTAssertFalse(report.isEmpty)
         XCTAssertTrue(report.multipleFirstIssues.contains { $0.series == "Messy" })
+    }
+
+    // MARK: - Series link auto-population (real-world regression coverage)
+
+    private func buildBondFixture(at path: String) {
+        var fdb: OpaquePointer?
+        sqlite3_open(path, &fdb)
+        defer { sqlite3_close(fdb) }
+        let sql = """
+        CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT, sort_name TEXT,
+            year_began INTEGER, year_ended INTEGER, publisher_id INTEGER,
+            issue_count INTEGER, deleted INTEGER, norm_name TEXT, initials TEXT);
+        CREATE TABLE issue (id INTEGER PRIMARY KEY, series_id INTEGER, number TEXT,
+            key_date TEXT, sort_code INTEGER, title TEXT, variant_of_id INTEGER, deleted INTEGER);
+        CREATE TABLE publisher (id INTEGER PRIMARY KEY, name TEXT, deleted INTEGER);
+        CREATE TABLE series_bond (id INTEGER PRIMARY KEY, origin_id INTEGER, target_id INTEGER,
+            origin_issue_id INTEGER, target_issue_id INTEGER, bond_type_id INTEGER);
+        CREATE TABLE series_bond_type (id INTEGER PRIMARY KEY, name TEXT);
+
+        INSERT INTO publisher VALUES (1, 'Marvel', 0);
+        INSERT INTO series VALUES (100, 'Tales of Suspense', 'Tales of Suspense', 1959, 1968, 1, 99, 0, 'tales of suspense', 'TOS');
+        INSERT INTO series VALUES (101, 'Captain America', 'Captain America', 1968, 1996, 1, 300, 0, 'captain america', 'CA');
+        INSERT INTO series_bond_type VALUES (2, 'major_name_numbering_continues');
+        INSERT INTO series_bond VALUES (1, 100, 101, NULL, NULL, 2);
+        """
+        var errmsg: UnsafeMutablePointer<Int8>?
+        sqlite3_exec(fdb, sql, nil, nil, &errmsg)
+        if let errmsg { XCTFail("bond fixture build failed: \(String(cString: errmsg))") }
+    }
+
+    func test_autoPopulateSeriesLinksFromGCD_resolvesAbbreviatedLocalFolders() {
+        // Real-world regression: a local library organizes these under abbreviated folder
+        // names ("TOS (Modern)", "Cap America") rather than GCD's full official names — the
+        // auto-linker must use the same abbreviation-aware matching lookupIssue does, not a
+        // bare exact-normalized-name comparison (which would silently link nothing, exactly
+        // the bug found by testing this against a real library).
+        insertComic(series: "TOS (Modern)", issue: "99", title: "TOS (Modern) #99")
+        insertComic(series: "Captain America", issue: "100", title: "Captain America #100")
+
+        let bondPath = NSTemporaryDirectory() + "bond-fixture-\(UUID().uuidString).sqlite"
+        buildBondFixture(at: bondPath)
+        defer { try? FileManager.default.removeItem(atPath: bondPath) }
+        let bondStore = OfflineMetadataStore(path: bondPath)
+
+        db.autoPopulateSeriesLinksFromGCD(store: bondStore)
+
+        let links = db.seriesLinks()
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links.first?.parentSeries, "TOS (Modern)")
+        XCTAssertEqual(links.first?.childSeries, "Captain America")
+        XCTAssertEqual(links.first?.source, "gcd")
+    }
+
+    func test_autoPopulateSeriesLinksFromGCD_doesNotOverwriteManualLink() {
+        insertComic(series: "TOS (Modern)", issue: "99", title: "TOS (Modern) #99")
+        insertComic(series: "Captain America", issue: "100", title: "Captain America #100")
+        insertComic(series: "SomeOtherParent", issue: "1", title: "SomeOtherParent #1")
+        db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "SomeOtherParent",
+                          childPublisher: "Marvel", childSeries: "Captain America", source: "manual")
+
+        let bondPath = NSTemporaryDirectory() + "bond-fixture-\(UUID().uuidString).sqlite"
+        buildBondFixture(at: bondPath)
+        defer { try? FileManager.default.removeItem(atPath: bondPath) }
+        let bondStore = OfflineMetadataStore(path: bondPath)
+
+        db.autoPopulateSeriesLinksFromGCD(store: bondStore)
+
+        let links = db.seriesLinks()
+        XCTAssertEqual(links.count, 1) // still just the manual one, not replaced/duplicated
+        XCTAssertEqual(links.first?.parentSeries, "SomeOtherParent")
+        XCTAssertEqual(links.first?.source, "manual")
     }
 }

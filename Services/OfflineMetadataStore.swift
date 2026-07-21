@@ -87,8 +87,22 @@ final class OfflineMetadataStore {
         return s.trimmingCharacters(in: .whitespaces)
     }
 
-    private static func normalizePublisher(_ raw: String) -> String {
+    static func normalizePublisher(_ raw: String) -> String {
         raw.lowercased().replacingOccurrences(of: #"[^a-z0-9]"#, with: "", options: .regularExpression)
+    }
+
+    /// True if a local series name plausibly refers to the same real-world series as a GCD
+    /// catalog name — either a direct normalized-name match, or the local name is a short
+    /// abbreviation ("ASM") whose letters match the GCD name's computed initials. Shared by
+    /// lookupIssue's series-candidate search and any caller that needs to resolve a GCD name
+    /// against the local library without an issue number in hand (e.g. auto-linking series
+    /// continuations from allSeriesBonds).
+    static func seriesNamesMatch(local: String, gcdName: String) -> Bool {
+        let normLocal = normalizeSeriesName(local)
+        let normGCD = normalizeSeriesName(gcdName)
+        if !normLocal.isEmpty, normLocal == normGCD { return true }
+        if let abbrev = abbreviationToken(local), computeInitials(gcdName) == abbrev { return true }
+        return false
     }
 
     /// Must exactly mirror the Python ETL's compute_initials. Lets a fan abbreviation like
@@ -107,13 +121,22 @@ final class OfflineMetadataStore {
     }
 
     /// A local series folder name is treated as a possible abbreviation only when, after
-    /// stripping the trailing year/volume annotation, what's left is a single short alphabetic
+    /// stripping a trailing qualifier annotation, what's left is a single short alphabetic
     /// token — "ASM" qualifies, "Amazing Spider-Man" (with spaces) does not need this path at
     /// all since the plain name match already handles it.
-    private static func abbreviationToken(_ raw: String) -> String? {
+    ///
+    /// Strips ANY trailing "(...)" here — not just a year — since local folder conventions use
+    /// this for all kinds of qualifiers ("ASM (Modern)", "ASM (1963)", "ASM (Vol 2)"). This is
+    /// deliberately broader than normalizeSeriesName/computeInitials below, which strip only a
+    /// year: those two feed matching against GCD's own catalog names (real GCD series titles
+    /// occasionally carry a genuine disambiguating year in the name itself, e.g. "Firestorm
+    /// (2004)"), and the stored `norm_name`/`initials` columns in the downloaded database were
+    /// pre-computed with that narrower rule — broadening them here without regenerating that
+    /// data would desync the two sides. This function only ever runs against the LOCAL name,
+    /// so it's free to be as permissive as real-world folder-naming conventions need.
+    static func abbreviationToken(_ raw: String) -> String? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        s = s.replacingOccurrences(of: #"\s*\((?:19|20)\d{2}(?:-(?:19|20)?\d{2,4})?\)\s*$"#,
-                                    with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\s*\([^)]*\)\s*$"#, with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: #"\s*,?\s*[Vv]ol(?:ume)?\.?\s*\d+\s*$"#,
                                     with: "", options: .regularExpression)
         guard (2...6).contains(s.count), s.allSatisfy({ $0.isLetter }) else { return nil }
