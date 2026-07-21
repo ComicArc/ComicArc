@@ -701,7 +701,7 @@ final class DatabaseManager: @unchecked Sendable {
         guard OfflineMetadataStore.shared.isAvailable else { return }
         queue.sync {
             var sql = """
-                SELECT id, series, publisher, issue_number, year,
+                SELECT id, series, publisher, issue_number, year, title,
                        publisher || ':' || COALESCE(NULLIF(series_group,''), series)
                 FROM comics WHERE deleted_at IS NULL
             """
@@ -712,15 +712,18 @@ final class DatabaseManager: @unchecked Sendable {
                 sql += " AND (publisher || ':' || COALESCE(NULLIF(series_group,''), series)) IN (\(placeholders))"
                 args = Array(keys).map { $0 as Any? }
             }
-            struct Row { let id: Int64; let series: String; let publisher: String; let issueNumber: String?; let year: Int? }
+            struct Row { let id: Int64; let series: String; let publisher: String; let issueNumber: String?; let year: Int?; let title: String }
             let candidates: [Row] = rows(sql, args: args) { s in
                 Row(id: colInt64(s, 0), series: colText(s, 1) ?? "General", publisher: colText(s, 2) ?? "Unknown",
-                    issueNumber: colText(s, 3), year: sqlite3_column_type(s, 4) != SQLITE_NULL ? colInt(s, 4) : nil)
+                    issueNumber: colText(s, 3), year: sqlite3_column_type(s, 4) != SQLITE_NULL ? colInt(s, 4) : nil,
+                    title: colText(s, 5) ?? "")
             }
             exec("BEGIN")
             for row in candidates {
+                let comicType = ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series)
                 guard let match = OfflineMetadataStore.shared.lookupIssue(
-                    series: row.series, publisher: row.publisher, issueNumber: row.issueNumber, year: row.year
+                    series: row.series, publisher: row.publisher, issueNumber: row.issueNumber, year: row.year,
+                    comicType: comicType
                 ) else { continue }
                 _ = run("""
                     UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = ?, gcd_match_reason = ?

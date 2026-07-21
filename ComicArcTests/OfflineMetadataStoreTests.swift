@@ -26,7 +26,7 @@ final class OfflineMetadataStoreTests: XCTestCase {
         let sql = """
         CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT, sort_name TEXT,
             year_began INTEGER, year_ended INTEGER, publisher_id INTEGER,
-            issue_count INTEGER, deleted INTEGER, norm_name TEXT);
+            issue_count INTEGER, deleted INTEGER, norm_name TEXT, initials TEXT);
         CREATE TABLE issue (id INTEGER PRIMARY KEY, series_id INTEGER, number TEXT,
             key_date TEXT, sort_code INTEGER, title TEXT, variant_of_id INTEGER, deleted INTEGER);
         CREATE TABLE publisher (id INTEGER PRIMARY KEY, name TEXT, deleted INTEGER);
@@ -38,14 +38,20 @@ final class OfflineMetadataStoreTests: XCTestCase {
         INSERT INTO publisher VALUES (2, 'DC Comics', 0);
 
         -- Two distinct real-world runs sharing a name, disambiguated by year.
-        INSERT INTO series VALUES (100, 'The Amazing Spider-Man', 'Amazing Spider-Man', 1963, 1998, 1, 443, 0, 'amazing spider man');
-        INSERT INTO series VALUES (101, 'The Amazing Spider-Man', 'Amazing Spider-Man', 1999, 2013, 1, 700, 0, 'amazing spider man');
-        INSERT INTO series VALUES (102, 'Superior Spider-Man', 'Superior Spider-Man', 2013, 2014, 1, 34, 0, 'superior spider man');
+        INSERT INTO series VALUES (100, 'The Amazing Spider-Man', 'Amazing Spider-Man', 1963, 1998, 1, 443, 0, 'amazing spider man', 'ASM');
+        INSERT INTO series VALUES (101, 'The Amazing Spider-Man', 'Amazing Spider-Man', 1999, 2013, 1, 700, 0, 'amazing spider man', 'ASM');
+        INSERT INTO series VALUES (102, 'Superior Spider-Man', 'Superior Spider-Man', 2013, 2014, 1, 34, 0, 'superior spider man', 'SSM');
+        INSERT INTO series VALUES (103, 'Ultimate Spider-Man', 'Ultimate Spider-Man', 2000, 2009, 1, 133, 0, 'ultimate spider man', 'USM');
 
         INSERT INTO issue VALUES (1000, 100, '12', '1964-05-00', 500, '', NULL, 0);
         INSERT INTO issue VALUES (1001, 100, '13', '1964-06-00', 501, '', NULL, 0);
         INSERT INTO issue VALUES (1002, 101, '12', '2000-01-15', 900, '', NULL, 0);
         INSERT INTO issue VALUES (1003, 100, '12', '1964-05-00', 499, 'variant', 1000, 0);
+        INSERT INTO issue VALUES (1004, 103, '1', '2000-10-00', 1, '', NULL, 0);
+
+        -- GCD catalogs annuals as their own series, separate from the ongoing title.
+        INSERT INTO series VALUES (200, 'The Amazing Spider-Man Annual', 'Amazing Spider-Man Annual', 1964, 1994, 1, 28, 0, 'amazing spider man annual', 'ASMA');
+        INSERT INTO issue VALUES (2000, 200, '1', '1964-09-00', 1, '', NULL, 0);
 
         INSERT INTO series_bond_type VALUES (1, 'major_name_numbering_continues');
         INSERT INTO series_bond VALUES (1, 100, 102, NULL, NULL, 1);
@@ -91,6 +97,58 @@ final class OfflineMetadataStoreTests: XCTestCase {
     func test_allSeriesBonds_returnsRealContinuation() {
         let bonds = store.allSeriesBonds()
         XCTAssertTrue(bonds.contains { $0.originName == "The Amazing Spider-Man" && $0.targetName == "Superior Spider-Man" })
+    }
+
+    func test_computeInitials_matchesCommonFanAbbreviations() {
+        XCTAssertEqual(OfflineMetadataStore.computeInitials("The Amazing Spider-Man"), "ASM")
+        XCTAssertEqual(OfflineMetadataStore.computeInitials("Ultimate Spider-Man"), "USM")
+        XCTAssertEqual(OfflineMetadataStore.computeInitials("Amazing Spider-Man (2016)"), "ASM")
+        XCTAssertEqual(OfflineMetadataStore.computeInitials("Teenage Mutant Ninja Turtles"), "TMNT")
+    }
+
+    func test_lookupIssue_matchesAbbreviatedSeriesFolderName() {
+        // The real-world gap this exists for: a series folder named "ASM (1963)" instead of
+        // the full name — must resolve to the same series a full-name folder would.
+        let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "12", year: 1964)
+        XCTAssertEqual(match?.coverDate, "1964-05-00")
+    }
+
+    func test_lookupIssue_abbreviationStillRequiresRealSignal() {
+        // "ASM" alone with no publisher/year corroboration must not silently guess between
+        // the two same-named Marvel runs.
+        let match = store.lookupIssue(series: "ASM", publisher: nil, issueNumber: "12", year: nil)
+        XCTAssertNil(match)
+    }
+
+    func test_lookupIssue_abbreviationDoesNotMatchWrongSeries() {
+        // "USM" should resolve to Ultimate Spider-Man, not the unrelated ASM/Superior runs.
+        let match = store.lookupIssue(series: "USM (2000)", publisher: "Marvel", issueNumber: "1", year: 2000)
+        XCTAssertEqual(match?.gcdIssueId, 1004)
+    }
+
+    func test_lookupIssue_ordinarySpacedNameIsNotTreatedAsAbbreviation() {
+        // A normal full-word series name should never accidentally hit the initials path.
+        let match = store.lookupIssue(series: "Superior Spider-Man", publisher: "Marvel", issueNumber: "999", year: 2013)
+        XCTAssertNil(match) // issue #999 doesn't exist for this series — must not fall back to ASM's #12 etc.
+    }
+
+    func test_lookupIssue_annualResolvesToCompanionSeries() {
+        // Real-world gap: "ASM (1963) Annual #001" filed in the same local folder as the
+        // ongoing series must resolve to GCD's separate "...Annual" series, not the ongoing one.
+        let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "001", year: 1964, comicType: .annual)
+        XCTAssertEqual(match?.gcdIssueId, 2000)
+        XCTAssertEqual(match?.coverDate, "1964-09-00")
+    }
+
+    func test_lookupIssue_zeroPaddedNumberMatchesUnpadded() {
+        let match = store.lookupIssue(series: "Amazing Spider-Man", publisher: "Marvel", issueNumber: "012", year: 1964)
+        XCTAssertEqual(match?.gcdIssueId, 1000)
+    }
+
+    func test_lookupIssue_regularIssueDoesNotSearchAnnualCompanion() {
+        // A plain numbered issue must never accidentally match into the Annual series.
+        let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "12", year: 1964, comicType: .regular)
+        XCTAssertEqual(match?.gcdIssueId, 1000)
     }
 
     func test_isAvailable_falseWhenFileMissing() {

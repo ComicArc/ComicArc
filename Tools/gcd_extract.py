@@ -26,7 +26,7 @@ _WS = re.compile(r"\s+")
 
 
 def normalize_series_name(name):
-    """Must exactly mirror ReadingOrderMatcher.normalizeSeriesName in Swift."""
+    """Must exactly mirror OfflineMetadataStore.normalizeSeriesName in Swift."""
     s = name.strip()
     s = _YEAR_PAREN.sub("", s)
     s = _VOL_SUFFIX.sub("", s)
@@ -36,6 +36,23 @@ def normalize_series_name(name):
     s = _NON_ALNUM.sub(" ", s)
     s = _WS.sub(" ", s).strip()
     return s
+
+
+_WORD_SPLIT = re.compile(r"[\s\-]+")
+
+
+def compute_initials(name):
+    """Must exactly mirror OfflineMetadataStore.computeInitials in Swift. Lets a fan
+    abbreviation like "ASM" or "USM" resolve to "Amazing Spider-Man" / "Ultimate Spider-Man"
+    without a hand-curated alias table — most real-world comic abbreviations are literally
+    the initials of each word (including hyphenated ones split into separate words)."""
+    s = name.strip()
+    s = _YEAR_PAREN.sub("", s)
+    s = _VOL_SUFFIX.sub("", s)
+    if s.lower().startswith("the "):
+        s = s[4:]
+    words = [w for w in _WORD_SPLIT.split(s) if w]
+    return "".join(w[0].upper() for w in words if w[0].isalpha())
 
 ESCAPES = {'n': '\n', 'r': '\r', 't': '\t', '0': '\0', '\\': '\\',
            "'": "'", '"': '"', 'Z': '\x1a', 'b': '\b'}
@@ -132,7 +149,7 @@ def main():
         CREATE TABLE series (
             id INTEGER PRIMARY KEY, name TEXT, sort_name TEXT,
             year_began INTEGER, year_ended INTEGER, publisher_id INTEGER,
-            issue_count INTEGER, deleted INTEGER, norm_name TEXT
+            issue_count INTEGER, deleted INTEGER, norm_name TEXT, initials TEXT
         );
         CREATE TABLE issue (
             id INTEGER PRIMARY KEY, series_id INTEGER, number TEXT,
@@ -182,9 +199,10 @@ def main():
 
             if dest == "series":
                 batch = [(to_int(r[0]), r[1], r[2], to_int(r[4]), to_int(r[6]),
-                          to_int(r[12]), to_int(r[18]), to_int(r[21]), normalize_series_name(r[1] or ""))
+                          to_int(r[12]), to_int(r[18]), to_int(r[21]), normalize_series_name(r[1] or ""),
+                          compute_initials(r[1] or ""))
                          for r in rows]
-                c.executemany("INSERT OR REPLACE INTO series VALUES (?,?,?,?,?,?,?,?,?)", batch)
+                c.executemany("INSERT OR REPLACE INTO series VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
             elif dest == "issue":
                 batch = [(to_int(r[0]), to_int(r[5]), r[1], r[11], to_int(r[12]),
                           r[32], to_int(r[28]), to_int(r[23]))
@@ -211,6 +229,7 @@ def main():
         CREATE INDEX idx_issue_series ON issue(series_id);
         CREATE INDEX idx_series_name ON series(sort_name);
         CREATE INDEX idx_series_norm_name ON series(norm_name);
+        CREATE INDEX idx_series_initials ON series(initials);
         CREATE INDEX idx_bond_origin ON series_bond(origin_id);
         CREATE INDEX idx_bond_target ON series_bond(target_id);
     """)

@@ -86,36 +86,101 @@ final class OfflineMetadataStore {
         raw.lowercased().replacingOccurrences(of: #"[^a-z0-9]"#, with: "", options: .regularExpression)
     }
 
+    /// Must exactly mirror the Python ETL's compute_initials. Lets a fan abbreviation like
+    /// "ASM" or "USM" resolve to "Amazing Spider-Man" / "Ultimate Spider-Man" without a
+    /// hand-curated alias table — most real-world comic abbreviations are literally the
+    /// initials of each word (hyphenated words counted separately, "The" prefix ignored).
+    static func computeInitials(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: #"\s*\((?:19|20)\d{2}(?:-(?:19|20)?\d{2,4})?\)\s*$"#,
+                                    with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\s*,?\s*[Vv]ol(?:ume)?\.?\s*\d+\s*$"#,
+                                    with: "", options: .regularExpression)
+        if s.lowercased().hasPrefix("the ") { s = String(s.dropFirst(4)) }
+        let words = s.split(whereSeparator: { $0 == " " || $0 == "-" })
+        return words.compactMap { $0.first?.isLetter == true ? String($0.first!).uppercased() : nil }.joined()
+    }
+
+    /// A local series folder name is treated as a possible abbreviation only when, after
+    /// stripping the trailing year/volume annotation, what's left is a single short alphabetic
+    /// token — "ASM" qualifies, "Amazing Spider-Man" (with spaces) does not need this path at
+    /// all since the plain name match already handles it.
+    private static func abbreviationToken(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: #"\s*\((?:19|20)\d{2}(?:-(?:19|20)?\d{2,4})?\)\s*$"#,
+                                    with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\s*,?\s*[Vv]ol(?:ume)?\.?\s*\d+\s*$"#,
+                                    with: "", options: .regularExpression)
+        guard (2...6).contains(s.count), s.allSatisfy({ $0.isLetter }) else { return nil }
+        return s.uppercased()
+    }
+
     // MARK: - Issue lookup
+
+    /// GCD catalogs annuals/specials as their own series ("The Amazing Spider-Man Annual"),
+    /// separate from the ongoing title, even when a local library files them in the same
+    /// folder. When the comic's own type suggests this, search that companion series name
+    /// first — falling back to the plain series name only if nothing turns up there.
+    private static func gcdTypeSuffix(for type: ComicType) -> String? {
+        switch type {
+        case .annual: return "annual"
+        case .special: return "special"
+        case .giantSize, .kingSize: return "giant size"
+        default: return nil
+        }
+    }
 
     /// Conservative by design: returns nil rather than guess when there isn't a real signal
     /// (publisher match or year match) backing the chosen series candidate — a wrong match
     /// silently mis-files a comic, which is worse than no match at all.
-    func lookupIssue(series: String, publisher: String?, issueNumber: String?, year: Int?) -> GCDIssueMatch? {
+    func lookupIssue(series: String, publisher: String?, issueNumber: String?, year: Int?,
+                      comicType: ComicType = .regular) -> GCDIssueMatch? {
         guard let db, let issueNumber, !issueNumber.isEmpty else { return nil }
         let normSeries = Self.normalizeSeriesName(series)
         guard !normSeries.isEmpty else { return nil }
 
         struct Candidate { let id: Int; let publisherName: String?; let yearBegan: Int?; let yearEnded: Int?; let issueCount: Int }
-        var candidates: [Candidate] = []
-        let sql = """
-            SELECT s.id, p.name, s.year_began, s.year_ended, s.issue_count
-            FROM series s LEFT JOIN publisher p ON p.id = s.publisher_id
-            WHERE s.norm_name = ?
-        """
-        var stmt: OpaquePointer?
-        queue.sync {
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(stmt, 1, normSeries, -1, SQLITE_TRANSIENT)
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                let id = Int(sqlite3_column_int(stmt, 0))
-                let pub = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
-                let yb = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 2)) : nil
-                let ye = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
-                let count = Int(sqlite3_column_int(stmt, 4))
-                candidates.append(Candidate(id: id, publisherName: pub, yearBegan: yb, yearEnded: ye, issueCount: count))
+        func fetchCandidates(column: String, value: String) -> [Candidate] {
+            var results: [Candidate] = []
+            let sql = """
+                SELECT s.id, p.name, s.year_began, s.year_ended, s.issue_count
+                FROM series s LEFT JOIN publisher p ON p.id = s.publisher_id
+                WHERE s.\(column) = ?
+            """
+            var stmt: OpaquePointer?
+            queue.sync {
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+                sqlite3_bind_text(stmt, 1, value, -1, SQLITE_TRANSIENT)
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let id = Int(sqlite3_column_int(stmt, 0))
+                    let pub = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+                    let yb = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 2)) : nil
+                    let ye = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
+                    let count = Int(sqlite3_column_int(stmt, 4))
+                    results.append(Candidate(id: id, publisherName: pub, yearBegan: yb, yearEnded: ye, issueCount: count))
+                }
+                sqlite3_finalize(stmt)
             }
-            sqlite3_finalize(stmt)
+            return results
+        }
+
+        let abbrev = Self.abbreviationToken(series)
+
+        func candidatePool(nameSuffix: String?) -> [Candidate] {
+            let name = nameSuffix.map { "\(normSeries) \($0)" } ?? normSeries
+            var pool = fetchCandidates(column: "norm_name", value: name)
+            if let abbrev {
+                let initials = nameSuffix.flatMap { $0.first.map { c in abbrev + String(c).uppercased() } } ?? abbrev
+                let existingIds = Set(pool.map(\.id))
+                pool += fetchCandidates(column: "initials", value: initials).filter { !existingIds.contains($0.id) }
+            }
+            return pool
+        }
+
+        var candidates = candidatePool(nameSuffix: nil)
+        if let suffix = Self.gcdTypeSuffix(for: comicType) {
+            let variantCandidates = candidatePool(nameSuffix: suffix)
+            if !variantCandidates.isEmpty { candidates = variantCandidates }
         }
         guard !candidates.isEmpty else { return nil }
 
@@ -149,17 +214,34 @@ final class OfflineMetadataStore {
     private struct IssueRow { let id: Int; let keyDate: String? }
 
     private func queryIssue(seriesId: Int, issueNumber: String) -> IssueRow? {
+        // Exact match first (handles non-numeric labels like "Alpha" correctly); falls back to
+        // a numeric comparison so "001" (a common local zero-padding convention) still finds
+        // GCD's "1" — but only when the requested number actually parses as a number at all,
+        // so this can't accidentally match unrelated non-numeric issue labels.
         let sql = """
-            SELECT id, key_date FROM issue
+            SELECT id, key_date, 0 AS rank, sort_code FROM issue
             WHERE series_id = ? AND number = ? AND variant_of_id IS NULL
-            ORDER BY sort_code LIMIT 1
+            UNION ALL
+            SELECT id, key_date, 1 AS rank, sort_code FROM issue
+            WHERE series_id = ? AND variant_of_id IS NULL
+                  AND ? IS NOT NULL AND CAST(number AS REAL) = ?
+            ORDER BY rank, sort_code LIMIT 1
         """
         var result: IssueRow?
         var stmt: OpaquePointer?
+        let numericValue = Double(issueNumber)
         queue.sync {
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             sqlite3_bind_int(stmt, 1, Int32(seriesId))
             sqlite3_bind_text(stmt, 2, issueNumber, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(stmt, 3, Int32(seriesId))
+            if let numericValue {
+                sqlite3_bind_double(stmt, 4, numericValue)
+                sqlite3_bind_double(stmt, 5, numericValue)
+            } else {
+                sqlite3_bind_null(stmt, 4)
+                sqlite3_bind_null(stmt, 5)
+            }
             if sqlite3_step(stmt) == SQLITE_ROW {
                 let id = Int(sqlite3_column_int(stmt, 0))
                 let dateRaw = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
