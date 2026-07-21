@@ -391,18 +391,12 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertTrue(hits.contains { $0.series == "Relaunch" && $0.count == 2 })
     }
 
-    func test_seriesMissingComicInfo_detectsAbsence() {
-        insertComic(series: "NoMeta", issue: "1", title: "NoMeta #1")
-        let hits = db.seriesMissingComicInfo()
-        XCTAssertTrue(hits.contains { $0.series == "NoMeta" })
-    }
-
     func test_libraryHealthAnalyzer_reportIsEmptyForCleanLibrary() {
         for n in 1...5 { insertComic(series: "Clean", issue: "\(n)", title: "Clean #\(n)", comicInfoIssueNumber: "\(n)") }
         db.recomputeReadingOrder()
         let report = LibraryHealthAnalyzer.analyze(db: db)
         XCTAssertEqual(report.multipleFirstIssues.count, 0)
-        XCTAssertTrue(report.missingComicInfo.isEmpty)
+        XCTAssertTrue(report.isEmpty)
     }
 
     func test_libraryHealthAnalyzer_reportFlagsRealIssues() {

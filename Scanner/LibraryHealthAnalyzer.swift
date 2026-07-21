@@ -8,18 +8,14 @@ struct LibraryHealthReport {
 
     var duplicateGroupCount: Int = 0
     var multipleFirstIssues: [SeriesIssue] = []
-    var unparseableNumbering: [Comic] = []
-    var missingComicInfo: [SeriesIssue] = []
     var needsSpecialReposition: [SeriesIssue] = []
 
     var isEmpty: Bool {
-        duplicateGroupCount == 0 && multipleFirstIssues.isEmpty && unparseableNumbering.isEmpty &&
-        missingComicInfo.isEmpty && needsSpecialReposition.isEmpty
+        duplicateGroupCount == 0 && multipleFirstIssues.isEmpty && needsSpecialReposition.isEmpty
     }
 
     var totalCount: Int {
-        duplicateGroupCount + multipleFirstIssues.count + unparseableNumbering.count +
-        missingComicInfo.count + needsSpecialReposition.count
+        duplicateGroupCount + multipleFirstIssues.count + needsSpecialReposition.count
     }
 }
 
@@ -28,10 +24,6 @@ enum LibraryHealthAnalyzer {
         LibraryHealthReport(
             duplicateGroupCount: db.duplicateGroups().count,
             multipleFirstIssues: db.seriesWithMultipleFirstIssues().map {
-                .init(publisher: $0.publisher, series: $0.series, count: $0.count)
-            },
-            unparseableNumbering: db.unparseableIssueNumberComics(),
-            missingComicInfo: db.seriesMissingComicInfo().map {
                 .init(publisher: $0.publisher, series: $0.series, count: $0.count)
             },
             needsSpecialReposition: db.seriesNeedingSpecialReposition().map {

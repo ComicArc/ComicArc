@@ -760,26 +760,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func unparseableIssueNumberComics() -> [Comic] {
-        queue.sync {
-            let candidates = rows("\(comicSelect) WHERE c.deleted_at IS NULL", map: comicRow)
-            return candidates.filter {
-                ReadingOrderEngine.parseLegacyNumber($0.issueNumber) == nil &&
-                ReadingOrderEngine.classify(issueNumber: $0.issueNumber, title: $0.title, series: $0.series).needsPlacement == false
-            }
-        }
-    }
-
-    func seriesMissingComicInfo() -> [(publisher: String, series: String, count: Int)] {
-        queue.sync {
-            rows("""
-                SELECT publisher, series, COUNT(*) FROM comics
-                WHERE deleted_at IS NULL AND comicinfo_issue_number IS NULL
-                GROUP BY publisher, series HAVING COUNT(*) > 0
-                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
-        }
-    }
-
     func seriesNeedingSpecialReposition() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""

@@ -39,8 +39,13 @@ struct SeriesManagerView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Link as Continuation…") { showSeriesLinkPicker = true }
-                    .buttonStyle(.bordered)
+                Menu {
+                    Button("Link as Continuation of Another Series…") { showSeriesLinkPicker = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton).frame(width: 28)
+                .help("Advanced: chain this series to another series' numbering (e.g. a relaunch)")
                 Button("Done") { dismiss() }
                     .goldButton()
             }

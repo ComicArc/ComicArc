@@ -10,10 +10,10 @@ struct ImportWizardView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Library Health Check")
+                    Text("Library Check")
                         .font(.system(size: 20, weight: .black, design: .rounded))
                         .foregroundStyle(Design.textPrimary)
-                    Text("\(report.totalCount) thing\(report.totalCount == 1 ? "" : "s") worth a look after this scan")
+                    Text("A few things worth a look after this scan")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -28,20 +28,20 @@ struct ImportWizardView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     if !report.needsSpecialReposition.isEmpty {
                         section(
-                            title: "Annuals/specials with no anchor to place against",
+                            title: "Some annuals or specials may be in the wrong spot",
                             icon: "arrow.up.arrow.down.circle.fill",
-                            detail: "\(report.needsSpecialReposition.reduce(0) { $0 + $1.count }) issue(s) across \(report.needsSpecialReposition.count) series are estimated with the lowest confidence — this repositions them using publication date and story arc where available."
+                            detail: "\(report.needsSpecialReposition.reduce(0) { $0 + $1.count }) issue(s) across \(report.needsSpecialReposition.count) series. This tries to place them better using their cover date and story."
                         ) {
-                            Button(isRepositioning ? "Repositioning…" : "Reposition Now") { repositionSpecials() }
+                            Button(isRepositioning ? "Fixing…" : "Fix Automatically") { repositionSpecials() }
                                 .buttonStyle(.borderedProminent).tint(Design.brandGold)
                                 .disabled(isRepositioning)
                         }
                     }
                     if report.duplicateGroupCount > 0 {
                         section(
-                            title: "Duplicate issues",
+                            title: "Possible duplicate issues",
                             icon: "doc.on.doc.fill",
-                            detail: "\(report.duplicateGroupCount) group(s) of possible duplicates found."
+                            detail: "\(report.duplicateGroupCount) group(s) of comics that look like the same issue twice."
                         ) {
                             Button("Review Duplicates") {
                                 vm.destination = .duplicates
@@ -51,38 +51,20 @@ struct ImportWizardView: View {
                     }
                     if !report.multipleFirstIssues.isEmpty {
                         seriesListSection(
-                            title: "Multiple issue #1s in one series",
+                            title: "More than one issue #1 in a series",
                             icon: "1.circle.fill",
-                            detail: "Could be a relaunch, a reprint, or a numbering mix-up — worth a manual look since only you know which is which.",
+                            detail: "Could be a relaunch, a reprint, or a numbering mix-up — take a quick look and decide which is which.",
                             items: report.multipleFirstIssues
                         )
                     }
-                    if !report.missingComicInfo.isEmpty {
-                        seriesListSection(
-                            title: "No embedded ComicInfo.xml",
-                            icon: "doc.text.magnifyingglass",
-                            detail: "These comics only have filename-derived metadata, so Intelligent Reading Order and ComicInfo Order mode can't do as much for them. Nothing to fix automatically — ComicArc never writes files.",
-                            items: report.missingComicInfo,
-                            actionable: false
-                        )
-                    }
-                    if !report.unparseableNumbering.isEmpty {
-                        section(
-                            title: "Unparseable issue numbers",
-                            icon: "questionmark.circle.fill",
-                            detail: "\(report.unparseableNumbering.count) comic(s) have no usable issue number and aren't a recognized special type."
-                        ) {
-                            EmptyView()
-                        }
-                    }
                     if report.isEmpty {
-                        Text("Nothing to report.").foregroundStyle(.secondary).padding(24)
+                        Text("Nothing to report — your library looks good.").foregroundStyle(.secondary).padding(24)
                     }
                 }
                 .padding(24)
             }
         }
-        .frame(minWidth: 640, idealWidth: 720, minHeight: 480, idealHeight: 620)
+        .frame(minWidth: 640, idealWidth: 720, minHeight: 480, idealHeight: 560)
         .background(Design.appBackground)
     }
 
@@ -99,7 +81,7 @@ struct ImportWizardView: View {
     }
 
     @ViewBuilder
-    private func seriesListSection(title: String, icon: String, detail: String, items: [LibraryHealthReport.SeriesIssue], actionable: Bool = true) -> some View {
+    private func seriesListSection(title: String, icon: String, detail: String, items: [LibraryHealthReport.SeriesIssue]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(title, systemImage: icon).font(.headline)
             Text(detail).font(.caption).foregroundStyle(.secondary)
@@ -108,14 +90,12 @@ struct ImportWizardView: View {
                     Text("\(item.series)").font(.caption.weight(.semibold))
                     Text("· \(item.count) issue(s)").font(.caption).foregroundStyle(.tertiary)
                     Spacer()
-                    if actionable {
-                        Button("Review") {
-                            vm.destination = .publisher(item.publisher)
-                            vm.selectedSeries = item.series
-                            vm.showSeriesManager = true
-                            dismiss()
-                        }.buttonStyle(.borderless).font(.caption)
-                    }
+                    Button("Review") {
+                        vm.destination = .publisher(item.publisher)
+                        vm.selectedSeries = item.series
+                        vm.showSeriesManager = true
+                        dismiss()
+                    }.buttonStyle(.borderless).font(.caption)
                 }
             }
             if items.count > 8 {

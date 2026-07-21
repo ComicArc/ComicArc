@@ -21,6 +21,11 @@ struct SettingsView: View {
                 set: { progressFormatRaw = $0.rawValue })
     }
 
+    private var smartReadingOrderIsOn: Binding<Bool> {
+        Binding(get: { vm.readingOrderMode == .intelligent },
+                set: { vm.readingOrderMode = $0 ? .intelligent : .filename })
+    }
+
     private var readingOrderModeExplainer: String {
         switch vm.readingOrderMode {
         case .filename:        return "Issues sort by their original position, unaffected by any of the modes below."
@@ -117,15 +122,22 @@ struct SettingsView: View {
                 }
 
                 Section("Reading Order") {
-                    Picker("Order Basis", selection: $vm.readingOrderMode) {
-                        ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    Text(readingOrderModeExplainer)
+                    Toggle("Smart Reading Order", isOn: smartReadingOrderIsOn)
+                    Text("Automatically places annuals and specials in their correct spot in a series instead of dumping them at the end. Turn this off to go back to the original order.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    DisclosureGroup("Advanced") {
+                        Picker("Order Basis", selection: $vm.readingOrderMode) {
+                            ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Text(readingOrderModeExplainer)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Section("Reader") {

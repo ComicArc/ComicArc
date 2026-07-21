@@ -29,27 +29,20 @@ struct ReadingOrderManagerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Order Health").font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundStyle(Design.textPrimary)
-                    Text("Which series have issues placed with low confidence, worst first.")
+                    Text("Series that could use a second look, listed first.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
 
             HStack(spacing: 10) {
-                Picker("Reading Order Mode", selection: $vm.readingOrderMode) {
-                    ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu).frame(maxWidth: 260)
-
-                Spacer()
-
-                Button(isWorking ? "Working…" : "Recompute All") { recomputeAll() }
+                Button(isWorking ? "Working…" : "Recheck Everything") { recomputeAll() }
                     .buttonStyle(.bordered).disabled(isWorking)
 
-                Button(isWorking ? "Working…" : "Clear All Overrides") { clearAllOverrides() }
+                Button(isWorking ? "Working…" : "Undo My Manual Fixes") { clearAllOverrides() }
                     .buttonStyle(.bordered).foregroundStyle(.red).disabled(isWorking)
+
+                Spacer()
             }
         }
         .padding(20)
@@ -59,7 +52,7 @@ struct ReadingOrderManagerView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.seal.fill").font(.system(size: 44)).foregroundStyle(.secondary)
-            Text("Everything's placed with full confidence").font(.headline).foregroundStyle(.secondary)
+            Text("Everything looks good").font(.headline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -123,16 +116,13 @@ private struct SeriesTriageRowView: View {
                 }
                 Spacer()
                 if row.overrideCount > 0 {
-                    Label("\(row.overrideCount)", systemImage: "pin.fill")
+                    Label("Fixed by you", systemImage: "pin.fill")
                         .font(.caption2.bold()).foregroundStyle(Design.brandGold)
                 }
                 if row.flaggedCount > 0 {
-                    Label("\(row.flaggedCount)", systemImage: "exclamationmark.triangle.fill")
+                    Label("Worth a look", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2.bold()).foregroundStyle(.orange)
                 }
-                Text("\(row.minConfidence)%")
-                    .font(.caption.bold())
-                    .foregroundStyle(row.minConfidence < 70 ? .red : (row.minConfidence < 85 ? .orange : .secondary))
             }
             .padding(.horizontal, 20).padding(.vertical, 10)
         }
