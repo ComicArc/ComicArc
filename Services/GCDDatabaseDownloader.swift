@@ -5,11 +5,8 @@ import Foundation
 /// successful download runs entirely offline, forever, with no server dependency and no
 /// per-request cost regardless of how many people use the app.
 ///
-/// IMPORTANT: `hostedURL` is a placeholder. Before this can download anything real, the
-/// processed database file needs to be uploaded somewhere reachable (GitHub Releases is the
-/// recommended free, versioned option) and this constant updated to point at it.
 enum GCDDatabaseDownloader {
-    static let hostedURL = URL(string: "https://github.com/REPLACE_ME/REPLACE_ME/releases/download/gcd-v1/gcd_lookup.sqlite")!
+    static let hostedURL = URL(string: "https://github.com/ComicArc/ComicArc/releases/download/gcd-v1/gcd_lookup.sqlite")!
 
     enum State: Equatable {
         case idle, downloading(progress: Double), success, failure(String)

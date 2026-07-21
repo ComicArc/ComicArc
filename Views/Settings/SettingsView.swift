@@ -309,6 +309,10 @@ struct SettingsView: View {
                     }
                     Text("A native macOS comic reader and library.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if OfflineMetadataStore.shared.isAvailable {
+                        Text("Comics database data from the Grand Comics Database™ (GCD), licensed under CC BY-SA 4.0.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             }
             .formStyle(.grouped)
