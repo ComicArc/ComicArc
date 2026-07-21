@@ -56,7 +56,9 @@ struct ComicArcApp: App {
     private var currentBuild: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
     }
-    private var needsOnboarding: Bool { completedBuild != currentBuild }
+    private var needsOnboarding: Bool {
+        completedBuild.isEmpty && UserDefaults.standard.string(forKey: "libraryPath").flatMap { $0.isEmpty ? nil : $0 } == nil
+    }
 
     var body: some Scene {
         WindowGroup {

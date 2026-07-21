@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum TStep: Int, CaseIterable {
-    case welcome, library, browse, openComic, reader, runs, settings, done
+    case welcome, library, browse, openComic, reader, runs, readingOrder, customize, settings, done
 }
 
 private struct TStepInfo {
@@ -44,6 +44,16 @@ private let steps: [TStepInfo] = [
               title: "Reading Runs",
               body: "A Run is an ordered reading list that can span multiple series — like a crossover event or a character's entire history. Build one from the Runs tab.",
               spot: .navRuns, above: false),
+
+    TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
+              title: "Fixing Reading Order",
+              body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place, or check the Order Health tab to see which series need a look — no editing files required.",
+              spot: nil, above: true),
+
+    TStepInfo(icon: "photo.on.rectangle.angled",
+              title: "Renaming Files & Covers",
+              body: "Settings → Rename Files can tidy up messy filenames automatically. And you're never stuck with the wrong cover — pick any page from the issue itself, or a custom image, right from its detail view.",
+              spot: nil, above: true),
 
     TStepInfo(icon: "gearshape.fill",
               title: "Settings",

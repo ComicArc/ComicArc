@@ -5,12 +5,27 @@ struct ComicArcIPadApp: App {
     @StateObject private var vm = LibraryViewModel.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
+
     private let fileService   = makePlatformFileService()
     private let windowService = makePlatformWindowService()
 
+    private var needsOnboarding: Bool {
+        completedBuild.isEmpty && UserDefaults.standard.string(forKey: "libraryPath").flatMap { $0.isEmpty ? nil : $0 } == nil
+    }
+
     var body: some Scene {
         WindowGroup {
-            iPadRootView()
+            Group {
+                if needsOnboarding {
+                    OnboardingView {
+                        completedBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+                        vm.reload()
+                    }
+                } else {
+                    iPadRootView()
+                }
+            }
                 .environmentObject(vm)
                 .environment(\.fileService, fileService)
                 .environment(\.windowService, windowService)

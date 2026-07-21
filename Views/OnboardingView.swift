@@ -29,7 +29,9 @@ struct OnboardingView: View {
                 bottomBar
             }
         }
+        #if os(macOS)
         .frame(minWidth: 960, minHeight: 640)
+        #endif
         .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
         .task { unarInstalled = checkUnar() }
     }
@@ -96,7 +98,15 @@ struct OnboardingView: View {
                 featureBullet(icon: "list.bullet.rectangle", label: "Build Runs", sub: "Reading orders")
             }
 
-            Button("Get Started") { withAnimation(.easeInOut) { step = .cbrSetup } }
+            Button("Get Started") {
+                withAnimation(.easeInOut) {
+                    #if os(macOS)
+                    step = .cbrSetup
+                    #else
+                    step = .chooseLibrary
+                    #endif
+                }
+            }
                 .goldButton()
                 .shadow(color: Design.brandGold.opacity(0.4), radius: 12, x: 0, y: 4)
         }
@@ -258,7 +268,15 @@ struct OnboardingView: View {
             .frame(maxWidth: 560)
 
             HStack(spacing: 16) {
-                Button("Back") { withAnimation { step = .cbrSetup } }
+                Button("Back") {
+                    withAnimation {
+                        #if os(macOS)
+                        step = .cbrSetup
+                        #else
+                        step = .welcome
+                        #endif
+                    }
+                }
                     .foregroundStyle(.secondary).buttonStyle(.plain)
 
                 Button("Scan Library") {

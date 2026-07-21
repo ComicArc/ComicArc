@@ -5,6 +5,7 @@ struct ImportWizardView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var vm: LibraryViewModel
     @State private var isRepositioning = false
+    @State private var showRenameFiles = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,12 +61,22 @@ struct ImportWizardView: View {
                     if report.isEmpty {
                         Text("Nothing to report — your library looks good.").foregroundStyle(.secondary).padding(24)
                     }
+
+                    section(
+                        title: "Messy filenames?",
+                        icon: "textformat",
+                        detail: "Automatically rename files to match your library's naming convention. Nothing outside ComicArc changes except the filename."
+                    ) {
+                        Button("Rename Files…") { showRenameFiles = true }
+                            .buttonStyle(.bordered)
+                    }
                 }
                 .padding(24)
             }
         }
         .frame(minWidth: 640, idealWidth: 720, minHeight: 480, idealHeight: 560)
         .background(Design.appBackground)
+        .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
     }
 
     @ViewBuilder
