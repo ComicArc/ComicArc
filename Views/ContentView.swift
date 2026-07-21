@@ -144,8 +144,6 @@ struct ContentView: View {
             ReadingHistoryView()
         case .duplicates:
             DuplicatesView()
-        case .readingOrderManager:
-            ReadingOrderManagerView()
         case .settings:
             SettingsView()
         }

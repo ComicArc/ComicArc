@@ -51,33 +51,33 @@ enum AppTheme: String, CaseIterable, Identifiable {
             )
         case .graphite:
             return Palette(
-                appBackground: Color(red: 0.075, green: 0.075, blue: 0.078),
-                navBackground: Color(red: 0.100, green: 0.100, blue: 0.104),
-                cardBg:        Color(red: 0.130, green: 0.130, blue: 0.135),
-                surfaceBg:     Color(red: 0.160, green: 0.160, blue: 0.166),
-                borderColor:   Color.white.opacity(0.08),
+                appBackground: Color(red: 0.145, green: 0.145, blue: 0.150),
+                navBackground: Color(red: 0.175, green: 0.175, blue: 0.182),
+                cardBg:        Color(red: 0.205, green: 0.205, blue: 0.213),
+                surfaceBg:     Color(red: 0.235, green: 0.235, blue: 0.245),
+                borderColor:   Color.white.opacity(0.12),
                 brandBlue:     Color(red: 0.416, green: 0.647, blue: 0.902),
                 brandGold:     Color(red: 0.87, green: 0.73, blue: 0.42)
             )
         case .midnightBlue:
             return Palette(
-                appBackground: Color(red: 0.024, green: 0.035, blue: 0.098),
-                navBackground: Color(red: 0.039, green: 0.055, blue: 0.145),
-                cardBg:        Color(red: 0.055, green: 0.078, blue: 0.196),
-                surfaceBg:     Color(red: 0.075, green: 0.102, blue: 0.243),
-                borderColor:   Color(red: 0.4, green: 0.55, blue: 0.95).opacity(0.22),
-                brandBlue:     Color(red: 0.396, green: 0.616, blue: 0.980),
-                brandGold:     Color(red: 0.949, green: 0.694, blue: 0.129)
+                appBackground: Color(red: 0.043, green: 0.090, blue: 0.220),
+                navBackground: Color(red: 0.058, green: 0.110, blue: 0.260),
+                cardBg:        Color(red: 0.075, green: 0.130, blue: 0.300),
+                surfaceBg:     Color(red: 0.095, green: 0.155, blue: 0.340),
+                borderColor:   Color(red: 0.5, green: 0.65, blue: 1.0).opacity(0.28),
+                brandBlue:     Color(red: 0.478, green: 0.694, blue: 1.0),
+                brandGold:     Color(red: 0.973, green: 0.741, blue: 0.184)
             )
         case .forest:
             return Palette(
-                appBackground: Color(red: 0.043, green: 0.063, blue: 0.051),
-                navBackground: Color(red: 0.059, green: 0.086, blue: 0.070),
-                cardBg:        Color(red: 0.082, green: 0.114, blue: 0.094),
-                surfaceBg:     Color(red: 0.106, green: 0.145, blue: 0.121),
-                borderColor:   Color.white.opacity(0.09),
+                appBackground: Color(red: 0.035, green: 0.095, blue: 0.055),
+                navBackground: Color(red: 0.048, green: 0.120, blue: 0.072),
+                cardBg:        Color(red: 0.065, green: 0.150, blue: 0.095),
+                surfaceBg:     Color(red: 0.085, green: 0.180, blue: 0.120),
+                borderColor:   Color(red: 0.4, green: 0.85, blue: 0.55).opacity(0.20),
                 brandBlue:     Color(red: 0.310, green: 0.671, blue: 0.478),
-                brandGold:     Color(red: 0.851, green: 0.714, blue: 0.263)
+                brandGold:     Color(red: 0.906, green: 0.769, blue: 0.290)
             )
         case .sepia:
 

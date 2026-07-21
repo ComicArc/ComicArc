@@ -230,9 +230,6 @@ private struct iPadContentColumn: View {
             case .duplicates:
                 DuplicatesView().environmentObject(vm)
                     .navigationTitle("Possible Duplicates")
-            case .readingOrderManager:
-                ReadingOrderManagerView().environmentObject(vm)
-                    .navigationTitle("Order Health")
             case .settings:
                 iPadSettingsView()
                     .navigationTitle("Settings")

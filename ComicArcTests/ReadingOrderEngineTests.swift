@@ -372,18 +372,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertEqual(db.seriesLinks().count, 1)
     }
 
-    func test_readingOrderTriageSummary_flagsLowConfidenceSeries() {
-        for n in 1...20 { insertComic(series: "Flagged", issue: "\(n)", title: "Flagged #\(n)") }
-        insertComic(series: "Flagged", issue: "1", title: "Flagged Annual #1")
-        db.recomputeReadingOrder()
-
-        let summary = db.readingOrderTriageSummary()
-        let row = summary.first { $0.series == "Flagged" }
-        XCTAssertNotNil(row)
-        XCTAssertEqual(row?.minConfidence, 60)
-        XCTAssertGreaterThanOrEqual(row?.flaggedCount ?? 0, 1)
-    }
-
     func test_seriesWithMultipleFirstIssues_detectsCollision() {
         insertComic(series: "Relaunch", issue: "1", title: "Relaunch (2010) #1")
         insertComic(series: "Relaunch", issue: "1", title: "Relaunch (2020) #1")

@@ -14,7 +14,6 @@ enum AppDestination: Hashable, Codable {
     case stats
     case history
     case duplicates
-    case readingOrderManager
     case settings
 
     var title: String {
@@ -29,7 +28,6 @@ enum AppDestination: Hashable, Codable {
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
-        case .readingOrderManager:  return "Order Health"
         case .settings:             return "Settings"
         }
     }
@@ -46,7 +44,6 @@ enum AppDestination: Hashable, Codable {
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
         case .duplicates:           return "doc.on.doc"
-        case .readingOrderManager:  return "list.number"
         case .settings:             return "gear"
         }
     }
@@ -135,7 +132,6 @@ final class LibraryViewModel: ObservableObject {
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
-        case .readingOrderManager: return .readingOrderManager
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
         case .readingList:     return .readingList
@@ -154,7 +150,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, readingOrderManager, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {

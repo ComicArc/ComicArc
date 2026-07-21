@@ -725,31 +725,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    struct SeriesTriageRow {
-        let publisher: String; let series: String
-        let issueCount: Int; let minConfidence: Int; let flaggedCount: Int; let overrideCount: Int
-    }
-
-    func readingOrderTriageSummary() -> [SeriesTriageRow] {
-        queue.sync {
-            rows("""
-                SELECT c.publisher, c.series, COUNT(*),
-                       COALESCE(MIN(c.reading_order_confidence), 100),
-                       SUM(CASE WHEN COALESCE(c.reading_order_confidence, 100) < 85 THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN o.comic_id IS NOT NULL THEN 1 ELSE 0 END)
-                FROM comics c
-                LEFT JOIN reading_order_overrides o ON o.comic_id = c.id
-                WHERE c.deleted_at IS NULL
-                GROUP BY c.publisher, c.series
-                ORDER BY MIN(COALESCE(c.reading_order_confidence, 100)) ASC, COUNT(*) DESC
-                """) { s in
-                SeriesTriageRow(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General",
-                                 issueCount: colInt(s, 2), minConfidence: colInt(s, 3),
-                                 flaggedCount: colInt(s, 4), overrideCount: colInt(s, 5))
-            }
-        }
-    }
-
     func seriesWithMultipleFirstIssues() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""

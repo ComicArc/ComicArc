@@ -47,7 +47,7 @@ private let steps: [TStepInfo] = [
 
     TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
               title: "Fixing Reading Order",
-              body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place, or check the Order Health tab to see which series need a look — no editing files required.",
+              body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place — no editing files required.",
               spot: nil, above: true),
 
     TStepInfo(icon: "photo.on.rectangle.angled",

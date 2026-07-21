@@ -37,6 +37,7 @@ struct SettingsView: View {
     }
 
     @State private var unarAvailable         = false
+    @State private var isFixingOrder         = false
     @State private var showTrash             = false
     @State private var showRenameFiles       = false
     @State private var showClearConfirm      = false
@@ -127,6 +128,16 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
+                    HStack {
+                        Button(isFixingOrder ? "Working…" : "Recheck My Library") { recheckReadingOrder() }
+                            .disabled(isFixingOrder)
+                            .help("Re-run automatic placement for every series, without touching anything you've manually fixed")
+                        Button(isFixingOrder ? "Working…" : "Undo My Manual Fixes") { undoManualOrderFixes() }
+                            .foregroundStyle(.red)
+                            .disabled(isFixingOrder)
+                            .help("Forget every manual reading-order correction you've made and let automatic placement decide again")
+                    }
+
                     DisclosureGroup("Advanced") {
                         Picker("Order Basis", selection: $vm.readingOrderMode) {
                             ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
@@ -203,7 +214,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("File Organization") {
+                Section("Fix Filenames") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("ComicArc reads folders as Publisher / Character / Series, and file names as \"Series #Issue\" (e.g. \"Batman #427.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -314,6 +325,29 @@ struct SettingsView: View {
     }
 
     private func confirmRerunOnboarding() { showOnboardingConfirm = true }
+
+    private func recheckReadingOrder() {
+        isFixingOrder = true
+        Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+            await MainActor.run {
+                isFixingOrder = false
+                vm.reload()
+            }
+        }
+    }
+
+    private func undoManualOrderFixes() {
+        isFixingOrder = true
+        Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.clearAllReadingOrderOverrides()
+            DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+            await MainActor.run {
+                isFixingOrder = false
+                vm.reload()
+            }
+        }
+    }
     private func confirmClear()           { showClearConfirm = true }
 
     private func exportBackup() {
