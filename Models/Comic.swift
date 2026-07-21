@@ -31,6 +31,7 @@ struct Comic: Identifiable, Equatable, Hashable {
     var readingOrderPosition: Int? = nil
     var readingOrderConfidence: Int? = nil
     var readingOrderReason: String? = nil
+    var gcdMatchConfidence: Int? = nil
 
     var fileExtension: String { URL(fileURLWithPath: filePath).pathExtension.lowercased() }
     var isStarted: Bool { progress > 0 }

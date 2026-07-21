@@ -386,9 +386,20 @@ final class DatabaseManager: @unchecked Sendable {
             child_series     TEXT NOT NULL,
             sequence_order   INTEGER NOT NULL,
             created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source           TEXT NOT NULL DEFAULT 'manual',
             UNIQUE(child_publisher, child_series)
         )
         """)
+        exec("ALTER TABLE series_links ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+
+        // Offline comics-database match (see Services/OfflineMetadataStore.swift) — a real
+        // publication date/order looked up from a downloaded reference database, entirely
+        // separate from anything derived from the file itself. Feeds ReadingOrderEngine's
+        // highest-confidence tier when present; never required, never overwrites the file.
+        exec("ALTER TABLE comics ADD COLUMN gcd_issue_id INTEGER")
+        exec("ALTER TABLE comics ADD COLUMN gcd_cover_date TEXT")
+        exec("ALTER TABLE comics ADD COLUMN gcd_match_confidence INTEGER")
+        exec("ALTER TABLE comics ADD COLUMN gcd_match_reason TEXT")
 
         exec("""
         UPDATE comics SET position =
@@ -513,6 +524,7 @@ final class DatabaseManager: @unchecked Sendable {
                 let filePath: String; let issueNumber: String?; let comicInfoIssueNumber: String?
                 let title: String
                 let year: Int?; let month: Int?; let day: Int?; let storyArc: String?
+                let gcdCoverDate: String?
             }
 
             var effectiveKeys = affectedGroupKeys
@@ -525,7 +537,8 @@ final class DatabaseManager: @unchecked Sendable {
 
             var sql = """
             SELECT id, publisher, series, publisher || ':' || COALESCE(NULLIF(series_group,''), series),
-                   file_path, issue_number, comicinfo_issue_number, title, year, cover_month, cover_day, story_arc
+                   file_path, issue_number, comicinfo_issue_number, title, year, cover_month, cover_day, story_arc,
+                   gcd_cover_date
             FROM comics WHERE deleted_at IS NULL
             """
             var args: [Any?] = []
@@ -542,25 +555,39 @@ final class DatabaseManager: @unchecked Sendable {
                     year:  sqlite3_column_type(s, 8) != SQLITE_NULL ? colInt(s, 8) : nil,
                     month: sqlite3_column_type(s, 9) != SQLITE_NULL ? colInt(s, 9) : nil,
                     day:   sqlite3_column_type(s, 10) != SQLITE_NULL ? colInt(s, 10) : nil,
-                    storyArc: colText(s, 11))
+                    storyArc: colText(s, 11), gcdCoverDate: colText(s, 12))
             }
 
             var positions: [Int64: (position: Int, confidence: Int, reason: String)] = [:]
 
             switch mode {
             case .intelligent:
-                let inputs = allRows.map { row in
-                    ReadingOrderEngine.ReadingOrderInput(
+                // A verified cover date from the offline comics database always outranks a
+                // locally-parsed one — it's real editorial data, not inference — so it feeds
+                // the engine's existing date-interpolation tier as if it were a perfect filename.
+                var usedGCDDate: Set<Int64> = []
+                let inputs = allRows.map { row -> ReadingOrderEngine.ReadingOrderInput in
+                    var y = row.year, m = row.month, d = row.day
+                    if let gcd = row.gcdCoverDate, let parsed = Self.parseGCDDate(gcd) {
+                        y = parsed.year; m = parsed.month; d = parsed.day
+                        usedGCDDate.insert(row.id)
+                    }
+                    return ReadingOrderEngine.ReadingOrderInput(
                         id: row.id, groupKey: row.groupKey,
                         legacyNumber: ReadingOrderEngine.parseLegacyNumber(row.issueNumber),
                         comicType: ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series),
-                        year: row.year, month: row.month, day: row.day, storyArc: row.storyArc,
+                        year: y, month: m, day: d, storyArc: row.storyArc,
                         title: row.title
                     )
                 }
                 let results = ReadingOrderEngine.computeSeriesPositions(inputs)
                 for row in allRows {
-                    if let r = results[row.id] { positions[row.id] = (r.position, r.confidence, r.reason) }
+                    guard let r = results[row.id] else { continue }
+                    if usedGCDDate.contains(row.id) {
+                        positions[row.id] = (r.position, r.confidence, "Placed using its real publication date from the offline comics database")
+                    } else {
+                        positions[row.id] = (r.position, r.confidence, r.reason)
+                    }
                 }
             case .filename:
                 break
@@ -657,6 +684,93 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    /// GCD's key_date format is "YYYY-MM-DD" with "00" for an unknown month/day segment.
+    private static func parseGCDDate(_ raw: String) -> (year: Int, month: Int?, day: Int?)? {
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3, let year = Int(parts[0]), year > 0 else { return nil }
+        let month = Int(parts[1]).flatMap { $0 > 0 ? $0 : nil }
+        let day = month != nil ? Int(parts[2]).flatMap { $0 > 0 ? $0 : nil } : nil
+        return (year, month, day)
+    }
+
+    /// Matches every comic against the offline comics database (if downloaded) by series name,
+    /// publisher, issue number, and year — conservative by design, see OfflineMetadataStore.
+    /// A comic that already has a match keeps it unless recompute finds a different one, and a
+    /// comic with no match at all is left completely alone (no columns touched).
+    func recomputeGCDMatches(affectedGroupKeys: Set<String>? = nil) {
+        guard OfflineMetadataStore.shared.isAvailable else { return }
+        queue.sync {
+            var sql = """
+                SELECT id, series, publisher, issue_number, year,
+                       publisher || ':' || COALESCE(NULLIF(series_group,''), series)
+                FROM comics WHERE deleted_at IS NULL
+            """
+            var args: [Any?] = []
+            if let keys = affectedGroupKeys {
+                guard !keys.isEmpty else { return }
+                let placeholders = keys.map { _ in "?" }.joined(separator: ",")
+                sql += " AND (publisher || ':' || COALESCE(NULLIF(series_group,''), series)) IN (\(placeholders))"
+                args = Array(keys).map { $0 as Any? }
+            }
+            struct Row { let id: Int64; let series: String; let publisher: String; let issueNumber: String?; let year: Int? }
+            let candidates: [Row] = rows(sql, args: args) { s in
+                Row(id: colInt64(s, 0), series: colText(s, 1) ?? "General", publisher: colText(s, 2) ?? "Unknown",
+                    issueNumber: colText(s, 3), year: sqlite3_column_type(s, 4) != SQLITE_NULL ? colInt(s, 4) : nil)
+            }
+            exec("BEGIN")
+            for row in candidates {
+                guard let match = OfflineMetadataStore.shared.lookupIssue(
+                    series: row.series, publisher: row.publisher, issueNumber: row.issueNumber, year: row.year
+                ) else { continue }
+                _ = run("""
+                    UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = ?, gcd_match_reason = ?
+                    WHERE id = ?
+                    """, args: [match.gcdIssueId, match.coverDate, match.confidence, match.reason, row.id])
+            }
+            exec("COMMIT")
+        }
+    }
+
+    /// Auto-derives series_links from the offline database's known real-world series
+    /// continuations (see OfflineMetadataStore.allSeriesBonds), matched against the user's own
+    /// library by normalized series name + publisher. Only ever touches links this function
+    /// created itself (source = 'gcd') — a manual link the user made always takes precedence
+    /// and is never overwritten or removed here.
+    func autoPopulateSeriesLinksFromGCD() {
+        let bonds = OfflineMetadataStore.shared.allSeriesBonds()
+        guard !bonds.isEmpty else { return }
+        queue.sync {
+            struct LibSeries { let publisher: String; let series: String; let normName: String }
+            let librarySeries: [LibSeries] = rows(
+                "SELECT DISTINCT publisher, series FROM comics WHERE deleted_at IS NULL"
+            ) { s in
+                let series = colText(s, 1) ?? "General"
+                return LibSeries(publisher: colText(s, 0) ?? "Unknown", series: series,
+                                  normName: OfflineMetadataStore.normalizeSeriesName(series))
+            }
+            guard librarySeries.count > 1 else { return }
+            var byNormName: [String: [LibSeries]] = [:]
+            for s in librarySeries { byNormName[s.normName, default: []].append(s) }
+
+            for bond in bonds {
+                guard let origin = byNormName[OfflineMetadataStore.normalizeSeriesName(bond.originName)]?.first,
+                      let target = byNormName[OfflineMetadataStore.normalizeSeriesName(bond.targetName)]?.first,
+                      origin.publisher != target.publisher || origin.series != target.series else { continue }
+                let alreadyLinked = scalarInt(
+                    "SELECT COUNT(*) FROM series_links WHERE child_publisher = ? AND child_series = ?",
+                    args: [target.publisher, target.series]
+                ) > 0
+                guard !alreadyLinked else { continue }
+                let nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
+                _ = run("""
+                    INSERT OR IGNORE INTO series_links
+                        (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source)
+                    VALUES (?, ?, ?, ?, ?, 'gcd')
+                    """, args: [origin.publisher, origin.series, target.publisher, target.series, nextSeq])
+            }
+        }
+    }
+
     func setReadingOrderOverride(comicId: Int64, position: Int, reason: String = "Manually placed") {
         queue.sync {
             _ = run("""
@@ -680,31 +794,38 @@ final class DatabaseManager: @unchecked Sendable {
         let parentPublisher: String; let parentSeries: String
         let childPublisher: String; let childSeries: String
         let sequenceOrder: Int
+        let source: String
     }
 
     func seriesLinks() -> [SeriesLink] {
         queue.sync {
             rows("""
-                SELECT id, parent_publisher, parent_series, child_publisher, child_series, sequence_order
+                SELECT id, parent_publisher, parent_series, child_publisher, child_series, sequence_order, source
                 FROM series_links ORDER BY sequence_order
                 """) { s in
                 SeriesLink(id: colInt64(s, 0), parentPublisher: colText(s, 1) ?? "", parentSeries: colText(s, 2) ?? "",
-                           childPublisher: colText(s, 3) ?? "", childSeries: colText(s, 4) ?? "", sequenceOrder: colInt(s, 5))
+                           childPublisher: colText(s, 3) ?? "", childSeries: colText(s, 4) ?? "", sequenceOrder: colInt(s, 5),
+                           source: colText(s, 6) ?? "manual")
             }
         }
     }
 
+    /// `source` distinguishes a link the user made explicitly ("manual", always wins, never
+    /// auto-removed) from one derived automatically from the offline comics database
+    /// ("gcd") — auto-derived links are safe to re-derive/replace on a future database refresh,
+    /// manual ones never are.
     @discardableResult
-    func addSeriesLink(parentPublisher: String, parentSeries: String, childPublisher: String, childSeries: String) -> Bool {
+    func addSeriesLink(parentPublisher: String, parentSeries: String, childPublisher: String, childSeries: String,
+                       source: String = "manual") -> Bool {
         queue.sync {
             let nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
             let before = scalarInt("SELECT COUNT(*) FROM series_links WHERE child_publisher=? AND child_series=?",
                                     args: [childPublisher, childSeries])
             guard before == 0 else { return false }
             _ = run("""
-                INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order)
-                VALUES (?, ?, ?, ?, ?)
-                """, args: [parentPublisher, parentSeries, childPublisher, childSeries, nextSeq])
+                INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, args: [parentPublisher, parentSeries, childPublisher, childSeries, nextSeq, source])
             return true
         }
     }
@@ -761,7 +882,8 @@ final class DatabaseManager: @unchecked Sendable {
             isFavorite: colBool(s, 21), inReadingList: colBool(s, 22),
             readingOrderPosition: sqlite3_column_type(s, 24) != SQLITE_NULL ? colInt(s, 24) : nil,
             readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil,
-            readingOrderReason: colText(s, 26)
+            readingOrderReason: colText(s, 26),
+            gcdMatchConfidence: sqlite3_column_type(s, 27) != SQLITE_NULL ? colInt(s, 27) : nil
         )
     }
 
@@ -774,7 +896,8 @@ final class DatabaseManager: @unchecked Sendable {
                COALESCE(r.rating, 0) as rating,
                (f.comic_id IS NOT NULL) as is_favorite,
                (rl.comic_id IS NOT NULL) as in_reading_list,
-               r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason
+               r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
+               c.gcd_match_confidence
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id

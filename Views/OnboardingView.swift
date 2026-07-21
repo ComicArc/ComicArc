@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum OnboardingStep {
-    case welcome, cbrSetup, chooseLibrary, scanning, complete
+    case welcome, cbrSetup, chooseLibrary, scanning, comicsDatabase, complete
 }
 
 struct OnboardingView: View {
@@ -16,6 +16,7 @@ struct OnboardingView: View {
     @State private var scanError:   String? = nil
     @State private var unarInstalled: Bool = false
     @State private var installingUnar: Bool = false
+    @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
 
     var body: some View {
         ZStack {
@@ -61,6 +62,7 @@ struct OnboardingView: View {
         case .cbrSetup:      cbrSetupStep
         case .chooseLibrary: chooseLibraryStep
         case .scanning:      scanningStep
+        case .comicsDatabase: comicsDatabaseStep
         case .complete:      completeStep
         }
     }
@@ -337,6 +339,57 @@ struct OnboardingView: View {
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
 
+    private var comicsDatabaseStep: some View {
+        VStack(spacing: 36) {
+            VStack(spacing: 14) {
+                Image(systemName: "text.book.closed.fill")
+                    .font(.system(size: 52))
+                    .foregroundStyle(Design.goldGradient)
+
+                Text("Smarter Reading Order (Optional)")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(Design.textPrimary)
+
+                Text("Download a free, one-time comics database so annuals and specials get placed\ncorrectly on their own. This downloads once and works offline forever after —\nno ongoing internet needed, no account, no cost.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 560)
+            }
+
+            VStack(spacing: 12) {
+                switch gcdDownloadState {
+                case .idle:
+                    Button("Download Comics Database") {
+                        GCDDatabaseDownloader.download { gcdDownloadState = $0 }
+                    }
+                    .goldButton()
+                case .downloading(let progress):
+                    ProgressView(value: progress).frame(maxWidth: 320).tint(Design.brandGold)
+                    Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+                case .success:
+                    Label("Comics database ready", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                case .failure(let message):
+                    Text(message).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480)
+                    Button("Try Again") { GCDDatabaseDownloader.download { gcdDownloadState = $0 } }
+                        .buttonStyle(.bordered)
+                }
+            }
+
+            HStack(spacing: 16) {
+                if case .downloading = gcdDownloadState {} else {
+                    Button(gcdDownloadState == .success ? "Continue" : "Skip for Now") {
+                        withAnimation { step = .complete }
+                    }
+                    .goldButton()
+                }
+            }
+        }
+        .padding(48)
+        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+    }
+
     private var completeStep: some View {
         VStack(spacing: 36) {
             ZStack {
@@ -381,7 +434,8 @@ struct OnboardingView: View {
         case .cbrSetup:      return 1
         case .chooseLibrary: return 2
         case .scanning:      return 3
-        case .complete:      return 4
+        case .comicsDatabase: return 4
+        case .complete:      return 5
         }
     }
 
@@ -398,7 +452,7 @@ struct OnboardingView: View {
                 scanTotal = state.total
                 if !state.running {
                     LibraryViewModel.shared.reload()
-                    withAnimation { step = .complete }
+                    withAnimation { step = .comicsDatabase }
                 }
             }
         }

@@ -135,6 +135,8 @@ final class LibraryScanner: @unchecked Sendable {
         if !state.cancelled {
             db.seedMissingPositions()
             db.positionSpecialsChronologically()
+            db.recomputeGCDMatches()
+            db.autoPopulateSeriesLinksFromGCD()
             db.recomputeReadingOrder()
         }
 

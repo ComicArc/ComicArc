@@ -26,6 +26,11 @@ struct SettingsView: View {
                 set: { vm.readingOrderMode = $0 ? .intelligent : .filename })
     }
 
+    private var gcdSizeLabel: String? {
+        guard let bytes = OfflineMetadataStore.shared.fileSizeOnDisk else { return nil }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
     private var readingOrderModeExplainer: String {
         switch vm.readingOrderMode {
         case .filename:        return "Issues sort by their original position, unaffected by any of the modes below."
@@ -38,6 +43,7 @@ struct SettingsView: View {
 
     @State private var unarAvailable         = false
     @State private var isFixingOrder         = false
+    @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
     @State private var showTrash             = false
     @State private var showRenameFiles       = false
     @State private var showClearConfirm      = false
@@ -148,6 +154,41 @@ struct SettingsView: View {
                         Text(readingOrderModeExplainer)
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Section("Comics Database") {
+                    if OfflineMetadataStore.shared.isAvailable {
+                        Label("Downloaded" + (gcdSizeLabel.map { " · \($0)" } ?? ""), systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Annuals and specials with a real match are placed using their actual publication date, entirely offline.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Update") {
+                                GCDDatabaseDownloader.download { gcdDownloadState = $0 }
+                            }.disabled(gcdDownloadState.isDownloading)
+                            Button("Delete", role: .destructive) {
+                                OfflineMetadataStore.shared.deleteDownloadedDatabase()
+                                gcdDownloadState = .idle
+                            }
+                        }
+                    } else {
+                        Text("A free, one-time download that lets annuals and specials be placed using their real publication date instead of a guess. Works offline forever after — no account, no ongoing internet, no cost.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        switch gcdDownloadState {
+                        case .idle, .success:
+                            Button("Download Comics Database") {
+                                GCDDatabaseDownloader.download { gcdDownloadState = $0 }
+                            }
+                        case .downloading(let progress):
+                            ProgressView(value: progress)
+                            Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+                        case .failure(let message):
+                            Text(message).font(.caption).foregroundStyle(.red)
+                            Button("Try Again") { GCDDatabaseDownloader.download { gcdDownloadState = $0 } }
+                        }
                     }
                 }
 
