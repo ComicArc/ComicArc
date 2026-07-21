@@ -184,7 +184,7 @@ final class OfflineMetadataStore {
         }
         guard !candidates.isEmpty else { return nil }
 
-        var best: (candidate: Candidate, score: Int)?
+        var scored: [(candidate: Candidate, score: Int)] = []
         for c in candidates {
             var score = 0
             var hasRealSignal = false
@@ -198,26 +198,37 @@ final class OfflineMetadataStore {
                 else { score -= min(30, abs(year - yb) * 2) }
             }
             score += min(c.issueCount, 100) / 10
-            guard hasRealSignal else { continue } // no publisher or year corroboration at all — skip
-            if best == nil || score > best!.score { best = (c, score) }
+            guard hasRealSignal, score >= 40 else { continue } // no real corroboration — skip
+            scored.append((c, score))
         }
-        guard let match = best, match.score >= 40 else { return nil }
+        guard !scored.isEmpty else { return nil }
 
-        guard let issueRow = queryIssue(seriesId: match.candidate.id, issueNumber: issueNumber) else { return nil }
-        let confidence = match.score >= 85 ? 100 : (match.score >= 60 ? 90 : 75)
-        let reason = match.score >= 85
-            ? "Matched to the offline comics database (publisher and year confirmed)"
-            : "Matched to the offline comics database"
-        return GCDIssueMatch(gcdIssueId: issueRow.id, coverDate: issueRow.keyDate, confidence: confidence, reason: reason)
+        // A single title is often split across several GCD series entries (relaunches,
+        // restart-numbered "Annual" lines with the true continuing number in parens like
+        // "1 (35)", etc.) — the highest-scoring candidate isn't necessarily the one that
+        // actually contains this specific issue, so try each in score order rather than
+        // committing to just the top one.
+        for (candidate, score) in scored.sorted(by: { $0.score > $1.score }) {
+            guard let issueRow = queryIssue(seriesId: candidate.id, issueNumber: issueNumber) else { continue }
+            let confidence = score >= 85 ? 100 : (score >= 60 ? 90 : 75)
+            let reason = score >= 85
+                ? "Matched to the offline comics database (publisher and year confirmed)"
+                : "Matched to the offline comics database"
+            return GCDIssueMatch(gcdIssueId: issueRow.id, coverDate: issueRow.keyDate, confidence: confidence, reason: reason)
+        }
+        return nil
     }
 
     private struct IssueRow { let id: Int; let keyDate: String? }
 
     private func queryIssue(seriesId: Int, issueNumber: String) -> IssueRow? {
-        // Exact match first (handles non-numeric labels like "Alpha" correctly); falls back to
-        // a numeric comparison so "001" (a common local zero-padding convention) still finds
-        // GCD's "1" — but only when the requested number actually parses as a number at all,
-        // so this can't accidentally match unrelated non-numeric issue labels.
+        // Three tiers, tried in order: (1) exact string match — handles non-numeric labels
+        // like "Alpha" correctly; (2) a numeric comparison so "001" (a common local
+        // zero-padding convention) still finds GCD's "1"; (3) GCD's restart-numbering
+        // convention, where a relaunched "Annual" line stores e.g. "1 (35)" — the true
+        // continuing number in parentheses after a reset display number. Tiers 2 and 3 only
+        // fire when the requested number actually parses as numeric, so neither can misfire
+        // on an unrelated non-numeric label.
         let sql = """
             SELECT id, key_date, 0 AS rank, sort_code FROM issue
             WHERE series_id = ? AND number = ? AND variant_of_id IS NULL
@@ -225,11 +236,16 @@ final class OfflineMetadataStore {
             SELECT id, key_date, 1 AS rank, sort_code FROM issue
             WHERE series_id = ? AND variant_of_id IS NULL
                   AND ? IS NOT NULL AND CAST(number AS REAL) = ?
+            UNION ALL
+            SELECT id, key_date, 2 AS rank, sort_code FROM issue
+            WHERE series_id = ? AND variant_of_id IS NULL
+                  AND ? IS NOT NULL AND number LIKE '%(' || ? || ')'
             ORDER BY rank, sort_code LIMIT 1
         """
         var result: IssueRow?
         var stmt: OpaquePointer?
         let numericValue = Double(issueNumber)
+        let parenValue = numericValue.map { $0 == $0.rounded() ? String(Int($0)) : issueNumber }
         queue.sync {
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             sqlite3_bind_int(stmt, 1, Int32(seriesId))
@@ -241,6 +257,14 @@ final class OfflineMetadataStore {
             } else {
                 sqlite3_bind_null(stmt, 4)
                 sqlite3_bind_null(stmt, 5)
+            }
+            sqlite3_bind_int(stmt, 6, Int32(seriesId))
+            if let parenValue {
+                sqlite3_bind_text(stmt, 7, parenValue, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 8, parenValue, -1, SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(stmt, 7)
+                sqlite3_bind_null(stmt, 8)
             }
             if sqlite3_step(stmt) == SQLITE_ROW {
                 let id = Int(sqlite3_column_int(stmt, 0))

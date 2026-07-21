@@ -52,6 +52,16 @@ final class OfflineMetadataStoreTests: XCTestCase {
         -- GCD catalogs annuals as their own series, separate from the ongoing title.
         INSERT INTO series VALUES (200, 'The Amazing Spider-Man Annual', 'Amazing Spider-Man Annual', 1964, 1994, 1, 28, 0, 'amazing spider man annual', 'ASMA');
         INSERT INTO issue VALUES (2000, 200, '1', '1964-09-00', 1, '', NULL, 0);
+        -- A second, later fragment of the SAME annual line under a distinct GCD series id —
+        -- real-world relaunches split cataloging like this. Higher issue_count so it would
+        -- normally win the score, but it doesn't contain #29 — the matcher must retry the
+        -- lower-scored fragment (200) rather than give up.
+        INSERT INTO series VALUES (201, 'Amazing Spider-Man Annual', 'Amazing Spider-Man Annual', 2008, 2012, 1, 39, 0, 'amazing spider man annual', 'ASMA');
+        INSERT INTO issue VALUES (2001, 201, '36', '2009-08-00', 100, '', NULL, 0);
+        -- Restart-numbered with the true continuing number in parens, as GCD does for some
+        -- relaunched annual lines.
+        INSERT INTO issue VALUES (2002, 201, '1 (35)', '2008-12-00', 99, '', NULL, 0);
+        INSERT INTO issue VALUES (2003, 200, '29', '1995-09-00', 2, '', NULL, 0);
 
         INSERT INTO series_bond_type VALUES (1, 'major_name_numbering_continues');
         INSERT INTO series_bond VALUES (1, 100, 102, NULL, NULL, 1);
@@ -149,6 +159,20 @@ final class OfflineMetadataStoreTests: XCTestCase {
         // A plain numbered issue must never accidentally match into the Annual series.
         let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "12", year: 1964, comicType: .regular)
         XCTAssertEqual(match?.gcdIssueId, 1000)
+    }
+
+    func test_lookupIssue_retriesLowerScoredCandidateWhenTopChoiceLacksIssue() {
+        // Series 201 (39 issues) outscores series 200 (28 issues) on issue_count alone, but
+        // #29 only exists in 200 — must not give up after trying just the top-scored candidate.
+        let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "29", year: nil, comicType: .annual)
+        XCTAssertEqual(match?.gcdIssueId, 2003)
+    }
+
+    func test_lookupIssue_matchesRestartNumberingWithTrueNumberInParens() {
+        // GCD stores this one as "1 (35)" — the true continuing number 35 needs to resolve
+        // even though the display number restarted at 1.
+        let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "35", year: 2008, comicType: .annual)
+        XCTAssertEqual(match?.gcdIssueId, 2002)
     }
 
     func test_isAvailable_falseWhenFileMissing() {
