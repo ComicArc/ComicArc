@@ -1271,26 +1271,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func updateFolderMeta(comicId: Int64, publisher: String?, character: String?, series: String?, title: String?) {
-        queue.sync {
-            if let pub = publisher {
-                _ = run("UPDATE comics SET publisher = ? WHERE id = ?", args: [pub, comicId])
-            }
-            if let char = character {
-                _ = run("UPDATE comics SET character = ? WHERE id = ?", args: [char, comicId])
-            } else {
-                _ = run("UPDATE comics SET character = NULL WHERE id = ? AND (character LIKE '%,%' OR character LIKE '%[%' OR LENGTH(COALESCE(character,'')) > 60)",
-                        args: [comicId])
-            }
-            if let ser = series {
-                _ = run("UPDATE comics SET series = ? WHERE id = ?", args: [ser, comicId])
-            }
-            if let t = title {
-                _ = run("UPDATE comics SET title = ? WHERE id = ?", args: [t, comicId])
-            }
-        }
-    }
-
     func renameSeries(oldName: String, publisher: String?, newName: String) {
         queue.sync {
             if let pub = publisher, !pub.isEmpty, pub != "All" {
@@ -2102,17 +2082,6 @@ final class DatabaseManager: @unchecked Sendable {
 
     func removeFromShelf(comicId: Int64, shelfId: Int64) {
         queue.async { _ = self.run("DELETE FROM comic_shelves WHERE comic_id = ? AND shelf_id = ?", args: [comicId, shelfId]) }
-    }
-
-    func createShelf(name: String) -> Int64 {
-        queue.sync {
-            _ = run("INSERT OR IGNORE INTO shelves (name, is_builtin, position) VALUES (?,0,99)", args: [name])
-            return Int64(scalarInt("SELECT id FROM shelves WHERE name = ?", args: [name]))
-        }
-    }
-
-    func deleteShelf(_ shelfId: Int64) {
-        queue.async { _ = self.run("DELETE FROM shelves WHERE id = ? AND is_builtin = 0", args: [shelfId]) }
     }
 
     func trashedComics() -> [Comic] {

@@ -323,6 +323,21 @@ struct SettingsView: View {
         .background(Design.appBackground)
         .navigationTitle("Settings")
         .onAppear { if cbrEnabled { checkUnarAsync() } }
+        .onChange(of: gcdDownloadState) { _, newValue in
+            guard newValue == .success else { return }
+            // A download that never gets matched against the existing library is pointless —
+            // the whole point is fixing placement without a separate manual "Recheck" step.
+            isFixingOrder = true
+            Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.recomputeGCDMatches()
+                DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
+                DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+                await MainActor.run {
+                    isFixingOrder = false
+                    vm.reload()
+                }
+            }
+        }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
         .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
         .confirmationDialog("Clear Library?", isPresented: $showClearConfirm, titleVisibility: .visible) {
@@ -374,6 +389,11 @@ struct SettingsView: View {
     private func recheckReadingOrder() {
         isFixingOrder = true
         Task.detached(priority: .userInitiated) {
+            // Also re-runs GCD matching, not just placement — otherwise downloading the
+            // comics database after the initial scan would never actually get used until
+            // the next full library scan.
+            DatabaseManager.shared.recomputeGCDMatches()
+            DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
             DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
             await MainActor.run {
                 isFixingOrder = false

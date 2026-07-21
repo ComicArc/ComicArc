@@ -602,10 +602,32 @@ struct iPadSettingsView: View {
     @State private var cacheCleared     = false
     @State private var comicCount       = 0
     @State private var backupErrorMessage: String?
+    @State private var isFixingOrder    = false
+    @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @AppStorage("appTheme") private var appThemeRaw = AppTheme.dark.rawValue
     @AppStorage("customAccentColorHex") private var customAccentHex: String = ""
+
+    private var smartReadingOrderIsOn: Binding<Bool> {
+        Binding(get: { vm.readingOrderMode == .intelligent },
+                set: { vm.readingOrderMode = $0 ? .intelligent : .filename })
+    }
+
+    private var gcdSizeLabel: String? {
+        guard let bytes = OfflineMetadataStore.shared.fileSizeOnDisk else { return nil }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private var readingOrderModeExplainer: String {
+        switch vm.readingOrderMode {
+        case .filename:        return "Issues sort by their original position, unaffected by any of the modes below."
+        case .legacyNumber:    return "Issues sort strictly by parsed issue number within each series."
+        case .publicationDate: return "Issues sort by cover date within each series."
+        case .comicInfoOrder:  return "Issues sort by the issue number embedded in ComicInfo.xml, where present."
+        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Series Manager always take priority."
+        }
+    }
 
     var body: some View {
         Form {
@@ -733,6 +755,59 @@ struct iPadSettingsView: View {
                 Text("CBZ, PDF, JPG, and PNG are supported. CBR isn't readable on iPad — extraction needs a command-line tool that doesn't exist in the iOS sandbox. If reading order or metadata looks wrong, use Resync Library — it rescans and re-derives metadata for every comic.")
             }
 
+            Section("Reading Order") {
+                Toggle("Smart Reading Order", isOn: smartReadingOrderIsOn)
+                Text("Automatically places annuals and specials in their correct spot in a series instead of dumping them at the end. Turn this off to go back to the original order.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Button(isFixingOrder ? "Working…" : "Recheck My Library") { recheckReadingOrder() }
+                    .disabled(isFixingOrder)
+                Button(isFixingOrder ? "Working…" : "Undo My Manual Fixes") { undoManualOrderFixes() }
+                    .foregroundStyle(.red)
+                    .disabled(isFixingOrder)
+
+                DisclosureGroup("Advanced") {
+                    Picker("Order Basis", selection: $vm.readingOrderMode) {
+                        ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    Text(readingOrderModeExplainer)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Comics Database") {
+                if OfflineMetadataStore.shared.isAvailable {
+                    Label("Downloaded" + (gcdSizeLabel.map { " · \($0)" } ?? ""), systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Annuals and specials with a real match are placed using their actual publication date, entirely offline.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Update") {
+                        GCDDatabaseDownloader.download { gcdDownloadState = $0 }
+                    }.disabled(gcdDownloadState.isDownloading)
+                    Button("Delete", role: .destructive) {
+                        OfflineMetadataStore.shared.deleteDownloadedDatabase()
+                        gcdDownloadState = .idle
+                    }
+                } else {
+                    Text("A free, one-time download that lets annuals and specials be placed using their real publication date instead of a guess. Works offline forever after — no account, no ongoing internet, no cost.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    switch gcdDownloadState {
+                    case .idle, .success:
+                        Button("Download Comics Database") {
+                            GCDDatabaseDownloader.download { gcdDownloadState = $0 }
+                        }
+                    case .downloading(let progress):
+                        ProgressView(value: progress)
+                        Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+                    case .failure(let message):
+                        Text(message).font(.caption).foregroundStyle(.red)
+                        Button("Try Again") { GCDDatabaseDownloader.download { gcdDownloadState = $0 } }
+                    }
+                }
+            }
+
             Section {
                 Text("ComicArc reads folders as Publisher / Character / Series, and file names as \"Series #Issue\" (e.g. \"Batman #427.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -780,6 +855,10 @@ struct iPadSettingsView: View {
                     let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
                     Text(v).foregroundStyle(.secondary)
                 }
+                if OfflineMetadataStore.shared.isAvailable {
+                    Text("Comics database data from the Grand Comics Database™ (GCD), licensed under CC BY-SA 4.0.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
         }
         .formStyle(.grouped)
@@ -799,11 +878,49 @@ struct iPadSettingsView: View {
         } message: {
             Text(backupErrorMessage ?? "")
         }
+        .onChange(of: gcdDownloadState) { _, newValue in
+            guard newValue == .success else { return }
+            isFixingOrder = true
+            Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.recomputeGCDMatches()
+                DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
+                DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+                await MainActor.run {
+                    isFixingOrder = false
+                    vm.reload()
+                }
+            }
+        }
         .task {
             let count = await Task.detached(priority: .utility) {
                 DatabaseManager.shared.allComics().count
             }.value
             comicCount = count
+        }
+    }
+
+    private func recheckReadingOrder() {
+        isFixingOrder = true
+        Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.recomputeGCDMatches()
+            DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
+            DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+            await MainActor.run {
+                isFixingOrder = false
+                vm.reload()
+            }
+        }
+    }
+
+    private func undoManualOrderFixes() {
+        isFixingOrder = true
+        Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.clearAllReadingOrderOverrides()
+            DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+            await MainActor.run {
+                isFixingOrder = false
+                vm.reload()
+            }
         }
     }
 }

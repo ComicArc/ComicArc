@@ -17,6 +17,7 @@ struct OnboardingView: View {
     @State private var unarInstalled: Bool = false
     @State private var installingUnar: Bool = false
     @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
+    @State private var isMatchingAfterDownload = false
 
     var body: some View {
         ZStack {
@@ -368,8 +369,13 @@ struct OnboardingView: View {
                     ProgressView(value: progress).frame(maxWidth: 320).tint(Design.brandGold)
                     Text("Downloading…").font(.caption).foregroundStyle(.secondary)
                 case .success:
-                    Label("Comics database ready", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                    if isMatchingAfterDownload {
+                        ProgressView().controlSize(.small)
+                        Text("Matching your library against it…").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Label("Comics database ready", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
                 case .failure(let message):
                     Text(message).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480)
                     Button("Try Again") { GCDDatabaseDownloader.download { gcdDownloadState = $0 } }
@@ -378,7 +384,7 @@ struct OnboardingView: View {
             }
 
             HStack(spacing: 16) {
-                if case .downloading = gcdDownloadState {} else {
+                if case .downloading = gcdDownloadState {} else if !isMatchingAfterDownload {
                     Button(gcdDownloadState == .success ? "Continue" : "Skip for Now") {
                         withAnimation { step = .complete }
                     }
@@ -388,6 +394,22 @@ struct OnboardingView: View {
         }
         .padding(48)
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+        .onChange(of: gcdDownloadState) { _, newValue in
+            guard newValue == .success else { return }
+            // A download with nothing matched against the library that was just scanned would
+            // be pointless — the whole point is annuals/specials getting placed correctly the
+            // first time, not after a second rescan the user doesn't know to trigger.
+            isMatchingAfterDownload = true
+            Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.recomputeGCDMatches()
+                DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
+                DatabaseManager.shared.recomputeReadingOrder()
+                await MainActor.run {
+                    isMatchingAfterDownload = false
+                    LibraryViewModel.shared.reload()
+                }
+            }
+        }
     }
 
     private var completeStep: some View {

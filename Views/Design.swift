@@ -134,14 +134,6 @@ extension View {
             .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
     }
 
-    func darkSurface(cornerRadius: CGFloat = 10) -> some View {
-        self
-            .background(Design.cardBg)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: cornerRadius)
-                        .stroke(Design.borderColor, lineWidth: 1))
-    }
-
     func goldButton() -> some View {
         self
             .buttonStyle(GoldCapsuleStyle())

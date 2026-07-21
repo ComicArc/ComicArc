@@ -387,11 +387,6 @@ final class LibraryViewModel: ObservableObject {
         select(.library)
     }
 
-    func selectSeries(_ series: String?) {
-        selectedSeries = series
-        reload()
-    }
-
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
         let pub = activePublisher
         reloadGeneration += 1
