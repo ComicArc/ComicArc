@@ -4,8 +4,6 @@ extension Notification.Name {
 
 import SwiftUI
 
-// MARK: - Runs list (left panel)
-
 struct RunsListView: View {
     @Binding var selectedRun: Run?
     @State private var runs:          [Run]   = []
@@ -133,8 +131,6 @@ struct RunsListView: View {
     }
 }
 
-// MARK: - Run list card
-
 struct RunListCard: View {
     let run:        Run
     let isSelected: Bool
@@ -244,8 +240,6 @@ struct RunListCard: View {
     }
 }
 
-// MARK: - Run detail (right panel)
-
 struct RunDetailView: View {
     let run:      Run
     let onDelete: () -> Void
@@ -271,7 +265,7 @@ struct RunDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Page header
+
             runPageHeader
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
@@ -354,8 +348,6 @@ struct RunDetailView: View {
         }
     }
 
-    // MARK: - Page header
-
     private var runPageHeader: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
@@ -431,8 +423,6 @@ struct RunDetailView: View {
         .background(Design.navBackground)
     }
 
-    // MARK: - Review sheet
-
     private var reviewSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Rate & Review: \(run.title)")
@@ -472,8 +462,6 @@ struct RunDetailView: View {
         .padding(24).frame(width: 440)
     }
 
-    // MARK: - Helpers
-
     private func reorder(from: IndexSet, to: Int) {
         items.move(fromOffsets: from, toOffset: to)
         LibraryViewModel.shared.reorderRun(runId: run.id, orderedIds: items.map(\.id))
@@ -488,8 +476,6 @@ struct RunDetailView: View {
         }
     }
 }
-
-// MARK: - Run item row
 
 struct RunItemRow: View {
     let item:     RunItem
@@ -594,8 +580,7 @@ struct RunItemRow: View {
         .accessibilityValue(item.comic.isFinished ? "Read" : item.comic.isStarted ? "In progress" : "Unread")
         .accessibilityHint("Double-tap to open")
         .accessibilityAddTraits(.isButton)
-        // Collapsing the row into one element (above) hides the visible Notes button and
-        // context-menu actions from VoiceOver entirely unless re-exposed here.
+
         .accessibilityAction(named: item.notes.isEmpty ? "Add Notes" : "Edit Notes") {
             notesText = item.notes
             showNotes = true
@@ -645,8 +630,6 @@ struct RunItemRow: View {
         .padding(16)
     }
 }
-
-// MARK: - Edit Run sheet
 
 struct EditRunView: View {
     @Binding var run: Run
@@ -703,8 +686,6 @@ struct EditRunView: View {
         dismiss()
     }
 }
-
-// MARK: - Add Comics to Run
 
 struct AddComicsToRunView: View {
     let run:   Run
@@ -767,8 +748,6 @@ struct AddComicsToRunView: View {
         }
     }
 }
-
-// MARK: - Cross-platform wrapper used by iPad content column
 
 struct RunsView: View {
     @EnvironmentObject var vm: LibraryViewModel

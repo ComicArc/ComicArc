@@ -5,9 +5,6 @@ import AppKit
 import UIKit
 #endif
 
-// MARK: - Hex color round-trip (for the custom-accent-color picker, which stores its choice
-// as a plain UserDefaults string rather than needing Codable Color support)
-
 extension Color {
     init?(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -16,8 +13,6 @@ extension Color {
         self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
 
-    /// Best-effort hex encoding via the platform color's RGB components. Only used for a
-    /// user-picked accent color, never round-tripped through system/dynamic colors.
     func toHexString() -> String? {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
         #if os(macOS)
@@ -30,8 +25,6 @@ extension Color {
         return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
     }
 }
-
-// MARK: - Grid density
 
 enum GridDensity: String, CaseIterable {
     case compact = "compact"
@@ -47,7 +40,7 @@ enum GridDensity: String, CaseIterable {
 }
 
 enum Design {
-    // Card sizes — read via GridDensity at runtime; these are the .regular defaults
+
     static let cardWidth:       CGFloat = 172
     static let cardHeight:      CGFloat = 258
     static let groupCardWidth:  CGFloat = 220
@@ -55,9 +48,6 @@ enum Design {
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
 
-    // Sourced from the user's chosen AppTheme (Settings ▸ Appearance), read once at first
-    // access like every other `static` here — a theme change takes effect on next launch,
-    // which Settings' UI says explicitly rather than leaving it a surprise.
     static var appBackground: Color { AppTheme.current.palette.appBackground }
     static var navBackground: Color { AppTheme.current.palette.navBackground }
     static var cardBg:        Color { AppTheme.current.palette.cardBg }
@@ -65,10 +55,7 @@ enum Design {
     static var borderColor:   Color { AppTheme.current.palette.borderColor }
 
     static let secondaryLabel = Color.secondary
-    // A custom accent overrides the current theme's own brandBlue when set (Settings ▸
-    // Appearance ▸ Accent Color). Falls back to the theme's palette otherwise — which itself
-    // matches Assets.xcassets/AccentColor exactly for the default Dark theme, so brandBlue
-    // and Color.accentColor stay visually identical unless the user deliberately overrides.
+
     static var brandBlue: Color {
         if let hex = UserDefaults.standard.string(forKey: "customAccentColorHex"), let c = Color(hex: hex) {
             return c
@@ -77,15 +64,8 @@ enum Design {
     }
     static var brandGold: Color { AppTheme.current.palette.brandGold }
 
-    // Most headings/titles were hardcoded to .white — correct for every dark theme, but
-    // Sepia is a light theme (cream/parchment background), so white text there was reading
-    // as nearly invisible. Use this instead of .white for any title/label sitting directly
-    // on Design.appBackground/navBackground/cardBg; leave actual .white alone for text drawn
-    // over a fixed dark scrim (a cover image's gradient overlay, the reader's black
-    // background) — those are correct regardless of the app's chosen theme.
     static var textPrimary: Color { AppTheme.current.isLight ? Color(red: 0.13, green: 0.11, blue: 0.08) : .white }
 
-    // Gold gradient (use for prominent elements)
     static var goldGradient: LinearGradient {
         LinearGradient(
             colors: [Color(red: 0.980, green: 0.749, blue: 0.118),
@@ -94,20 +74,16 @@ enum Design {
         )
     }
 
-    // Spring animation constants
     static let springSnappy   = Animation.spring(response: 0.3, dampingFraction: 0.75)
     static let springBouncy   = Animation.spring(response: 0.4, dampingFraction: 0.65)
     static let springGentle   = Animation.spring(response: 0.5, dampingFraction: 0.85)
     static let easeStandard   = Animation.easeInOut(duration: 0.2)
     static let easeFast       = Animation.easeOut(duration: 0.15)
 
-    // Reduced-motion–aware animation: returns `.default` (instant) when reduce-motion is on.
-    // Usage: `Design.motion(.springSnappy, env: reduceMotion)`
     static func motion(_ animation: Animation, reduce: Bool) -> Animation {
         reduce ? .default : animation
     }
 
-    // Publisher color map
     static func publisherColor(_ pub: String) -> Color {
         switch pub.lowercased() {
         case "dc":     return Color(red: 0.157, green: 0.420, blue: 0.886)
@@ -118,8 +94,6 @@ enum Design {
         }
     }
 }
-
-// MARK: - Progress format
 
 enum ProgressFormat: String, CaseIterable {
     case fraction = "fraction"
@@ -153,8 +127,6 @@ enum ProgressFormat: String, CaseIterable {
     }
 }
 
-// MARK: - View modifiers
-
 extension View {
     func comicCardStyle() -> some View {
         self
@@ -176,8 +148,6 @@ extension View {
     }
 }
 
-// MARK: - Gold button style
-
 struct GoldCapsuleStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -192,8 +162,6 @@ struct GoldCapsuleStyle: ButtonStyle {
             .contentShape(Capsule())
     }
 }
-
-// MARK: - Star rating
 
 struct StarRating: View {
     let rating: Int
@@ -218,11 +186,6 @@ struct StarRating: View {
     }
 }
 
-// MARK: - Tag chip (used wherever a comic's tags are shown — was three near-identical,
-// independently-drifted implementations across Mac's series detail, Mac's issue detail, and
-// iPad's comic detail: different colors, paddings, remove-icon glyphs, and only iPad
-// prefixed the name with "#". One shared component now.)
-
 struct TagChip: View {
     let name: String
     var onRemove: (() -> Void)? = nil
@@ -245,8 +208,6 @@ struct TagChip: View {
         .overlay(Capsule().stroke(Design.brandBlue.opacity(0.3)))
     }
 }
-
-// MARK: - Publisher badge (colored pill)
 
 struct PublisherBadge: View {
     let publisher: String
@@ -286,8 +247,6 @@ struct StarRatingLarge: View {
         .accessibilityLabel("Rating: \(rating == 0 ? "None" : "\(rating) star\(rating == 1 ? "" : "s")")")
     }
 }
-
-// MARK: - Previews (use for rapid UI iteration without rebuilding)
 
 #Preview("Publisher Badge") {
     HStack(spacing: 12) {

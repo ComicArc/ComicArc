@@ -6,8 +6,6 @@ extension Notification.Name {
     static let triggerImport       = Notification.Name("triggerImport")
 }
 
-// MARK: - Content view (root)
-
 struct ContentView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.windowService) private var windowService
@@ -16,7 +14,6 @@ struct ContentView: View {
     @AppStorage("tutorialSeen") private var tutorialSeen = false
     @State private var showTutorial = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
-
 
     var body: some View {
         ZStack {
@@ -50,9 +47,6 @@ struct ContentView: View {
                 .zIndex(20)
             }
 
-            // Undo toast — floats above whatever's on screen (Library, Runs, Duplicates all
-            // trigger it) rather than living in the sidebar like the scan-report banner, since
-            // deletions happen throughout the app, not just from sidebar-adjacent actions.
             if let action = vm.pendingUndo {
                 VStack {
                     Spacer()
@@ -65,9 +59,7 @@ struct ContentView: View {
             }
         }
         .animation(Design.springGentle, value: vm.pendingUndo?.message)
-        // Every theme but Sepia is dark; forcing .dark unconditionally made Sepia render its
-        // light card/background colors underneath dark-scheme system chrome (text fields,
-        // scrollbars, etc.), which looks broken rather than like a real light theme.
+
         .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
         .frame(minWidth: 960, minHeight: 640)
         .animation(.easeInOut(duration: 0.2), value: vm.readerComic?.id)
@@ -129,8 +121,6 @@ struct ContentView: View {
         .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
     }
 
-    // MARK: - Detail content router
-
     @ViewBuilder
     private var detailContent: some View {
         switch vm.selectedSection {
@@ -191,18 +181,12 @@ struct ContentView: View {
         .background(Design.appBackground)
     }
 
-    // MARK: - Toolbar
-
     @ToolbarContentBuilder
     private var mainToolbar: some CustomizableToolbarContent {
         ToolbarItem(id: "scan", placement: .primaryAction) {
             scanToolbarItem
         }
 
-        // Resync library (rescan + re-derive metadata) — the fix for "ordering/metadata
-        // looks wrong" was previously only reachable by opening Settings and finding a
-        // buried button, or knowing a menu-bar shortcut existed. Now it's one click from
-        // the main window at all times.
         ToolbarItem(id: "resync", placement: .primaryAction) {
             resyncToolbarItem
         }
@@ -214,10 +198,6 @@ struct ContentView: View {
             .help("Import comic files (⌘O)")
         }
 
-        // Grid density (library only). Hidden via opacity/disabled rather than omitted
-        // outright — a conditionally-omitted ToolbarItem collapses to zero width, which
-        // visibly shifts every item after it (Bulk select, Settings) left or right every
-        // time you navigate in or out of the library section.
         ToolbarItem(id: "density", placement: .primaryAction) {
             DensityPicker()
                 .opacity(isLibrarySection ? 1 : 0)
@@ -225,7 +205,6 @@ struct ContentView: View {
                 .allowsHitTesting(isLibrarySection)
         }
 
-        // Bulk select (issue level only) — same fixed-width treatment as density above.
         ToolbarItem(id: "bulk", placement: .primaryAction) {
             let show = vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil
             Button { vm.toggleBulkMode() } label: {
@@ -238,8 +217,6 @@ struct ContentView: View {
             .allowsHitTesting(show)
         }
 
-        // Settings is a real in-app page (see detailContent), not the macOS Settings{}
-        // scene — consistent with Stats/History/Runs.
         #if os(macOS)
         ToolbarItem(id: "settings", placement: .primaryAction) {
             Button { vm.select(.settings) } label: {
@@ -262,9 +239,7 @@ struct ContentView: View {
             }
         } else {
             Button { vm.scan() } label: {
-                // "folder.badge.magnifyingglass" isn't a real SF Symbol — it silently
-                // rendered as a blank circle with no glyph at all, making Scan look broken
-                // and indistinguishable from Resync right next to it.
+
                 Label("Scan", systemImage: "magnifyingglass")
             }
             .help("Scan library folder for new comics (⇧⌘R)")
@@ -293,8 +268,6 @@ struct ContentView: View {
         return s == .library || s == .continueReading || s == .favorites || s == .readingList
     }
 
-    // MARK: - Import
-
     private func importFiles() {
         fileService.pickFiles(
             allowsMultiple: true,
@@ -322,8 +295,6 @@ struct ContentView: View {
         if !comics.isEmpty { vm.importFiles(comics) }
     }
 }
-
-// MARK: - Sidebar
 
 struct SidebarView: View {
     @EnvironmentObject var vm: LibraryViewModel
@@ -365,11 +336,7 @@ struct SidebarView: View {
                                 draggedPublisher = nil; dropTargetPublisher = nil
                                 return true
                             }
-                            // An overlay rather than a second .listRowBackground call — navRow
-                            // already sets one for selection highlighting, and a later
-                            // .listRowBackground on the same row would replace it outright
-                            // (List reads only the outermost one), silently breaking the
-                            // selected-row highlight whenever it isn't also a drop target.
+
                             .overlay(alignment: .bottom) {
                                 if isTarget {
                                     Rectangle().fill(Design.brandGold).frame(height: 2)
@@ -400,7 +367,6 @@ struct SidebarView: View {
                 }
             }
 
-            // Settings row behaves like every other sidebar destination, not a separate window.
             #if os(macOS)
             Section {
                 navRow("Settings", icon: "gearshape", item: .settings)
@@ -424,7 +390,6 @@ struct SidebarView: View {
         }
     }
 
-    // Single row builder used by every sidebar item — Button-based so taps always fire
     @ViewBuilder
     private func navRow(_ label: String,
                         icon: String? = nil,
@@ -432,7 +397,7 @@ struct SidebarView: View {
                         item: AppDestination,
                         trailingText: String? = nil) -> some View {
         Button {
-            // Publisher tap: second tap deselects → all comics
+
             if case .publisher(let p) = item, case .publisher(let cur) = vm.destination, p == cur {
                 vm.select(.library)
             } else {
@@ -459,7 +424,7 @@ struct SidebarView: View {
                     Text(t).font(.caption2).foregroundStyle(.tertiary)
                 }
             }
-            // Extra vertical padding so the tap target matches native Mac sidebar row height (~28pt).
+
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
@@ -514,7 +479,6 @@ struct SidebarView: View {
         .background(Design.navBackground)
     }
 
-    // Auto-dismissed a few seconds after appearing; only shown when the scan changed something.
     private var scanReportBanner: some View {
         VStack(spacing: 0) {
             Divider()

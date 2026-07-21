@@ -28,8 +28,6 @@ struct Comic: Identifiable, Equatable, Hashable {
     var inReadingList: Bool = false
     var tags: [String] = []
 
-    // ReadingOrderEngine output — nil until the first recomputeReadingOrder() pass runs
-    // (once per app launch/scan). See Models/ReadingOrderEngine.swift.
     var readingOrderPosition: Int? = nil
     var readingOrderConfidence: Int? = nil
     var readingOrderReason: String? = nil
@@ -102,7 +100,6 @@ struct HistoryEntry: Identifiable {
     let readAt: String
     var pagesRead: Int { max(0, pageEnd - pageStart) }
 }
-
 
 struct LibraryStats {
     let totalComics: Int

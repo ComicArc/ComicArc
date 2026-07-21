@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Shimmer placeholder card
-
 struct ShimmerCard: View {
     var width: CGFloat = 140
     var height: CGFloat = 200
@@ -25,8 +23,6 @@ struct ShimmerCard: View {
     }
 }
 
-// MARK: - Mini comic card (thumbnail + fallback)
-
 struct MiniComicCard: View {
     let comic: Comic
     @State private var thumbnail: PlatformImage?
@@ -45,9 +41,6 @@ struct MiniComicCard: View {
     }
 }
 
-// MARK: - Cover picker (choose an existing comic's cover)
-
-// Sheet for picking an existing library comic's cover, as an alternative to an external image file.
 struct CoverPickerSheet: View {
     let title: String
     let onPick: (Comic) -> Void

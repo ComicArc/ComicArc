@@ -9,12 +9,6 @@ final class PageCache: @unchecked Sendable {
     private var order = [String]()
     private let maxEntries = 30
 
-    // Bumped by evict(comicId:) so a load()/prefetch() that was already in flight when the
-    // reader closed can't write its result back in after the fact. load/prefetch dispatch
-    // decode work onto `queue` independent of any specific reader instance — without this,
-    // closing a comic right after turning a page (which queues a prefetch for the next few
-    // pages) could see evict() run, then the already-in-flight prefetch complete a moment
-    // later and silently re-insert that comic's pages, defeating the eviction.
     private var generation = [Int64: Int]()
 
     private let queue = DispatchQueue(label: "com.comicarc.pages", qos: .userInitiated, attributes: .concurrent)

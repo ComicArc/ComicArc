@@ -42,8 +42,6 @@ struct StatsView: View {
         .task { await loadStats() }
     }
 
-    // MARK: - Heading
-
     private var heading: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("YOUR STATS")
@@ -56,8 +54,6 @@ struct StatsView: View {
         }
         .padding(.horizontal, 24)
     }
-
-    // MARK: - Hero: completion ring + key metrics
 
     private func heroRow(_ s: LibraryStats) -> some View {
         HStack(alignment: .top, spacing: 20) {
@@ -139,8 +135,6 @@ struct StatsView: View {
         .accessibilityLabel("\(label.lowercased()): \(value)")
     }
 
-    // MARK: - Reading Goal
-
     private var readingGoalCard: some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 14) {
@@ -199,8 +193,6 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - By Publisher
-
     private func publisherCard(_ s: LibraryStats) -> some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 14) {
@@ -230,8 +222,6 @@ struct StatsView: View {
             }
         }
     }
-
-    // MARK: - Top Series
 
     private func topSeriesCard(_ s: LibraryStats) -> some View {
         DashboardCard {
@@ -271,8 +261,6 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - Collection Growth
-
     private func growthCard(_ s: LibraryStats) -> some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 14) {
@@ -296,8 +284,6 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - Reading Activity heatmap
-
     private func activityCard(_ s: LibraryStats) -> some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -307,8 +293,6 @@ struct StatsView: View {
             }
         }
     }
-
-    // MARK: - Recently Read (horizontal shelf)
 
     private func recentlyReadSection(_ s: LibraryStats) -> some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -342,8 +326,6 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - Helpers
-
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .black))
@@ -365,8 +347,6 @@ struct StatsView: View {
     }
 }
 
-// MARK: - Dashboard card container (shared visual language for every Stats tile)
-
 private struct DashboardCard<Content: View>: View {
     var padding: CGFloat = 20
     @ViewBuilder let content: Content
@@ -380,8 +360,6 @@ private struct DashboardCard<Content: View>: View {
             .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
     }
 }
-
-// MARK: - Heatmap (GitHub-style)
 
 struct HeatmapView: View {
     let activityMap: [String: Int]

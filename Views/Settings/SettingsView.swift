@@ -6,10 +6,7 @@ struct SettingsView: View {
 
     @AppStorage("libraryPath")      private var libraryPath      = ""
     @AppStorage("scrollMode")       private var scrollMode       = false
-    // Default true: CBR was unconditionally supported before this toggle was wired up to
-    // anything, so a false default would silently stop scanning CBR files for every
-    // existing user the moment this ships, since nobody would have had a reason to turn on
-    // a toggle that, until now, did nothing.
+
     @AppStorage("cbrEnabled")       private var cbrEnabled       = true
     @AppStorage("autoplaySpeed")    private var autoplaySpeed: Double = 6.0
     @AppStorage("progressFormat")   private var progressFormatRaw = ProgressFormat.fraction.rawValue
@@ -50,7 +47,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            // Capped width keeps controls readable on a full-size window instead of stretching edge-to-edge.
+
             Form {
                 Section {
                     Picker("Theme", selection: Binding(
@@ -89,10 +86,7 @@ struct SettingsView: View {
                         Button("Browse…") { pickFolder() }
                     }
                     .onChange(of: libraryPath) { _, newPath in
-                        // Debounced: typing/editing a path can pass through several valid
-                        // intermediate directories (e.g. "/Users" before "/Users/x/Comics"),
-                        // and without this each one would synchronously stop+recreate the
-                        // FSEvents watcher mid-keystroke.
+
                         restartWatcherWorkItem?.cancel()
                         let work = DispatchWorkItem {
                             var isDir: ObjCBool = false
@@ -163,9 +157,7 @@ struct SettingsView: View {
                 Section("Sidebar") {
                     Text("Reorder or hide the Discover section. Library, Publishers, and Tags always show.")
                         .font(.caption).foregroundStyle(.secondary)
-                    // Up/down buttons rather than drag-to-reorder: this screen is a Form, and
-                    // .onMove's drag affordance is a List-specific interaction that doesn't
-                    // work inside a Form on macOS — buttons are simple and actually work.
+
                     let order = SidebarCustomization.decodeOrder(discoverOrderRaw)
                     ForEach(Array(order.enumerated()), id: \.element) { idx, item in
                         HStack {
@@ -320,8 +312,6 @@ struct SettingsView: View {
         BackupService.import(fileService: fileService, vm: vm) { backupErrorMessage = $0 }
     }
 }
-
-// MARK: - Trash view
 
 struct TrashView: View {
     @EnvironmentObject var vm: LibraryViewModel

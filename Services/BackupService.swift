@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Backup export/import (shared by macOS Settings and iPad Settings)
-
 enum BackupService {
     static func export(fileService: any FileServiceProtocol, filename: String = "ComicArc-backup.json",
                         onError: @escaping (String) -> Void) {
@@ -69,7 +67,6 @@ enum BackupService {
                     let db = DatabaseManager.shared
                     let knownPaths = db.knownPaths()
 
-                    // Older backups were a bare array of comics with no "runs" section.
                     let root = parsed as? [String: Any]
                     let comicsArr = root?["comics"] as? [[String: Any]] ?? (parsed as? [[String: Any]]) ?? []
                     var comicIdByPath: [String: Int64] = [:]
@@ -105,9 +102,7 @@ enum BackupService {
                                 .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
                                 .compactMap { i in (i["file_path"] as? String).flatMap { comicIdByPath[$0] } }
                             guard !orderedComicIds.isEmpty else { continue }
-                            // Importing the same backup twice (a retry, or restoring on a
-                            // second device then again on a third) shouldn't duplicate every
-                            // run — reuse an existing run with the same title instead.
+
                             let runId = db.runId(withTitle: title)
                                 ?? db.createRun(title: title, description: r["description"] as? String ?? "")
                             db.addToRun(runId: runId, comicIds: orderedComicIds)

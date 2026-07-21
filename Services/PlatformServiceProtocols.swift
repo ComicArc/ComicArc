@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - File service
-
 protocol FileServiceProtocol {
     func pickFiles(
         allowsMultiple: Bool,
@@ -12,12 +10,9 @@ protocol FileServiceProtocol {
     func pickFolder(completion: @escaping (URL?) -> Void)
     func pickSaveDestination(filename: String, completion: @escaping (URL?) -> Void)
     func revealInFinder(_ url: URL)
-    /// Presents the platform's way of getting an already-written file out to the user
-    /// (a no-op on macOS, where pickSaveDestination already saved it in place).
+
     func shareFile(_ url: URL)
 }
-
-// MARK: - Window service
 
 protocol WindowServiceProtocol {
     func toggleFullScreen()
@@ -27,8 +22,6 @@ protocol WindowServiceProtocol {
     func showCursor()
     func configureMainWindow()
 }
-
-// MARK: - No-op implementations (iOS defaults; also used as EnvironmentKey defaults)
 
 struct NoOpFileService: FileServiceProtocol {
     func pickFiles(allowsMultiple: Bool, message: String, prompt: String,
@@ -47,8 +40,6 @@ struct NoOpWindowService: WindowServiceProtocol {
     func showCursor() {}
     func configureMainWindow() {}
 }
-
-// MARK: - Platform factories (called once at app startup in ComicArcApp)
 
 func makePlatformFileService() -> any FileServiceProtocol {
     #if os(macOS)

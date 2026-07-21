@@ -5,7 +5,7 @@ import ZIPFoundation
 final class ThumbnailCache: @unchecked Sendable {
     static let shared = ThumbnailCache()
     private init() {
-        // 160×240 ARGB ≈ 150 KB per thumbnail; 500 images ≈ 75 MB upper bound.
+
         cache.countLimit      = 500
         cache.totalCostLimit  = 80 * 1024 * 1024
     }
@@ -41,7 +41,7 @@ final class ThumbnailCache: @unchecked Sendable {
         queue.async { [self] in
             let diskURL = coversDir.appendingPathComponent("\(comicId).jpg")
             var result: PlatformImage?
-            // Validate disk cache: a 0-byte file means a previous write was interrupted
+
             if let img = validatedDiskImage(at: diskURL) {
                 cache.setObject(img, forKey: key, cost: img.byteSize)
                 result = img
@@ -68,11 +68,6 @@ final class ThumbnailCache: @unchecked Sendable {
         return img
     }
 
-    // Only ever called from a background queue (prewarm) — bridges to the same inFlight-
-    // coordinated path `thumbnail(for:completion:)` uses, so a prewarm pass and a visible
-    // grid cell requesting the same comic's cover don't independently extract and write the
-    // same disk file at once. Would deadlock if called from the main thread, since the
-    // completion it waits on is always dispatched onto main.
     func thumbnailSync(for comic: Comic) -> PlatformImage? {
         let sema = DispatchSemaphore(value: 0)
         var result: PlatformImage?
@@ -117,8 +112,12 @@ final class ThumbnailCache: @unchecked Sendable {
     }
 
     func setCustomCover(comicId: Int64, imageURL: URL) {
-        guard let img = PlatformImage.fromURL(imageURL),
-              let resized = PlatformImage.resized(source: img, to: thumbSize) else { return }
+        guard let img = PlatformImage.fromURL(imageURL) else { return }
+        setCustomCover(comicId: comicId, image: img)
+    }
+
+    func setCustomCover(comicId: Int64, image: PlatformImage) {
+        guard let resized = PlatformImage.resized(source: image, to: thumbSize) else { return }
         let diskURL = coversDir.appendingPathComponent("\(comicId).jpg")
         save(resized, to: diskURL)
         cache.removeObject(forKey: NSNumber(value: comicId))
@@ -154,12 +153,8 @@ final class ThumbnailCache: @unchecked Sendable {
         return diskURL.path
     }
 
-    // Used by the in-app cover picker (choosing an existing comic's cover, rather than an
-    // external image file, for a run/group/series cover) — copies the comic's own already-
-    // rendered thumbnail instead of re-extracting+resizing from its archive. Must be called
-    // off the main thread: thumbnailSync blocks synchronously waiting on a background decode.
     func saveCoverFromComic(_ comic: Comic, destinationName: String) -> String? {
-        _ = thumbnailSync(for: comic)  // ensures coversDir/<comicId>.jpg exists
+        _ = thumbnailSync(for: comic)
         let source = coversDir.appendingPathComponent("\(comic.id).jpg")
         guard FileManager.default.fileExists(atPath: source.path) else { return nil }
         let dest = coversDir.appendingPathComponent("\(destinationName).jpg")
@@ -167,8 +162,6 @@ final class ThumbnailCache: @unchecked Sendable {
         try? FileManager.default.copyItem(at: source, to: dest)
         return FileManager.default.fileExists(atPath: dest.path) ? dest.path : nil
     }
-
-    // MARK: - Extraction
 
     private let imageExts = LibraryScanner.imageExtensions
 
@@ -189,7 +182,7 @@ final class ThumbnailCache: @unchecked Sendable {
             imageExts.contains(URL(fileURLWithPath: $0.path).pathExtension.lowercased()) && !$0.path.hasPrefix("__MACOSX")
         }
         guard let first = entries.min(by: { $0.path.localizedStandardCompare($1.path) == .orderedAscending }) else { return nil }
-        // Guard against corrupted entries: cap extraction at 50 MB to prevent memory blow-up
+
         guard first.uncompressedSize <= 50 * 1024 * 1024 else { return nil }
         var data = Data()
         data.reserveCapacity(Int(first.uncompressedSize))

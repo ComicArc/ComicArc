@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Environment keys
-
 private struct FileServiceKey: EnvironmentKey {
     static let defaultValue: any FileServiceProtocol = NoOpFileService()
 }
@@ -9,8 +7,6 @@ private struct FileServiceKey: EnvironmentKey {
 private struct WindowServiceKey: EnvironmentKey {
     static let defaultValue: any WindowServiceProtocol = NoOpWindowService()
 }
-
-// MARK: - EnvironmentValues extensions
 
 extension EnvironmentValues {
     var fileService: any FileServiceProtocol {

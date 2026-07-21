@@ -20,10 +20,6 @@ final class DatabaseManager: @unchecked Sendable {
         self.init(dbPath: Self.dataDir.appendingPathComponent("comics.db").path)
     }
 
-    /// Not private, unlike the no-arg initializer above — lets tests construct an isolated
-    /// instance against a temporary file instead of the real, shared library database.
-    /// `DatabaseManager.shared` always goes through the no-arg initializer and the real path;
-    /// nothing in the app itself ever calls this directly.
     init(dbPath path: String) {
         let dbURL = URL(fileURLWithPath: path)
         guard sqlite3_open(path, &db) == SQLITE_OK else { return }
@@ -38,9 +34,6 @@ final class DatabaseManager: @unchecked Sendable {
         migrate()
     }
 
-    // Registers SQL-callable scalar functions backed by shared Swift logic, so every query
-    // (library, series, search, duplicates) agrees on the same "is this a special issue"
-    // answer instead of each ORDER BY clause re-implementing its own keyword matching.
     private func registerCustomFunctions() {
         sqlite3_create_function_v2(db, "is_special_issue", 3, SQLITE_UTF8, nil, { context, argc, argv in
             guard let context, let argv, argc >= 3 else { return }
@@ -53,8 +46,6 @@ final class DatabaseManager: @unchecked Sendable {
         }, nil, nil, nil)
     }
 
-    // If the DB fails integrity_check, swap in the .bak and reopen.
-    // migrate() is idempotent (CREATE IF NOT EXISTS) so it's safe to run on the backup.
     private func recoverIfCorrupted(dbURL: URL) {
         var raw: OpaquePointer?
         guard sqlite3_prepare_v2(db, "PRAGMA integrity_check", -1, &raw, nil) == SQLITE_OK,
@@ -72,15 +63,9 @@ final class DatabaseManager: @unchecked Sendable {
         try? FileManager.default.removeItem(at: dbURL)
         try? FileManager.default.copyItem(at: bakURL, to: dbURL)
         _ = sqlite3_open(dbURL.path, &db)
-        registerCustomFunctions()  // lost when the connection was closed and reopened above
+        registerCustomFunctions()
     }
 
-    /// Flushes the WAL into the main database file without closing the connection.
-    /// Safe to call anytime, including from a state that isn't guaranteed to be a real
-    /// shutdown (e.g. iOS backgrounding, which happens constantly during normal use and
-    /// is very often followed by returning to the foreground rather than termination).
-    /// Reduces the amount of unflushed WAL data at risk if the process is later killed
-    /// while suspended, without making the database unusable if the app resumes.
     func checkpoint() {
         queue.sync {
             guard db != nil else { return }
@@ -88,9 +73,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Checkpoints and fully closes the connection. Only for an actual process exit
-    /// (macOS quit) — the connection is not reopened automatically, so calling this
-    /// anywhere the app might keep running afterward will break every subsequent query.
     func checkpointAndClose() {
         queue.sync {
             guard db != nil else { return }
@@ -99,8 +81,6 @@ final class DatabaseManager: @unchecked Sendable {
             db = nil
         }
     }
-
-    // MARK: - Low-level helpers
 
     @discardableResult
     func exec(_ sql: String) -> Bool {
@@ -158,10 +138,8 @@ final class DatabaseManager: @unchecked Sendable {
         return sqlite3_last_insert_rowid(db)
     }
 
-    // MARK: - Schema
-
     private func migrate() {
-        // Backup DB before any migrations so schema changes are reversible
+
         let dbPath = Self.dataDir.appendingPathComponent("comics.db")
         let bakPath = Self.dataDir.appendingPathComponent("comics.db.bak")
         if FileManager.default.fileExists(atPath: dbPath.path) {
@@ -381,11 +359,6 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE series_covers ADD COLUMN image_path TEXT")
         exec("ALTER TABLE runs   ADD COLUMN cover_image_path TEXT")
 
-        // ReadingOrderEngine columns — kept entirely separate from the existing `position`
-        // column rather than replacing it: the default sort reads
-        // COALESCE(reading_order_position, position, ...), so the new engine's output is live
-        // immediately with no new UI, but a bug in it can never regress the old, still-intact
-        // filename/manual-order path, and either can be disabled independently later.
         exec("ALTER TABLE comics ADD COLUMN reading_order_position INTEGER")
         exec("ALTER TABLE comics ADD COLUMN reading_order_confidence INTEGER")
         exec("ALTER TABLE comics ADD COLUMN reading_order_reason TEXT")
@@ -402,16 +375,8 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
 
-        // Raw ComicInfo.xml <IssueNumber>, captured separately from `issue_number` (which
-        // prefers the filename-parsed number, per parseMeta's comment) — needed so the
-        // ComicInfo Order reading mode can sort by what the embedded metadata alone says,
-        // rather than silently degrading into a duplicate of Legacy Number mode.
         exec("ALTER TABLE comics ADD COLUMN comicinfo_issue_number TEXT")
 
-        // Manual series continuation links (e.g. Amazing Spider-Man #700 -> Superior
-        // Spider-Man #1-31 -> Amazing Spider-Man (2014) #1 as one continuous sequence).
-        // UNIQUE(child) forces a simple forward chain rather than a graph; sequence_order
-        // lets a 3+ series chain be resolved in order.
         exec("""
         CREATE TABLE IF NOT EXISTS series_links (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -425,11 +390,6 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
 
-        // Mainline issues seed into the low range sorted by issue number (or insertion order
-        // as a fallback); annuals/specials/one-shots/etc. seed into a distinct band 1,000,000+
-        // above that, so they default to the end of the series instead of interleaving with
-        // regular issues just because their issue number happens to collide (e.g. many
-        // annuals are numbered "1" same as issue #1 of the ongoing series).
         exec("""
         UPDATE comics SET position =
             is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
@@ -443,11 +403,6 @@ final class DatabaseManager: @unchecked Sendable {
         recomputeReadingOrder()
     }
 
-    // One-time re-seed for libraries that were scanned before special-issue-aware sorting
-    // existed: their `position` column is already non-NULL (so the migration above skips
-    // them) but was seeded with the old formula that let annuals interleave with regular
-    // issues. Recomputes every comic's position with the corrected formula, once, tracked
-    // via a marker row so it never re-runs and clobbers a user's later manual reordering.
     private func resortSpecialIssuesIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'specialIssueSortV1'") > 0
@@ -460,14 +415,6 @@ final class DatabaseManager: @unchecked Sendable {
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('specialIssueSortV1')")
     }
 
-    // Re-seeds position with a wider stride between mainline issues (100 apart instead of 1)
-    // so positionSpecialsChronologically() below has room to interpolate a dated annual
-    // between two consecutive issues. Libraries that already ran specialIssueSortV1 before
-    // this stride existed would otherwise be stuck on the old dense scheme forever, since
-    // that migration never re-runs. One-time and separately gated via its own migration
-    // marker — same tradeoff specialIssueSortV1 above already accepted (a blanket re-seed
-    // can clobber a manual reorder's dense position values), but it only happens once per
-    // library, not on every launch.
     private func widenMainlinePositionStrideIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'positionStride100V1'") > 0
@@ -480,13 +427,6 @@ final class DatabaseManager: @unchecked Sendable {
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('positionStride100V1')")
     }
 
-    // migrate()'s NULL-position seeding only covers rows that already existed at app launch —
-    // every comic inserted by a scan afterward starts with position = NULL (see _insertRow)
-    // and would otherwise stay that way, falling back to COALESCE(position, id) everywhere
-    // position is read (roughly insertion order, not special-aware) until the next app
-    // restart re-runs migrate(). Called after every scan so newly-imported comics — including
-    // any new specials that positionSpecialsChronologically() needs a real position to move —
-    // get seeded immediately instead of waiting for a relaunch.
     func seedMissingPositions() {
         queue.sync {
             _ = exec("""
@@ -498,34 +438,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Places specials (annual/one-shot/etc., per is_special_issue) somewhere better than
-    // "always last" within their series, in two tiers:
-    //
-    //  Tier 1 — real dates: when a special has both year and cover_month from ComicInfo.xml,
-    //  and at least two mainline issues in the same series also have real dates bracketing
-    //  it, place it exactly between them (e.g. an Annual cover-dated August 2005 between
-    //  Batman #12 (June 2005) and #13 (September 2005)).
-    //
-    //  Tier 2 — proportional fallback: most real-world libraries have NO ComicInfo.xml at
-    //  all (confirmed directly against a real 1478-comic test library: only 10 comics had
-    //  any year metadata, zero had month), so tier 1 almost never fires and every annual
-    //  across a whole series was still landing dumped at the very end after the highest
-    //  mainline issue — not what "chronological where possible" was supposed to mean in
-    //  practice. When a special has no date match, but its series does have annual-style
-    //  sequential numbering (Annual #1, #2, #3...) and at least 2 mainline issues, spread
-    //  the specials proportionally across the mainline issue range by their own sequence
-    //  number — Annual #1 of 4 lands about a quarter of the way through the run, #2 about
-    //  half way, etc. This is a guess, not a real date, but it's a far better guess than
-    //  "every annual after issue #700" and matches how annuals are actually published
-    //  (roughly one per year, spread across a series' run) closely enough to be useful.
-    //
-    // Both tiers respect a manual reorder: reorderComics() collapses a series' positions to
-    // a dense 0,1,2... sequence with no headroom, which both tiers' room checks reject —
-    // once a user has dragged a series into a custom order, this function leaves it alone
-    // rather than fighting it on every scan.
-    //
-    // Not a one-time migration: called after every scan and metadata refresh so newly-added
-    // specials, or specials that just gained real date metadata, keep getting repositioned.
     func positionSpecialsChronologically() {
         queue.sync {
             struct Row { let id: Int64; let seriesKey: String; let special: Bool
@@ -557,7 +469,6 @@ final class DatabaseManager: @unchecked Sendable {
                 let mainlineDated = mainline.filter { $0.year != nil && $0.month != nil }
                 let allSpecials = group.filter { $0.special }
 
-                // Tier 1: real dates
                 var placedIds = Set<Int64>()
                 if mainlineDated.count >= 2 {
                     for special in allSpecials {
@@ -573,10 +484,6 @@ final class DatabaseManager: @unchecked Sendable {
                     }
                 }
 
-                // Tier 2: proportional fallback for whatever tier 1 didn't place. Only
-                // engages for specials still sitting in the untouched "always last" band
-                // (specialBandOffset+) — one already moved by tier 1, or by a manual drag,
-                // is left alone.
                 guard let minPos = mainline.first?.position, let maxPos = mainline.last?.position,
                       maxPos > minPos, mainline.count >= 2 else { continue }
                 let undated = allSpecials
@@ -599,18 +506,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Reading Order Engine
-
-    // Drives `comics.reading_order_position` — entirely separate storage from `position`
-    // above (see the ALTER TABLE comment in migrate()). Fetches every comic's signals, hands
-    // them to the pure ReadingOrderEngine, applies any durable manual override last (locked,
-    // skips the engine result), and writes position/confidence/reason back. Called after every
-    // scan/resync and once at the end of migrate() — same call sites positionSpecialsChronologically()
-    // already uses, left running unchanged alongside this.
-    /// `affectedGroupKeys: nil` (every existing call site) recomputes the whole library, same
-    /// as before. When provided, only comics whose `publisher:series` groupKey is in the set
-    /// are touched — safe because ReadingOrderEngine groups/interpolates strictly within a
-    /// groupKey, so narrowing to whole affected groups keeps each one's computation coherent.
     func recomputeReadingOrder(mode: ReadingOrderMode = .current, affectedGroupKeys: Set<String>? = nil) {
         queue.sync {
             struct Row {
@@ -620,11 +515,6 @@ final class DatabaseManager: @unchecked Sendable {
                 let year: Int?; let month: Int?; let day: Int?; let storyArc: String?
             }
 
-            // A scoped recompute must still see every series in the same link chain as any
-            // requested series, or an offset stamped below could be computed against a parent's
-            // stale/absent position instead of its real one — so widen the scope to the full
-            // chain membership before touching `series_links` (cheap, small table) whenever
-            // links exist at all.
             var effectiveKeys = affectedGroupKeys
             if effectiveKeys != nil {
                 let allLinkKeys: [String] = rows(
@@ -673,7 +563,7 @@ final class DatabaseManager: @unchecked Sendable {
                     if let r = results[row.id] { positions[row.id] = (r.position, r.confidence, r.reason) }
                 }
             case .filename:
-                break // handled directly in the write loop below (falls through to legacy `position`)
+                break
             case .legacyNumber:
                 for group in Dictionary(grouping: allRows, by: \.groupKey).values {
                     let ordered = group.sorted {
@@ -707,9 +597,6 @@ final class DatabaseManager: @unchecked Sendable {
                 }
             }
 
-            // Manual series-continuation chains (series_links): stamp a large offset onto every
-            // already-computed position of each child series so it sorts after its parent's,
-            // walked recursively for multi-hop chains. Skipped entirely when no links exist.
             let links: [(parentKey: String, childKey: String)] = rows(
                 "SELECT parent_publisher, parent_series, child_publisher, child_series FROM series_links ORDER BY sequence_order"
             ) { s in
@@ -728,7 +615,7 @@ final class DatabaseManager: @unchecked Sendable {
                 let roots = allKeys.subtracting(parentOf.keys)
                 var visited: Set<String> = []
                 func walk(_ seriesKey: String, baseOffset: Int) {
-                    guard !visited.contains(seriesKey) else { return } // cycle guard: skip, don't crash
+                    guard !visited.contains(seriesKey) else { return }
                     visited.insert(seriesKey)
                     var maxPos = baseOffset
                     for id in idsBySeriesKey[seriesKey] ?? [] where positions[id] != nil {
@@ -740,9 +627,6 @@ final class DatabaseManager: @unchecked Sendable {
                 for root in roots { walk(root, baseOffset: 0) }
             }
 
-            // Durable overrides win outright regardless of mode — the position above was still
-            // computed for these ids (needed so per-group interpolation/ordering stays coherent),
-            // but is discarded here in favor of whatever the user pinned via reorderComics().
             let overrideMap = Dictionary(uniqueKeysWithValues: rows(
                 "SELECT comic_id, position FROM reading_order_overrides", map: { (colInt64($0, 0), colInt($0, 1)) }
             ))
@@ -773,10 +657,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-
-    /// Durable manual override — written whenever a user drags a comic to reorder it
-    /// (`reorderComics(orderedIds:)` below), so the correction survives every future rescan
-    /// instead of being silently recomputed away the next time `recomputeReadingOrder()` runs.
     func setReadingOrderOverride(comicId: Int64, position: Int, reason: String = "Manually placed") {
         queue.sync {
             _ = run("""
@@ -794,8 +674,6 @@ final class DatabaseManager: @unchecked Sendable {
     func clearAllReadingOrderOverrides() {
         queue.sync { _ = run("DELETE FROM reading_order_overrides") }
     }
-
-    // MARK: - Series links (manual cross-series legacy renumbering)
 
     struct SeriesLink {
         let id: Int64
@@ -816,17 +694,13 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// A series can be linked as the continuation of at most one parent (UNIQUE(child) in the
-    /// schema) — this keeps chain resolution in recomputeReadingOrder() a simple forward walk
-    /// rather than a graph. sequence_order is assigned by insertion order so multi-hop chains
-    /// (A -> B -> C) resolve in the order they were linked.
     @discardableResult
     func addSeriesLink(parentPublisher: String, parentSeries: String, childPublisher: String, childSeries: String) -> Bool {
         queue.sync {
             let nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
             let before = scalarInt("SELECT COUNT(*) FROM series_links WHERE child_publisher=? AND child_series=?",
                                     args: [childPublisher, childSeries])
-            guard before == 0 else { return false } // already linked to a parent — remove first
+            guard before == 0 else { return false }
             _ = run("""
                 INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order)
                 VALUES (?, ?, ?, ?, ?)
@@ -842,8 +716,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Every distinct (publisher, series) pair in the library — backs the Series Links picker's
-    /// "pick the parent series" autocomplete.
     func allSeriesNames() -> [(publisher: String, series: String)] {
         queue.sync {
             rows("""
@@ -853,16 +725,11 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Reading Order Manager / Import Wizard support queries
-
     struct SeriesTriageRow {
         let publisher: String; let series: String
         let issueCount: Int; let minConfidence: Int; let flaggedCount: Int; let overrideCount: Int
     }
 
-    /// One row per series, worst-confidence-first — backs the library-wide Reading Order
-    /// Manager triage list. `flaggedCount` reuses the same confidence < 85 threshold
-    /// SeriesManagerView's per-issue badge already uses.
     func readingOrderTriageSummary() -> [SeriesTriageRow] {
         queue.sync {
             rows("""
@@ -883,9 +750,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Series with more than one issue at legacy number 1 (excluding collections/TPBs, which
-    /// aren't part of ongoing issue numbering) — an editorial judgment call the app can't make
-    /// automatically, surfaced by the Import Wizard as a deep-link into SeriesManagerView.
     func seriesWithMultipleFirstIssues() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -896,9 +760,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Comics whose issue_number can't be parsed as a legacy number at all (nil, blank, or
-    /// non-numeric with no recognized special-issue keyword) — nothing to auto-fix, but worth
-    /// surfacing since it silently degrades every reading-order mode for that comic.
     func unparseableIssueNumberComics() -> [Comic] {
         queue.sync {
             let candidates = rows("\(comicSelect) WHERE c.deleted_at IS NULL", map: comicRow)
@@ -909,9 +770,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Comics with no embedded ComicInfo.xml at all — report-only (never synthesized, per the
-    /// "never rewrite files" constraint), but explains why some comics can only reach the
-    /// engine's lower confidence tiers.
     func seriesMissingComicInfo() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -922,10 +780,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Series keys currently sitting in the engine's always-last band (confidence 0 — no
-    /// mainline sibling to place against) — these are exactly what `positionSpecialsChronologically()`
-    /// already knows how to reposition, so the Import Wizard's one real one-click fix is just
-    /// calling that existing function for the affected series.
     func seriesNeedingSpecialReposition() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -935,9 +789,6 @@ final class DatabaseManager: @unchecked Sendable {
                 """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
         }
     }
-
-
-    // MARK: - Comics
 
     private func comicRow(_ s: OpaquePointer) -> Comic {
         Comic(
@@ -976,12 +827,6 @@ final class DatabaseManager: @unchecked Sendable {
         LEFT JOIN reading_list rl     ON c.id = rl.comic_id
     """
 
-    // Orthogonal to SortOrder below: SortOrder answers "how does the library browser
-    // group/sort" (by publisher/title/date/rating/progress/custom); ReadingOrderMode answers
-    // "what basis decides the order of issues within one series" — it controls what
-    // recomputeReadingOrder() writes into reading_order_position, which SortOrder.publisher
-    // and .manual then read via COALESCE. Persisted the same way LibraryViewModel.sortOrder
-    // is (raw UserDefaults, key "readingOrderMode").
     enum ReadingOrderMode: String, CaseIterable, Identifiable {
         case filename = "Filename", legacyNumber = "Legacy Number",
              publicationDate = "Publication Date", comicInfoOrder = "ComicInfo Order",
@@ -999,12 +844,7 @@ final class DatabaseManager: @unchecked Sendable {
         var id: String { rawValue }
         var clause: String {
             switch self {
-            // Reads reading_order_position first (the new ReadingOrderEngine's output — see
-            // recomputeReadingOrder()), falling back to the older `position` column
-            // (positionSpecialsChronologically()'s output) and finally the live
-            // is_special_issue() formula, in that order. A read-time COALESCE rather than a
-            // write-time merge: the new engine's improved placement is live immediately for
-            // every user with zero new UI, but the two systems stay genuinely decoupled.
+
             case .publisher: return "c.publisher, c.series, COALESCE(c.reading_order_position, c.position, is_special_issue(c.issue_number, c.title, c.series) * \(ComicSortClassifier.specialBandOffset) + c.id), c.title"
             case .title:     return "c.title"
             case .dateAdded: return "c.added_at DESC"
@@ -1070,8 +910,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Mirrors reorderCharacterGroups/reorderSeriesGroups — always called with the entire
-    // currently-displayed publisher list so position is never left partially set.
     func reorderPublishers(orderedPublishers: [String]) {
         guard !orderedPublishers.isEmpty else { return }
         queue.sync {
@@ -1084,7 +922,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Public type used by LibraryScanner to batch-collect inserts before flushing
     struct ComicInsert {
         let title: String, filePath: String, publisher: String, character: String?
         let series: String, issueNumber: String?, pageCount: Int, writer: String?
@@ -1106,8 +943,6 @@ final class DatabaseManager: @unchecked Sendable {
                                 comic.penciller, comic.year, comic.storyArc, comic.languageIso, comic.fileHash) }
     }
 
-    // Batch insert wrapped in a single transaction — dramatically faster than one commit per file.
-    // SQLite WAL auto-rolls back on crash, so at most `comics.count` records are uncommitted.
     func batchInsert(_ comics: [ComicInsert]) {
         guard !comics.isEmpty else { return }
         queue.sync {
@@ -1141,7 +976,6 @@ final class DatabaseManager: @unchecked Sendable {
                     coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup, comicInfoIssueNumber])
     }
 
-    // Comics imported when the archive was unreadable get page_count=0; scanner retries these.
     func zeroPageCountPaths() -> [(id: Int64, path: String)] {
         queue.sync {
             rows("SELECT id, file_path FROM comics WHERE page_count = 0 AND deleted_at IS NULL",
@@ -1205,7 +1039,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     func setRating(_ comicId: Int64, rating: Int) {
         queue.sync {
-            // Use UPSERT to preserve the review column when changing rating
+
             _ = run("""
                 INSERT INTO ratings (comic_id, rating) VALUES (?,?)
                 ON CONFLICT(comic_id) DO UPDATE SET rating = excluded.rating
@@ -1286,11 +1120,8 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Columns that folder-derived reparsing (batchUpdateFolderMeta) also writes.
-    // Editing any of these by hand marks the row so a later reparse won't clobber it.
     private static let folderDerivedColumns: Set<String> = ["title", "series", "publisher", "character"]
 
-    // fields is ordered: [(column, value)] to prevent Dict iteration-order bugs
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) {
         guard !fields.isEmpty else { return }
         queue.sync {
@@ -1304,8 +1135,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Tags
-
     func tags(for comicId: Int64) -> [Tag] {
         queue.sync {
             rows("SELECT t.id, t.name FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id WHERE ct.comic_id = ? ORDER BY t.name",
@@ -1315,7 +1144,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     func addTag(name: String, to comicId: Int64) {
         queue.sync {
-            // INSERT OR IGNORE then SELECT covers both new and existing tags in one round-trip
+
             _ = run("INSERT OR IGNORE INTO tags (name) VALUES (?)", args: [name])
             let resolvedId = scalarInt("SELECT id FROM tags WHERE name = ?", args: [name])
             guard resolvedId > 0 else { return }
@@ -1341,8 +1170,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Folder-based metadata reparse
-
     func allComicPaths() -> [(id: Int64, path: String)] {
         queue.sync {
             rows("SELECT id, file_path FROM comics WHERE deleted_at IS NULL") { s in
@@ -1351,8 +1178,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Updates publisher/character/series/title derived from folder path and filename.
-    /// When `character` is nil, clears any messy roster-style character strings.
     func updateFolderMeta(comicId: Int64, publisher: String?, character: String?, series: String?, title: String?) {
         queue.sync {
             if let pub = publisher {
@@ -1373,8 +1198,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Series management
-
     func renameSeries(oldName: String, publisher: String?, newName: String) {
         queue.sync {
             if let pub = publisher, !pub.isEmpty, pub != "All" {
@@ -1387,8 +1210,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// True if `newName` (scoped to `publisher`, if given) already names a different series
-    /// than `oldName` — i.e. renaming into it would silently merge the two series' issues.
     func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
         guard newName != oldName else { return false }
         return queue.sync {
@@ -1400,9 +1221,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Bulk-reassigns series and/or publisher for the given comics (e.g. correcting a bad
-    /// folder-derived guess across several issues at once). Marks each row meta_edited so a
-    /// later folder-derived reparse won't silently revert the correction.
     func bulkReassign(ids: [Int64], series: String?, publisher: String?) {
         guard !ids.isEmpty, series != nil || publisher != nil else { return }
         queue.sync {
@@ -1419,12 +1237,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Groups of comics sharing the same publisher+series+issue number — likely the same issue
-    /// imported twice under different filenames (a rescan, a re-rip, a variant cover, etc.).
-    // One joined query instead of a "find the duplicate keys, then one round-trip per key"
-    // N+1 pattern — this runs after every scan/import/reassign/delete/rename, serialized on
-    // the same DB queue as everything else, so a library with many duplicate groups no
-    // longer means many sequential prepared-statement round trips blocking that queue.
     func duplicateGroups() -> [[Comic]] {
         queue.sync {
             let flat = rows("""
@@ -1460,19 +1272,13 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             exec("BEGIN")
             for (idx, id) in orderedIds.enumerated() {
-                // reading_order_position is also set directly here, not just left to the next
-                // recomputeReadingOrder() pass — the sort clauses read reading_order_position
-                // first, so a stale higher-priority value there would otherwise mask this drag
-                // until the next scan happened to run.
+
                 _ = run("""
                     UPDATE comics SET position = ?, reading_order_position = ?,
                            reading_order_confidence = 100, reading_order_reason = 'Manually placed'
                     WHERE id = ?
                     """, args: [idx, idx, id])
-                // Durable override: a manual drag is the strongest possible signal of intent,
-                // so it's recorded the same way in reading_order_overrides — surviving future
-                // rescans instead of being silently recomputed away the next time
-                // recomputeReadingOrder() runs (which happens after every scan).
+
                 _ = run("""
                     INSERT OR REPLACE INTO reading_order_overrides (comic_id, position, reason) VALUES (?, ?, 'Manually placed')
                     """, args: [id, idx])
@@ -1480,8 +1286,6 @@ final class DatabaseManager: @unchecked Sendable {
             exec("COMMIT")
         }
     }
-
-    // MARK: - Runs
 
     func allRuns() -> [Run] {
         queue.sync {
@@ -1519,10 +1323,6 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync { _ = run("UPDATE runs SET cover_image_path = NULL WHERE id = ?", args: [runId]) }
     }
 
-    // Mirrors reorderComics: called with the *entire* currently-displayed runs list every
-    // time, not just the two swapped, so position is never left partially NULL/non-NULL —
-    // allRuns()'s ORDER BY falls back to newest-first (r.id * -1) only for a library that's
-    // never had a manual drag at all.
     func reorderRuns(orderedIds: [Int64]) {
         queue.sync {
             exec("BEGIN")
@@ -1533,9 +1333,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Used by backup restore to avoid creating a duplicate run when the same backup is
-    /// imported more than once. Not used by the normal "create a run" flow, which
-    /// legitimately allows two runs sharing a title.
     func runId(withTitle title: String) -> Int64? {
         queue.sync {
             let id = scalarInt("SELECT id FROM runs WHERE title = ? LIMIT 1", args: [title])
@@ -1627,8 +1424,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Stats
-
     func loadStats() -> LibraryStats {
         queue.sync {
             let total     = scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL")
@@ -1677,8 +1472,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Comics added per calendar month, most recent `months` months (oldest first) — powers
-    // the Stats dashboard's collection-growth chart. Must be called from inside queue.sync.
     private func monthlyCollectionGrowth(months: Int) -> [GrowthPoint] {
         let raw = rows("""
             SELECT strftime('%Y-%m', added_at) as ym, COUNT(*)
@@ -1738,8 +1531,6 @@ final class DatabaseManager: @unchecked Sendable {
         return streak
     }
 
-    // MARK: - File presence check
-
     func clearAll() {
         queue.sync {
             exec("DELETE FROM reading_history")
@@ -1756,7 +1547,7 @@ final class DatabaseManager: @unchecked Sendable {
             exec("DELETE FROM runs")
             exec("DELETE FROM tags")
             exec("DELETE FROM comics")
-            // Re-seed built-in shelves after wiping (must match migrate())
+
             let builtins = [("Currently Reading", 0), ("Want to Read", 1), ("Finished", 2), ("DNF", 3)]
             for (name, pos) in builtins {
                 exec("INSERT OR IGNORE INTO shelves (name, is_builtin, position) VALUES ('\(name)', 1, \(pos))")
@@ -1764,8 +1555,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Skips rows the user has hand-edited (meta_edited=1) so folder-derived
-    // reparsing never silently reverts a manual title/series/publisher/character fix.
     func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?)]) {
         queue.sync {
             exec("BEGIN")
@@ -1783,10 +1572,7 @@ final class DatabaseManager: @unchecked Sendable {
                     _ = run("UPDATE comics SET series=? WHERE id=? AND meta_edited=0", args: [ser, item.id])
                 }
                 _ = run("UPDATE comics SET title=? WHERE id=? AND meta_edited=0", args: [item.title, item.id])
-                // Only overwrite when the filename actually yielded a number, and only when
-                // it disagrees with what's stored — an embedded ComicInfo.xml number that
-                // collides with a different issue's number (e.g. legacy vs. current-run
-                // numbering) breaks reading order for the whole series.
+
                 if let num = item.issueNumber {
                     _ = run("""
                         UPDATE comics SET issue_number=? WHERE id=? AND meta_edited=0
@@ -1796,9 +1582,6 @@ final class DatabaseManager: @unchecked Sendable {
             }
             exec("COMMIT")
 
-            // Issue numbers may have just changed for any number of rows above — recompute
-            // every position from scratch rather than trying to figure out which rows were
-            // actually touched. Cheap (single UPDATE) and idempotent.
             exec("""
                 UPDATE comics SET position =
                     is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
@@ -1822,9 +1605,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Used by the "Rename Files to Match Library" tool — the file on disk has already been
-    // moved by the time this is called, this just keeps file_path in sync so the app doesn't
-    // treat the renamed file as missing on the next scan.
     func updateFilePath(id: Int64, newPath: String) {
         queue.sync {
             _ = run("UPDATE comics SET file_path = ? WHERE id = ?", args: [newPath, id])
@@ -1865,8 +1645,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Browse groups
-
     struct CharacterGroup: Identifiable {
         let id: String
         let groupName: String
@@ -1900,8 +1678,7 @@ final class DatabaseManager: @unchecked Sendable {
                 let p = "%\(q)%"
                 args += [p, p]
             }
-            // If character looks like a roster list (has commas, brackets, or >60 chars),
-            // fall back to series name — so messy ComicInfo.xml character lists don't pollute grouping.
+
             let cleanChar = """
                 CASE
                   WHEN c.character IS NULL
@@ -1950,7 +1727,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     func seriesGroups(groupName: String, publisher: String? = nil) -> [SeriesGroup] {
         queue.sync {
-            // Match the same cleanChar logic used in characterGroups so drill-through is consistent
+
             let cleanChar = """
                 CASE
                   WHEN c.character IS NULL
@@ -1995,8 +1772,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Series covers
-
     func setSeriesCover(series: String, publisher: String, comicId: Int64) {
         queue.sync {
             _ = run("INSERT OR REPLACE INTO series_covers (series, publisher, comic_id) VALUES (?, ?, ?)",
@@ -2011,9 +1786,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // A custom image and "use this issue's cover" are mutually exclusive — setting one clears
-    // the other's comic_id, since a stale comic_id sitting alongside a custom image_path would
-    // leave it ambiguous which one currentSeriesCover()/the cover-loading code should prefer.
     func setSeriesCoverImage(series: String, publisher: String, imagePath: String) {
         queue.sync {
             _ = run("""
@@ -2034,8 +1806,6 @@ final class DatabaseManager: @unchecked Sendable {
             return sqlite3_column_int64(stmt, 0)
         }
     }
-
-    // MARK: - Series reader preferences
 
     struct SeriesReaderPrefs {
         let fitMode:      String
@@ -2069,8 +1839,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Character group covers
-
     func setCharacterGroupCover(groupName: String, publisher: String, imagePath: String) {
         queue.sync {
             _ = run("INSERT OR REPLACE INTO character_covers (group_name, publisher, image_path) VALUES (?,?,?)",
@@ -2085,8 +1853,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Series group ordering
-
     func reorderSeriesGroups(groupName: String, publisher: String, orderedSeries: [String]) {
         guard !orderedSeries.isEmpty else { return }
         queue.sync {
@@ -2099,8 +1865,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // Same pattern as reorderSeriesGroups, one level up: manual ordering for the
-    // character/collection cards shown before drilling into a specific group's series.
     func reorderCharacterGroups(publisher: String, orderedGroupNames: [String]) {
         guard !orderedGroupNames.isEmpty else { return }
         queue.sync {
@@ -2112,8 +1876,6 @@ final class DatabaseManager: @unchecked Sendable {
             exec("COMMIT")
         }
     }
-
-    // MARK: - Bookmarks
 
     func bookmarks(comicId: Int64) -> [Bookmark] {
         queue.sync {
@@ -2155,8 +1917,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Reading history
-
     func logReadingSession(comicId: Int64, pageStart: Int, pageEnd: Int) {
         guard pageEnd > pageStart else { return }
         queue.async {
@@ -2195,8 +1955,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Reading goals
-
     func readingGoal(year: Int) -> Int {
         queue.sync {
             let v = scalarInt("SELECT goal_count FROM reading_goals WHERE year=?", args: [year])
@@ -2209,9 +1967,6 @@ final class DatabaseManager: @unchecked Sendable {
             _ = self.run("INSERT OR REPLACE INTO reading_goals (year, goal_count) VALUES (?,?)", args: [year, count])
         }
     }
-
-
-    // MARK: - Series gap detection
 
     func missingIssueNumbers(series: String, publisher: String) -> [String] {
         queue.sync {
@@ -2233,8 +1988,6 @@ final class DatabaseManager: @unchecked Sendable {
             return missing
         }
     }
-
-    // MARK: - Shelves
 
     func allShelves() -> [Shelf] {
         queue.sync {
@@ -2269,8 +2022,6 @@ final class DatabaseManager: @unchecked Sendable {
         queue.async { _ = self.run("DELETE FROM shelves WHERE id = ? AND is_builtin = 0", args: [shelfId]) }
     }
 
-    // MARK: - Trash / restore
-
     func trashedComics() -> [Comic] {
         queue.sync {
             let sql = "\(comicSelect) WHERE c.deleted_at IS NOT NULL ORDER BY c.deleted_at DESC"
@@ -2282,9 +2033,6 @@ final class DatabaseManager: @unchecked Sendable {
         queue.async { _ = self.run("UPDATE comics SET deleted_at = NULL WHERE id = ?", args: [id]) }
     }
 
-    // Synchronous (unlike restoreComic's fire-and-forget queue.async) — callers doing an
-    // undo need the restore to have actually landed before they reload(), or the just-undone
-    // comics would still show as deleted for one more frame.
     func restore(_ ids: [Int64]) {
         guard !ids.isEmpty else { return }
         queue.sync {

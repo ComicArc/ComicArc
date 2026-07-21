@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Reader settings enums
-
 enum FitMode: String, CaseIterable {
     case fitPage    = "fitPage"
     case fitWidth   = "fitWidth"
@@ -46,8 +44,6 @@ enum ColorFilter: String, CaseIterable {
     }
 }
 
-// MARK: - ReaderView
-
 struct ReaderView: View {
     let comic: Comic
     let onClose: () -> Void
@@ -55,54 +51,43 @@ struct ReaderView: View {
     @Environment(\.windowService) private var windowService
     @FocusState private var isFocused: Bool
 
-    // Reading state
     @State private var currentPage:      Int
     @State private var sessionStartPage: Int
 
-    // Mode toggles — seeded per-series in init() (falling back to these global defaults for
-    // a series that's never been read before), then persisted per-series as the user changes
-    // them, so switching between e.g. a manga (RTL) and a Western comic doesn't require
-    // re-toggling reading direction every time.
     @AppStorage("readerColorFilter")    private var colorFilterRaw = ColorFilter.none.rawValue
 
     @State private var scrollMode: Bool
     @State private var rtl:        Bool
     @State private var fitModeRaw: String
 
-    // Derived
     private var fitMode: FitMode         { FitMode(rawValue: fitModeRaw) ?? .fitPage }
     private var colorFilter: ColorFilter { ColorFilter(rawValue: colorFilterRaw) ?? .none }
 
-    // Reader features
     @State private var doublePage: Bool
-    @State private var currentPageIsSpread = false  // updated by PagedModeView after each load
+    @State private var currentPageIsSpread = false
     @State private var saveProgressWorkItem: DispatchWorkItem?
     @State private var autoplay          = false
     @State private var countdownProgress = 0.0
     @AppStorage("autoplaySpeed") private var autoplayInterval: Double = 6.0
 
-    // Bookmarks
     @State private var bookmarks:   [Bookmark] = []
     @State private var isBookmarked = false
     @State private var showBookmarks = false
 
-    // Overlays
     @State private var showShortcuts = false
     @State private var showFilmstrip = false
     @State private var comicRating:  Int
 
-    // Auto-hide bar state
     @State private var showTopBar    = true
     @State private var showBottomBar = true
     @State private var hideTask:     DispatchWorkItem? = nil
     @AppStorage("readerToolbarLocked") private var toolbarLocked = false
 
-    // Zoom & pan — single source of truth (PagedModeView owns no zoom state)
     @GestureState private var pinchScale: CGFloat = 1.0
     @State private var steadyZoom: CGFloat = 1.0
     @State private var panOffset:  CGSize  = .zero
     @GestureState private var dragOffset: CGSize = .zero
-    @State private var cursorPosition: CGPoint = .zero   // tracked for cursor-anchored zoom
+    @State private var cursorPosition: CGPoint = .zero
 
     private var currentZoom: CGFloat { min(5, max(0.5, steadyZoom * pinchScale)) }
     private var isZoomed:    Bool    { currentZoom > 1.05 }
@@ -126,8 +111,6 @@ struct ReaderView: View {
         _scrollMode = State(initialValue: prefs?.scrollMode ?? defaults.bool(forKey: "scrollMode"))
     }
 
-    // Called whenever fit mode / RTL / double-page / scroll mode changes, so the next comic
-    // opened from this same series picks up where this one left off.
     private func saveSeriesPrefs() {
         DatabaseManager.shared.setSeriesReaderPrefs(
             series: comic.series, publisher: comic.publisher,
@@ -175,7 +158,7 @@ struct ReaderView: View {
                     scheduleHide()
                 }
             }
-            // Cursor-anchored double-click zoom (needs geo.size, so lives here not in pageContent)
+
             .onTapGesture(count: 2) {
                 withAnimation(Design.springGentle) {
                     if isZoomed {
@@ -189,12 +172,7 @@ struct ReaderView: View {
                     }
                 }
             }
-            // steadyZoom/panOffset are absolute points computed against geo.size at the
-            // moment of the gesture; resizing the window (or toggling fullscreen) reapplies
-            // that same stale offset/scale to the new size via .scaleEffect/.offset below,
-            // so the pan no longer matches where the user actually zoomed. Resetting on
-            // resize is simpler and safer than trying to rescale a pan offset proportionally,
-            // and matches the existing page-change behavior on the line below.
+
             .onChange(of: geo.size) { _, _ in resetZoom() }
         }
         .accessibilityLabel("Comic reader — \(comic.title), page \(currentPage + 1) of \(comic.pageCount)")
@@ -246,9 +224,7 @@ struct ReaderView: View {
             saveProgress(); logSession(); hideTask?.cancel()
             windowService.showCursor()
             windowService.exitImmersiveMode()
-            // Otherwise up to 30 full-resolution decoded pages from this comic stay
-            // resident in PageCache until unrelated LRU pressure from other comics
-            // eventually pushes them out.
+
             PageCache.shared.evict(comicId: comic.id)
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
@@ -270,11 +246,9 @@ struct ReaderView: View {
             if !scrollMode { windowService.hideCursorUntilMouseMoves() }
         }
         hideTask = w
-        // 8s delay before auto-hiding controls, long enough not to vanish mid-glance at the page counter.
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: w)
     }
-
-    // MARK: - Page content
 
     @ViewBuilder
     private var pageContent: some View {
@@ -292,7 +266,7 @@ struct ReaderView: View {
             )
             .scaleEffect(currentZoom)
             .offset(isZoomed ? totalOffset : .zero)
-            // Pinch-to-zoom — live scale via @GestureState pinchScale, committed on end
+
             .gesture(
                 MagnifyGesture()
                     .updating($pinchScale) { val, state, _ in state = val.magnification }
@@ -303,7 +277,7 @@ struct ReaderView: View {
                         }
                     }
             )
-            // Drag-to-pan — always attached, only responds when zoomed
+
             .simultaneousGesture(
                 DragGesture(minimumDistance: 4)
                     .updating($dragOffset) { val, state, _ in
@@ -318,7 +292,7 @@ struct ReaderView: View {
                         )
                     }
             )
-            .onTapGesture { }   // absorbs single taps so they don't fall through
+            .onTapGesture { }
             .animation(Design.springSnappy, value: currentZoom)
         }
     }
@@ -345,8 +319,6 @@ struct ReaderView: View {
         }
         .ignoresSafeArea()
     }
-
-    // MARK: - Overlay
 
     private var topBar: some View {
         HStack {
@@ -412,9 +384,6 @@ struct ReaderView: View {
                 .accessibilityLabel("Fit mode: \(fitMode.label)")
                 .help("Fit mode: \(fitMode.label)")
 
-                // Reading direction, double-page, scroll mode, color filter, and pin toolbar
-                // are set once per series and rarely touched again, so they live in one menu
-                // rather than as always-visible icons alongside bookmark/fit/autoplay/filmstrip.
                 Menu {
                     Toggle(isOn: $rtl) {
                         Label(rtl ? "Right-to-Left" : "Left-to-Right", systemImage: "text.justify.right")
@@ -572,8 +541,6 @@ struct ReaderView: View {
         .background(.ultraThinMaterial.opacity(0.9))
     }
 
-    // MARK: - Filmstrip
-
     private var filmstrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -600,8 +567,6 @@ struct ReaderView: View {
         .frame(height: 108)
         .background(.ultraThinMaterial.opacity(0.9))
     }
-
-    // MARK: - Bookmarks panel
 
     private var bookmarksPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -655,8 +620,6 @@ struct ReaderView: View {
         .frame(width: 380, height: 420)
     }
 
-    // MARK: - Shortcuts sheet
-
     private var shortcutsSheet: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Keyboard Shortcuts")
@@ -698,8 +661,6 @@ struct ReaderView: View {
         .frame(width: 420)
     }
 
-    // MARK: - Helpers
-
     private func nextPage() {
         let advance = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
         let target  = min(currentPage + advance, comic.pageCount - 1)
@@ -733,9 +694,6 @@ struct ReaderView: View {
         ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
     }
 
-    // Dragging the page scrubber fires a set() on every intermediate value — saving on each
-    // one is a synchronous SQLite write per tick across potentially hundreds of pages in one
-    // gesture. Debounced so only the value the drag actually settles on gets written.
     private func saveProgressDebounced() {
         saveProgressWorkItem?.cancel()
         let work = DispatchWorkItem { saveProgress() }
@@ -756,10 +714,7 @@ struct ReaderView: View {
             do {
                 try await Task.sleep(for: .milliseconds(Int(autoplayInterval * 1000) / steps))
             } catch {
-                // Cancelled — e.g. the user manually turned the page. `try?` here would
-                // swallow the CancellationError and let the loop spin through its remaining
-                // iterations instantly, still calling nextPage() at the end and silently
-                // skipping an extra page on top of the manual turn.
+
                 countdownProgress = 0
                 return
             }
@@ -772,8 +727,6 @@ struct ReaderView: View {
         }
     }
 }
-
-// MARK: - Color filter view extension
 
 extension View {
     @ViewBuilder
@@ -793,8 +746,6 @@ extension View {
     }
 }
 
-// MARK: - Paged mode
-
 struct PagedModeView: View {
     let comic:      Comic
     @Binding var currentPage: Int
@@ -802,7 +753,7 @@ struct PagedModeView: View {
     let doublePage: Bool
     let fitMode:    FitMode
     let rtl:        Bool
-    let isZoomed:   Bool   // owned by ReaderView; used to block page-swipe while zoomed
+    let isZoomed:   Bool
 
     @State private var imageLeft:  PlatformImage?
     @State private var imageRight: PlatformImage?
@@ -823,11 +774,7 @@ struct PagedModeView: View {
                 if isLoading {
                     ProgressView().tint(.white)
                 } else if effectiveDoublePage, let left = imageLeft {
-                    // imageLeft is always the earlier page (currentPage) and imageRight the
-                    // later one (currentPage + 1). In RTL/manga reading order the eye should
-                    // encounter the later page first, so the physical left/right placement
-                    // needs to mirror — otherwise a spread always renders in LTR order even
-                    // with RTL enabled, breaking artwork that's meant to be read right-to-left.
+
                     HStack(spacing: 1) {
                         if rtl {
                             if let right = imageRight { pageImage(right, size: geo.size) }
@@ -845,7 +792,7 @@ struct PagedModeView: View {
                 }
             }
         }
-        // Page-swipe: only when not zoomed (zoom/pan is handled entirely by ReaderView)
+
         .gesture(
             DragGesture(minimumDistance: 40).onEnded { val in
                 guard !isZoomed else { return }
@@ -891,11 +838,7 @@ struct PagedModeView: View {
         isLoading = true
         imageLeft = nil; imageRight = nil
         PageCache.shared.load(comic: comic, page: page) { img in
-            // PageCache dispatches decodes onto a concurrent queue, so completion order
-            // across overlapping requests isn't guaranteed — a fast scrub through many
-            // pages can start several loads before any complete. Without this check, a
-            // slow, now-abandoned page's decode finishing after a newer one would silently
-            // overwrite what the scrubber says is the current page.
+
             guard page == self.currentPage else { return }
             self.imageLeft  = img
             self.isLoading  = false
@@ -911,11 +854,6 @@ struct PagedModeView: View {
     }
 }
 
-// MARK: - Filmstrip thumbnail
-
-// Reuses PageCache rather than a separate thumbnail cache — LazyHStack only instantiates
-// visible cells, so at most a screenful of thumbnails (~10-12) actually decode, well within
-// PageCache's 30-entry LRU budget alongside the reader's own current-page/prefetch entries.
 private struct FilmstripThumb: View {
     let comic:     Comic
     let index:     Int
@@ -950,8 +888,6 @@ private struct FilmstripThumb: View {
         }
     }
 }
-
-// MARK: - Scroll mode
 
 struct ScrollModeView: View {
     let comic: Comic

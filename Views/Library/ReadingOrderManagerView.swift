@@ -1,9 +1,5 @@
 import SwiftUI
 
-// Library-wide triage list, not a second per-issue editor — SeriesManagerView already owns
-// confidence badges, the misplaced filter, and Move Near. Tapping a row here opens that
-// existing screen scoped to the series; this view's own job is surfacing which series need
-// attention and the handful of actions that only make sense at the whole-library scale.
 struct ReadingOrderManagerView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var rows: [DatabaseManager.SeriesTriageRow] = []

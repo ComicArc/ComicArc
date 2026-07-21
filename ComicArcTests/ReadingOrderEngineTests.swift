@@ -1,11 +1,7 @@
 import XCTest
 @testable import ComicArc
 
-// MARK: - Pure engine tests (no database involved)
-
 final class ReadingOrderEngineTests: XCTestCase {
-
-    // MARK: Classification
 
     func test_classify_regularIssue() {
         XCTAssertEqual(ReadingOrderEngine.classify(issueNumber: "12", title: "Batman #12", series: "Batman"), .regular)
@@ -20,8 +16,7 @@ final class ReadingOrderEngineTests: XCTestCase {
     }
 
     func test_classify_giantSizeDoesNotOverrideAnnual() {
-        // "most-specific-first" ordering: a Giant-Size Annual should classify as annual, the
-        // rarer/more meaningful label, not giant-size.
+
         XCTAssertEqual(ReadingOrderEngine.classify(issueNumber: "1", title: "X-Men Giant-Size Annual #1", series: "X-Men"), .annual)
     }
 
@@ -54,8 +49,6 @@ final class ReadingOrderEngineTests: XCTestCase {
         XCTAssertFalse(ComicType.regular.needsPlacement)
     }
 
-    // MARK: parseLegacyNumber
-
     func test_parseLegacyNumber_integer() {
         XCTAssertEqual(ReadingOrderEngine.parseLegacyNumber("700"), 700)
     }
@@ -69,8 +62,6 @@ final class ReadingOrderEngineTests: XCTestCase {
         XCTAssertNil(ReadingOrderEngine.parseLegacyNumber(nil))
         XCTAssertNil(ReadingOrderEngine.parseLegacyNumber(""))
     }
-
-    // MARK: Placement tiers
 
     private func input(_ id: Int64, group: String = "Marvel:ASM", num: Double? = nil,
                         type: ComicType = .regular, year: Int? = nil, month: Int? = nil, day: Int? = nil,
@@ -94,12 +85,11 @@ final class ReadingOrderEngineTests: XCTestCase {
     func test_tier2_singleDateAnchor() {
         let inputs = [
             input(1, num: 12, year: 2005, month: 6, title: "#12"),
-            input(2, num: 13, title: "#13"), // no date
+            input(2, num: 13, title: "#13"),
             input(3, type: .annual, year: 2005, month: 8, title: "Annual #1"),
         ]
         let results = ReadingOrderEngine.computeSeriesPositions(inputs)
-        // Only one dated mainline neighbor available — special's date (Aug 2005) is after it
-        // (June 2005), so it should land after, with reduced confidence vs. tier 1.
+
         XCTAssertEqual(results[3]?.confidence, 85)
         XCTAssertGreaterThan(results[3]!.position, results[1]!.position)
     }
@@ -116,7 +106,7 @@ final class ReadingOrderEngineTests: XCTestCase {
     }
 
     func test_tier3_storyArcDoesNotMatchAcrossGroups() {
-        // Same arc name, different series — must not match; arc names aren't globally unique.
+
         let inputs = [
             input(1, group: "Marvel:ASM", num: 12, arc: "Rebirth", title: "ASM #12"),
             input(2, group: "DC:Flash", num: 5, arc: "Rebirth", title: "Flash #5"),
@@ -124,8 +114,7 @@ final class ReadingOrderEngineTests: XCTestCase {
             input(4, group: "DC:Flash", type: .special, arc: "Rebirth", title: "Flash Special"),
         ]
         let results = ReadingOrderEngine.computeSeriesPositions(inputs)
-        // The Flash special should match Flash #5 (same group), not ASM #12 (different group,
-        // same arc name, would be a false positive if grouping weren't respected).
+
         XCTAssertEqual(results[4]?.position, results[2]!.position + 1)
     }
 
@@ -137,9 +126,9 @@ final class ReadingOrderEngineTests: XCTestCase {
         let results = ReadingOrderEngine.computeSeriesPositions(inputs)
         XCTAssertEqual(results[101]?.confidence, 60)
         XCTAssertEqual(results[102]?.confidence, 60)
-        // Annual #1 should land before Annual #2 (deterministic sequence order).
+
         XCTAssertLessThan(results[101]!.position, results[102]!.position)
-        // Both should land strictly within the mainline range, not at the very end.
+
         XCTAssertLessThan(results[102]!.position, results[20]!.position)
     }
 
@@ -163,7 +152,7 @@ final class ReadingOrderEngineTests: XCTestCase {
         for id in [101, 102, 103] {
             XCTAssertEqual(first[Int64(id)]?.position, second[Int64(id)]?.position)
         }
-        // And sequence order should reflect the annuals' own numbers, not insertion order.
+
         XCTAssertLessThan(first[102]!.position, first[103]!.position)
         XCTAssertLessThan(first[103]!.position, first[101]!.position)
     }
@@ -175,22 +164,12 @@ final class ReadingOrderEngineTests: XCTestCase {
             input(3, num: 13, title: "#13"),
         ]
         let results = ReadingOrderEngine.computeSeriesPositions(inputs)
-        // Point issues are regular-ish (needsPlacement is false only for format-only types) —
-        // .pointIssue.needsPlacement is true, so it goes through placement tiers, not direct
-        // mainline positioning. With no date/arc signal and only 2 non-special mainline
-        // siblings, it should land in the proportional band between them.
+
         XCTAssertGreaterThan(results[2]!.position, results[1]!.position)
         XCTAssertLessThan(results[2]!.position, results[3]!.position)
     }
 }
 
-// MARK: - DB integration tests
-
-// The rest of this test suite has no existing convention for DB-layer testing (no
-// setUp/tearDown, no in-memory test DB — every other test file exercises pure logic only).
-// DatabaseManager's new `init(dbPath:)` overload (added alongside the no-arg initializer
-// DatabaseManager.shared uses) makes this possible: each test gets its own throwaway SQLite
-// file instead of touching the real, shared library database.
 final class ReadingOrderEngineDatabaseTests: XCTestCase {
     private var db: DatabaseManager!
     private var tempPath: String!
@@ -227,8 +206,7 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         let annual = comics.first { $0.title.contains("Annual") }
         XCTAssertNotNil(annual?.readingOrderPosition)
         XCTAssertNotNil(annual?.readingOrderConfidence)
-        // With 20 mainline siblings and no date data, it should land in the proportional
-        // band (confidence 60), not the always-last safety net (confidence 0).
+
         XCTAssertEqual(annual?.readingOrderConfidence, 60)
     }
 
@@ -251,10 +229,8 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         let annual = comics.first { $0.title.contains("Annual") }!
         let issue3 = comics.first { $0.title == "Flash #3" }!
 
-        // Manually pin the annual to sit exactly at issue #3's position.
         db.setReadingOrderOverride(comicId: annual.id, position: issue3.readingOrderPosition! - 1)
 
-        // Simulate a rescan — recomputeReadingOrder() runs again, but the override must win.
         db.recomputeReadingOrder()
         let afterRescan = db.allComics(series: "Flash", sortOrder: .manual)
         let annualAfter = afterRescan.first { $0.id == annual.id }!
@@ -284,13 +260,10 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         let reversed = comics.reversed().map(\.id)
         db.reorderComics(orderedIds: Array(reversed))
 
-        // Simulate a rescan afterward — the drag must survive it.
         db.recomputeReadingOrder()
         let after = db.allComics(series: "Aquaman", sortOrder: .manual)
         XCTAssertEqual(after.map(\.id), Array(reversed))
     }
-
-    // MARK: - Reading Order Mode
 
     func test_mode_filename_fallsBackToLegacyPosition() {
         for n in 1...3 { insertComic(series: "Nightwing", issue: "\(n)", title: "Nightwing #\(n)") }
@@ -300,8 +273,7 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
 
         db.recomputeReadingOrder(mode: .filename)
         let comics = db.allComics(series: "Nightwing", sortOrder: .manual)
-        // Filename mode clears reading_order_position entirely so the sort falls through to
-        // the legacy `position` column — nothing here should carry an engine-computed value.
+
         XCTAssertTrue(comics.allSatisfy { $0.readingOrderPosition == nil })
     }
 
@@ -319,21 +291,18 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         insertComic(series: "Hawkeye", issue: "1", title: "Hawkeye #1", year: 2021, month: 1)
         db.recomputeReadingOrder(mode: .publicationDate)
         let ordered = db.allComics(series: "Hawkeye", sortOrder: .manual).sorted { $0.readingOrderPosition! < $1.readingOrderPosition! }
-        // #5 (2020) predates #1 (2021), so date mode should place #5 first despite its higher number.
+
         XCTAssertEqual(ordered.first?.issueNumber, "5")
     }
 
     func test_mode_comicInfoOrder_usesEmbeddedNumberNotFilename() {
-        // issue_number (filename-derived, per the app's real priority) disagrees with what
-        // ComicInfo.xml says — ComicInfo Order mode must follow the embedded field, not filename.
+
         insertComic(series: "Moonknight", issue: "10", title: "A", comicInfoIssueNumber: "2")
         insertComic(series: "Moonknight", issue: "20", title: "B", comicInfoIssueNumber: "1")
         db.recomputeReadingOrder(mode: .comicInfoOrder)
         let ordered = db.allComics(series: "Moonknight", sortOrder: .manual).sorted { $0.readingOrderPosition! < $1.readingOrderPosition! }
         XCTAssertEqual(ordered.map(\.title), ["B", "A"])
     }
-
-    // MARK: - Incremental scoping
 
     func test_recomputeReadingOrder_affectedGroupKeysLeavesOtherSeriesUntouched() {
         for n in 1...3 { insertComic(series: "Thor", issue: "\(n)", title: "Thor #\(n)") }
@@ -346,11 +315,9 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
 
         let thorAfter = db.allComics(series: "Thor", sortOrder: .manual).map(\.readingOrderPosition)
         let lokiAfter = db.allComics(series: "Loki", sortOrder: .manual).map(\.readingOrderPosition)
-        XCTAssertNotEqual(thorBefore, thorAfter) // Thor was rescoped into legacyNumber mode
-        XCTAssertEqual(lokiBefore, lokiAfter)    // Loki untouched by the scoped call
+        XCTAssertNotEqual(thorBefore, thorAfter)
+        XCTAssertEqual(lokiBefore, lokiAfter)
     }
-
-    // MARK: - Series links
 
     func test_seriesLink_childSortsAfterParent() {
         for n in 1...3 { insertComic(series: "Amazing Spider-Man", issue: "\(n)", title: "ASM #\(n)") }
@@ -393,8 +360,7 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         db.removeSeriesLink(childPublisher: "Marvel", childSeries: "Y")
         db.recomputeReadingOrder()
         XCTAssertEqual(db.seriesLinks().count, 0)
-        // No assertion on exact positions post-unlink — only that the link record itself is gone
-        // and a recompute afterward doesn't crash or leave stale link state behind.
+
     }
 
     func test_addSeriesLink_rejectsSecondParentForSameChild() {
@@ -406,11 +372,9 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertEqual(db.seriesLinks().count, 1)
     }
 
-    // MARK: - Reading Order Manager / Import Wizard support
-
     func test_readingOrderTriageSummary_flagsLowConfidenceSeries() {
         for n in 1...20 { insertComic(series: "Flagged", issue: "\(n)", title: "Flagged #\(n)") }
-        insertComic(series: "Flagged", issue: "1", title: "Flagged Annual #1") // lands at confidence 60
+        insertComic(series: "Flagged", issue: "1", title: "Flagged Annual #1")
         db.recomputeReadingOrder()
 
         let summary = db.readingOrderTriageSummary()
@@ -428,7 +392,7 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     func test_seriesMissingComicInfo_detectsAbsence() {
-        insertComic(series: "NoMeta", issue: "1", title: "NoMeta #1") // no comicInfoIssueNumber
+        insertComic(series: "NoMeta", issue: "1", title: "NoMeta #1")
         let hits = db.seriesMissingComicInfo()
         XCTAssertTrue(hits.contains { $0.series == "NoMeta" })
     }

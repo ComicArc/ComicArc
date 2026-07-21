@@ -15,16 +15,9 @@ struct ComicArcIPadApp: App {
                 .environment(\.fileService, fileService)
                 .environment(\.windowService, windowService)
                 .onChange(of: scenePhase) { _, phase in
-                    // No FSEvents-equivalent for an arbitrary security-scoped folder on iOS;
-                    // rescanning whenever the app returns to the foreground is the closest
-                    // practical approximation of auto-detecting files added outside the app.
+
                     if phase == .active, !vm.libraryPath.isEmpty { vm.scan() }
 
-                    // iOS can suspend a backgrounded app and later kill it for memory
-                    // pressure without any further callback — flush the WAL to the main
-                    // database file on the way out. Not a full close: the app is very
-                    // often about to resume rather than terminate, and closing the
-                    // connection here would break every query on return to foreground.
                     if phase == .background { DatabaseManager.shared.checkpoint() }
                 }
         }

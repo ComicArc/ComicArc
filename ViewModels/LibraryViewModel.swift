@@ -3,8 +3,6 @@ import Combine
 import CoreSpotlight
 import UserNotifications
 
-// MARK: - Navigation
-
 enum AppDestination: Hashable, Codable {
     case library
     case continueReading
@@ -69,10 +67,7 @@ final class LibraryViewModel: ObservableObject {
         DatabaseManager.SortOrder(rawValue: UserDefaults.standard.string(forKey: "comicSortOrder") ?? "") ?? .manual {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "comicSortOrder") }
     }
-    // What basis decides issue-within-series order (Filename/Legacy Number/Publication Date/
-    // ComicInfo Order/Intelligent) — orthogonal to sortOrder above, which controls library
-    // browser grouping. Changing this triggers a full recompute since it's a rare, deliberate
-    // setting change, not a per-scan hot path.
+
     @Published var readingOrderMode: DatabaseManager.ReadingOrderMode = .current {
         didSet {
             guard oldValue != readingOrderMode else { return }
@@ -90,8 +85,6 @@ final class LibraryViewModel: ObservableObject {
     @Published var libraryHealthReport: LibraryHealthReport? = nil
     private var scanReportDismissTask: DispatchWorkItem?
 
-    // MARK: - Undo
-
     struct UndoableAction {
         let message: String
         let undo: () -> Void
@@ -99,10 +92,6 @@ final class LibraryViewModel: ObservableObject {
     @Published var pendingUndo: UndoableAction?
     private var undoDismissTask: DispatchWorkItem?
 
-    // Session-only (not persisted across quit/relaunch) — a toast-style undo window rather
-    // than a true undo stack. Deliberately short-lived and visible (not a silent background
-    // capability) so it reads as "you have a few seconds to change your mind," matching how
-    // Mail/Gmail-style undo-send banners work, rather than implying indefinite undo history.
     func offerUndo(_ message: String, undo: @escaping () -> Void) {
         undoDismissTask?.cancel()
         pendingUndo = UndoableAction(message: message, undo: undo)
@@ -138,7 +127,6 @@ final class LibraryViewModel: ObservableObject {
 
     @Published var showSeriesManager: Bool = false
 
-    // Possible duplicates (same publisher+series+issue# imported under different filenames)
     @Published var duplicateGroups:   [[Comic]] = []
 
     var selectedSection: SidebarSection {
@@ -183,17 +171,14 @@ final class LibraryViewModel: ObservableObject {
 
     private init() {
         #if os(iOS)
-        // Security-scope access to a bookmarked library folder must be re-started every
-        // process launch — iOS revokes it on relaunch even though the bookmark stays valid.
-        // Must happen before startWatcher()/reload() below touch the library path.
+
         if let folder = resolveLibraryFolderBookmark() {
             UserDefaults.standard.set(folder.path, forKey: "libraryPath")
         }
         #endif
 
-        useGroupedView = true  // grouped hierarchy is the only browse mode
+        useGroupedView = true
 
-        // Restore last destination before initial reload so the right data loads
         if let data = UserDefaults.standard.data(forKey: "session.destination"),
            let dest = try? JSONDecoder().decode(AppDestination.self, from: data) {
             destination = dest
@@ -210,18 +195,12 @@ final class LibraryViewModel: ObservableObject {
         refreshDuplicates()
 
         #if os(macOS)
-        // FSEvents only reports changes from the moment the watcher starts (kFSEventStreamEventIdSinceNow)
-        // — it has no memory of what happened while the app wasn't running, so anything added
-        // or removed between quit and relaunch was invisible until the user remembered to hit
-        // Scan. The scan itself is already incremental (only touches paths it doesn't already
-        // know about), so this stays fast on the common case of nothing new having changed.
+
         scan()
         #endif
 
         if case .library = destination { restoreLibraryDrillDown() }
     }
-
-    // MARK: - Session persistence
 
     func saveNavigationState() {
         if let data = try? JSONEncoder().encode(destination) {
@@ -255,10 +234,8 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // One-time migration: re-derive publisher/character/series from folder structure.
-    // Runs in the background; resets the flag so a manual trigger (Settings) can force it again.
     func reparseMetaIfNeeded() {
-        // Bump version key when the reparse logic changes so all users get the updated fix.
+
         let key = "folderMetaReparseV3"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         let path = libraryPath
@@ -270,8 +247,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // One-time migration: recompute every comic's file_hash with the current algorithm.
-    // See LibraryScanner.rehashAll() — bump the version key if fileHash()'s formula changes.
     func rehashLibraryIfNeeded() {
         let key = "fileHashRehashV1"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
@@ -282,12 +257,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// One button that actually fixes things: rescans for file changes, then re-derives
-    /// metadata (publisher/character/series/issue number) for every comic from its folder
-    /// path and filename, respecting any manual edits (meta_edited=1 rows are skipped).
-    /// Previously a user had to know that "Scan Library" only catches new/removed files and
-    /// separately find "Re-parse Library Metadata" buried in Settings to fix drifted
-    /// ordering or metadata — this does both in one visible, one-button action.
     func resyncLibrary() {
         let path = libraryPath
         guard !path.isEmpty, !isScanning, !isResyncing else { return }
@@ -311,15 +280,12 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Load
-
     private var reloadWorkItem: DispatchWorkItem?
-    // Guards against an older, slower reload overwriting a newer one's results
-    // when rapid successive reload() calls each spawn their own detached query.
+
     private var reloadGeneration = 0
 
     func reload() {
-        // Debounce rapid calls
+
         reloadWorkItem?.cancel()
         let w = DispatchWorkItem { [weak self] in self?._reload() }
         reloadWorkItem = w
@@ -411,9 +377,7 @@ final class LibraryViewModel: ObservableObject {
         selectedComic     = nil
         bulkMode          = false
         selectedComicIds.removeAll()
-        // A macOS main-menu shortcut (Cmd+1…8) still fires even while the Series Manager
-        // sheet is open. Since it's bound to selectedSeries, leaving it presented after that
-        // becomes nil shows a permanently blank sheet the user can only escape via Cancel.
+
         showSeriesManager = false
         if case .tag = item { useGroupedView = false } else { useGroupedView = true }
         saveNavigationState()
@@ -432,8 +396,6 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
-    // MARK: - Hierarchical browsing
-
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
         let pub = activePublisher
         reloadGeneration += 1
@@ -441,8 +403,7 @@ final class LibraryViewModel: ObservableObject {
         Task.detached(priority: .userInitiated) { [db] in
             let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
             await MainActor.run {
-                // A newer navigation (drilled elsewhere, or backed out) happened while this
-                // query was in flight — applying it now would resurrect an abandoned screen.
+
                 guard gen == self.reloadGeneration else { return }
                 self.selectedGroup = group
                 if series.count == 1 {
@@ -489,8 +450,6 @@ final class LibraryViewModel: ObservableObject {
         }
         saveNavigationState()
     }
-
-    // MARK: - Bulk operations
 
     func toggleBulkMode() {
         bulkMode.toggle()
@@ -546,15 +505,12 @@ final class LibraryViewModel: ObservableObject {
         bulkMode = false
         reload()
         refreshDuplicates()
-        // Already recoverable via Settings ▸ Data ▸ View Trash… — this just saves the trip
-        // for the common case of "oops, wrong selection" noticed immediately.
+
         offerUndo("\(ids.count) comic\(ids.count == 1 ? "" : "s") deleted") { [weak self] in
             self?.db.restore(ids)
             self?.reload()
         }
     }
-
-    // MARK: - Scan / import
 
     func scan() {
         let path = libraryPath
@@ -584,7 +540,7 @@ final class LibraryViewModel: ObservableObject {
             for url in urls { LibraryScanner.shared.addSingle(url: url, libraryPath: path) }
             await self?.reload()
             await self?.refreshDuplicates()
-            // Prewarm only the newly imported comics — not the entire library
+
             let paths = urls.map(\.path)
             let newComics = DatabaseManager.shared.comics(withPaths: paths)
             if !newComics.isEmpty { ThumbnailCache.shared.prewarm(comics: newComics) }
@@ -598,8 +554,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // Post-scan diagnostics (Import Wizard) — only surfaces the banner's "Review" button when
-    // there's actually something to review; a clean library keeps today's plain scan banner.
     func refreshLibraryHealth() {
         Task.detached(priority: .utility) {
             let report = LibraryHealthAnalyzer.analyze()
@@ -612,16 +566,10 @@ final class LibraryViewModel: ObservableObject {
     func closeReader() { readerComic = nil }
 
     func clearLibrary(resetPreferences: Bool = false) {
-        // cancel() only flips a flag checked between files in the scan loop — it does not
-        // wait for the scan thread to stop, so a cancelled scan's final flushPending() can
-        // still be sitting on (or about to join) the scanner's serial queue. Clearing the DB
-        // here directly could race that tail write and have a few comics reappear right
-        // after "Clear Library" finishes. Routing the actual clear through the same queue
-        // guarantees it runs after any in-flight scan work, not concurrently with it.
+
         LibraryScanner.shared.cancel()
         isScanning = false
 
-        // UI resets immediately — none of this depends on the DB clear having happened yet.
         selectedComic = nil; selectedRun = nil; readerComic = nil
         selectedGroup = nil; selectedSeries = nil
         bulkMode = false; selectedComicIds.removeAll()
@@ -642,8 +590,6 @@ final class LibraryViewModel: ObservableObject {
             DispatchQueue.main.async { self.reload() }
         }
     }
-
-    // MARK: - File watcher
 
     func startWatcher() {
         let path = libraryPath
@@ -668,12 +614,6 @@ final class LibraryViewModel: ObservableObject {
 
     func restartWatcher() { watcher?.stop(); watcher = nil; startWatcher() }
 
-    // MARK: - App termination
-
-    /// Synchronous, best-effort cleanup run on app quit: stop watching the filesystem,
-    /// cancel any in-flight scan (and the `unar` subprocess it may be blocked on), and
-    /// checkpoint+close the database connection so nothing is left running or holding
-    /// a file handle once the process actually exits.
     func shutdown() {
         watcher?.stop()
         watcher = nil
@@ -689,8 +629,6 @@ final class LibraryViewModel: ObservableObject {
         restartWatcher()
         scan()
     }
-
-    // MARK: - Mutations
 
     func markAllRead() {
         db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
@@ -714,12 +652,7 @@ final class LibraryViewModel: ObservableObject {
         }
         comics = list
         db.reorderComics(orderedIds: list.map(\.id))
-        // reorderComics() writes real positions, but every sort order except .manual ignores
-        // the position column entirely and re-derives its own order live — so without this,
-        // a drag "worked" for exactly one frame and then silently reverted on the very next
-        // reload() (switching series and back, a scan completing, anything), which is
-        // indistinguishable from "doesn't stick" to whoever's dragging. Dragging an item is
-        // an unambiguous signal the user wants custom order, so switch to it automatically.
+
         if sortOrder != .manual { sortOrder = .manual }
     }
 
@@ -739,11 +672,6 @@ final class LibraryViewModel: ObservableObject {
                                orderedSeries: list.map(\.series))
     }
 
-    // Same pattern as moveSeriesGroup, one level up: reordering the character/collection
-    // cards before drilling into a specific group. Scoped to same-publisher moves only —
-    // characterGroups() can span multiple publishers when no publisher filter is active,
-    // and character_order's position is stored per-publisher, so a cross-publisher drag
-    // wouldn't have a coherent target position to land on.
     func moveCharacterGroup(from: DatabaseManager.CharacterGroup, to: DatabaseManager.CharacterGroup) {
         guard from.id != to.id, from.publisher == to.publisher else { return }
         var list = characterGroups
@@ -788,11 +716,6 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
-    // "Choose Existing Cover…" — picks from a comic already in the library (any comic,
-    // not just this group's own issues) rather than requiring an external image file, which
-    // was the only custom-cover option before this. Copies the comic's own rendered cover
-    // rather than pointing at it directly, so clearing that comic's own thumbnail cache
-    // later doesn't silently blank out this group's cover too.
     func setCharacterGroupCover(group: DatabaseManager.CharacterGroup, usingCoverOf comic: Comic) {
         let safe = "chargroup_\(group.publisher)_\(group.groupName)"
             .components(separatedBy: .init(charactersIn: "/:")).joined(separator: "_")
@@ -803,15 +726,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // Patches the comic in place (same approach as updateProgress below) instead of
-    // reload()'s full debounced SQL requery + resort of the whole filtered library — these
-    // four are the most frequently-tapped actions in the app (grid context menus, star
-    // ratings, detail pages), and with a large library reload() on every single tap was a
-    // visible stutter. When the current section's membership actually depends on the field
-    // being changed (Favorites/Reading List/Continue Reading), the comic is additionally
-    // removed from the in-memory list so it doesn't linger somewhere it should have
-    // disappeared from — every other section (Library, a publisher, a tag, a series) never
-    // filters on these fields, so a plain in-place update is already fully correct there.
     private func patchComicLocally(_ comicId: Int64, removeIfNoLongerVisible: Bool = false, _ mutate: (inout Comic) -> Void) {
         guard let idx = comics.firstIndex(where: { $0.id == comicId }) else { return }
         mutate(&comics[idx])
@@ -889,10 +803,7 @@ final class LibraryViewModel: ObservableObject {
     func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
         db.seriesNameCollides(oldName: oldName, publisher: publisher, newName: newName)
     }
-    // Same reasoning as moveComic: writing positions means nothing to a sort order that
-    // doesn't read them (every one except .manual re-derives its own order live), so a
-    // reorder from SeriesManagerView's issue list would otherwise silently vanish the next
-    // time the underlying grid reloads under whatever sort was active before the sheet opened.
+
     func reorderComics(orderedIds: [Int64]) {
         db.reorderComics(orderedIds: orderedIds)
         if sortOrder != .manual { sortOrder = .manual }
@@ -902,12 +813,6 @@ final class LibraryViewModel: ObservableObject {
     func createRun(title: String, description: String) -> Int64 { db.createRun(title: title, description: description) }
     func deleteRun(_ runId: Int64) { db.deleteRun(runId) }
 
-    // Delete Run has no confirmation dialog in the UI (a plain destructive button in a row
-    // of other buttons, unlike Clear Library which is gated behind one) and deleteRun() is a
-    // hard DELETE that cascades run_items — previously a single misclick permanently lost an
-    // entire curated reading order with zero recovery path. Snapshots everything needed to
-    // fully recreate the run before deleting, offered via the same undo-toast bulkDelete/
-    // delete(_:) use.
     func deleteRunWithUndo(_ run: Run) {
         let items = db.runItems(runId: run.id)
         db.deleteRun(run.id)
@@ -925,8 +830,7 @@ final class LibraryViewModel: ObservableObject {
                 self.db.setRunCover(runId: newId, imagePath: cover)
             }
             self.db.addToRun(runId: newId, comicIds: items.map(\.comic.id))
-            // addToRun doesn't return the newly-created run_items ids, so notes have to be
-            // matched back up by comic id after the fact via a second fetch.
+
             let newItems = self.db.runItems(runId: newId)
             for item in items where !item.notes.isEmpty {
                 if let match = newItems.first(where: { $0.comic.id == item.comic.id }) {
@@ -940,10 +844,6 @@ final class LibraryViewModel: ObservableObject {
     func addToRun(runId: Int64, comicIds: [Int64]) { db.addToRun(runId: runId, comicIds: comicIds) }
     func removeFromRun(runId: Int64, comicIds: [Int64]) { db.removeFromRun(runId: runId, comicIds: comicIds) }
 
-    // Re-adding puts the item(s) back at the end of the run rather than their exact original
-    // position — full position-preserving undo would mean snapshotting every item in the run,
-    // not just the ones removed, which is disproportionate for what's meant to be a quick
-    // "oops" recovery rather than a true undo stack.
     func removeFromRunWithUndo(runId: Int64, items: [RunItem], onRestored: @escaping () -> Void = {}) {
         let ids = items.map(\.comic.id)
         db.removeFromRun(runId: runId, comicIds: ids)
@@ -970,8 +870,6 @@ final class LibraryViewModel: ObservableObject {
     }
     func clearRunCover(runId: Int64) { db.clearRunCover(runId: runId) }
 
-    // "Choose Existing Cover…" for a run — picks any comic already in the library instead of
-    // requiring an external image file.
     func setRunCover(runId: Int64, usingCoverOf comic: Comic, onDone: @escaping () -> Void = {}) {
         Task.detached(priority: .userInitiated) { [db] in
             guard let path = ThumbnailCache.shared.saveCoverFromComic(comic, destinationName: "run_\(runId)") else { return }
@@ -985,10 +883,7 @@ final class LibraryViewModel: ObservableObject {
         db.setSeriesCoverImage(series: series, publisher: publisher, imagePath: path)
         reload()
     }
-    // "Choose Existing Cover…" for a series — unlike the existing per-issue "Set as Series
-    // Cover" (ComicCard.swift, restricted to that comic's own series), this can pick any
-    // comic in the whole library, since series_covers.comic_id was never actually restricted
-    // to same-series in the schema — GroupCard already resolves any comic id to a thumbnail.
+
     func setSeriesCover(series: String, publisher: String, usingCoverOf comic: Comic) {
         db.setSeriesCover(series: series, publisher: publisher, comicId: comic.id)
         reload()
@@ -1019,8 +914,6 @@ final class LibraryViewModel: ObservableObject {
         if selectedComic?.id == comic.id { selectedComic?.progress = page }
     }
 
-    // MARK: - Spotlight
-
     func indexSpotlight() {
         Task.detached(priority: .background) {
             let all = DatabaseManager.shared.allComics()
@@ -1039,11 +932,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // A scan runs silently on every launch now (not just when the user hits the Scan button),
-    // so without some in-app feedback a real reorganization — files renamed, moved, or gone
-    // missing since last launch — would be invisible unless the user happened to notice the
-    // comic count changed. Only surfaced when there's something worth reporting; a no-op scan
-    // (the common case) stays silent rather than showing "0 added, 0 removed" every launch.
     private func presentScanReport(_ state: LibraryScanner.ScanState) {
         guard state.error == nil, !state.cancelled else { return }
         guard state.added > 0 || state.removed > 0 || state.recovered > 0 || state.stillCorrupted > 0 else { return }
@@ -1058,8 +946,6 @@ final class LibraryViewModel: ObservableObject {
         scanReportDismissTask?.cancel()
         showScanReport = false
     }
-
-    // MARK: - Scan notifications
 
     func notifyScanComplete(added: Int) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in

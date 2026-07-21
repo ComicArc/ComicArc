@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Data
-
 private enum TStep: Int, CaseIterable {
     case welcome, library, browse, openComic, reader, runs, settings, done
 }
@@ -10,15 +8,11 @@ private struct TStepInfo {
     let icon:     String
     let title:    String
     let body:     String
-    let spot:     SpotRegion?   // nil = no spotlight, show centered card
-    let above:    Bool          // callout above spotlight (true) or below (false)
+    let spot:     SpotRegion?
+    let above:    Bool
 }
 
-// Spotlight regions use a mix of fixed pixel values (for the nav bar, which is 47px)
-// and fractional width so they work at any window size.
-// Resolved in resolved(_:in:) which interprets x/width as fractions of window width,
-// y/height as pixel values when navH is used directly.
-private let navH: CGFloat = 48   // nav bar + 1px divider
+private let navH: CGFloat = 48
 
 private let steps: [TStepInfo] = [
     TStepInfo(icon: "diamond.fill",
@@ -63,10 +57,10 @@ private let steps: [TStepInfo] = [
 ]
 
 private enum SpotRegion {
-    case content        // everything below the nav bar
-    case navCenter      // middle portion of nav bar (tabs)
-    case navRuns        // Runs tab button area
-    case navSettings    // Settings tab button area
+    case content
+    case navCenter
+    case navRuns
+    case navSettings
 
     func rect(in size: CGSize) -> CGRect {
         switch self {
@@ -76,20 +70,18 @@ private enum SpotRegion {
             let w = size.width * 0.56
             return CGRect(x: (size.width - w) / 2, y: 0, width: w, height: navH)
         case .navRuns:
-            // Runs is the 2nd tab; tabs are centered. Approximate 1/6 of width from center-left.
+
             let tabW: CGFloat = size.width * 0.10
             let startX = size.width * 0.335
             return CGRect(x: startX, y: 0, width: tabW, height: navH)
         case .navSettings:
-            // Settings is the last tab (rightmost of the centered tabs)
+
             let tabW: CGFloat = size.width * 0.10
             let startX = size.width * 0.62
             return CGRect(x: startX, y: 0, width: tabW, height: navH)
         }
     }
 }
-
-// MARK: - TutorialView
 
 struct TutorialView: View {
     let onDismiss: () -> Void
@@ -104,19 +96,17 @@ struct TutorialView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // Spotlight overlay
+
                 spotlightLayer(geo: geo)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
-                // Animated callout
                 if info.spot != nil {
                     calloutPopup(geo: geo)
                 } else {
                     centeredCard(geo: geo)
                 }
 
-                // Skip always top-right
                 VStack {
                     HStack {
                         Spacer()
@@ -133,8 +123,6 @@ struct TutorialView: View {
         .onKeyPress(.escape) { onDismiss(); return .handled }
     }
 
-    // MARK: - Spotlight canvas
-
     private func spotlightLayer(geo: GeometryProxy) -> some View {
         Canvas { ctx, size in
             var path = Path(CGRect(origin: .zero, size: size))
@@ -150,8 +138,6 @@ struct TutorialView: View {
         }
         .animation(.easeInOut(duration: 0.35), value: currentStep.rawValue)
     }
-
-    // MARK: - Callout (for spotlight steps)
 
     private func calloutPopup(geo: GeometryProxy) -> some View {
         let size = geo.size
@@ -177,8 +163,6 @@ struct TutorialView: View {
         )
     }
 
-    // MARK: - Centered card (for welcome/done steps)
-
     private func centeredCard(geo: GeometryProxy) -> some View {
         VStack {
             Spacer()
@@ -190,8 +174,6 @@ struct TutorialView: View {
             Spacer()
         }
     }
-
-    // MARK: - Shared card content
 
     private var calloutCard: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -213,7 +195,7 @@ struct TutorialView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
-                // Progress dots
+
                 HStack(spacing: 6) {
                     ForEach(TStep.allCases, id: \.rawValue) { s in
                         let active = s == currentStep
@@ -245,8 +227,6 @@ struct TutorialView: View {
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(Design.brandGold.opacity(0.35), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 8)
     }
-
-    // MARK: - Helpers
 
     private func advance(by delta: Int) {
         let next = currentStep.rawValue + delta

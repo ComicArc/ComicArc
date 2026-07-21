@@ -1,9 +1,5 @@
 import SwiftUI
 
-// Manual cross-series legacy renumbering (e.g. Amazing Spider-Man #700 -> Superior Spider-Man
-// #1-31 -> Amazing Spider-Man (2014) #1 as one continuous sequence). No auto-detection — there's
-// no external metadata source in this app to safely match series continuations, so this is an
-// explicit, reversible link the user makes themselves.
 struct SeriesLinkPickerView: View {
     let childSeries: String
     let childPublisher: String

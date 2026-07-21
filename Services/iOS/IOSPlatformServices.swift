@@ -4,10 +4,6 @@ import UniformTypeIdentifiers
 
 private let libraryFolderBookmarkKey = "libraryFolderBookmark"
 
-/// Re-resolves the persisted library folder's security-scoped bookmark and starts access.
-/// Must run once per process launch — iOS revokes security-scope access on every relaunch,
-/// even though the bookmark itself (and the folder path derived from it) stays valid.
-/// Returns the resolved folder URL so the caller can refresh `libraryPath` if it moved.
 @discardableResult
 func resolveLibraryFolderBookmark() -> URL? {
     guard let data = UserDefaults.standard.data(forKey: libraryFolderBookmarkKey) else { return nil }
@@ -20,9 +16,6 @@ func resolveLibraryFolderBookmark() -> URL? {
     return url
 }
 
-// Keeps document-picker delegates alive — UIDocumentPickerViewController.delegate is weak,
-// and these pickers are presented from plain completion-handler calls with no SwiftUI view
-// to own the delegate's lifetime.
 private final class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
     let onPick: ([URL]) -> Void
     let onCancel: () -> Void
@@ -64,8 +57,6 @@ struct IOSFileService: FileServiceProtocol {
         present(picker, delegate: DocumentPickerDelegate(onPick: completion, onCancel: { completion([]) }))
     }
 
-    /// Picks the library's root folder and persists a security-scoped bookmark so it can be
-    /// re-accessed (and re-scanned) on every future launch, not just this session.
     func pickFolder(completion: @escaping (URL?) -> Void) {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
         let delegate = DocumentPickerDelegate(onPick: { urls in
@@ -80,8 +71,6 @@ struct IOSFileService: FileServiceProtocol {
         present(picker, delegate: delegate)
     }
 
-    /// No iOS equivalent of NSSavePanel's "give me a destination, I'll write to it" — hand back
-    /// a private temp file the caller can write to immediately; `shareFile` exports it afterward.
     func pickSaveDestination(filename: String, completion: @escaping (URL?) -> Void) {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: tmp)

@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Top-level browser (routes correct level)
-
 struct LibraryBrowserView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @FocusState private var focused: Bool
@@ -48,8 +46,6 @@ struct LibraryBrowserView: View {
         return .handled
     }
 }
-
-// MARK: - Filter bar (heading + sort + bulk bar)
 
 struct LibraryFilterBar: View {
     @EnvironmentObject var vm: LibraryViewModel
@@ -121,8 +117,6 @@ struct LibraryFilterBar: View {
         .background(Design.navBackground)
     }
 
-    // MARK: - Heading
-
     private var headingTitle: String {
         if let tag = vm.activeTag { return "#\(tag)" }
         switch vm.selectedSection {
@@ -135,8 +129,6 @@ struct LibraryFilterBar: View {
             return "Library"
         }
     }
-
-    // MARK: - Bulk bar
 
     private var bulkBar: some View {
         HStack(spacing: 8) {
@@ -206,8 +198,6 @@ struct LibraryFilterBar: View {
         .background(Design.navBackground)
     }
 }
-
-// MARK: - Continue Reading shelf
 
 struct ContinueReadingShelf: View {
     @EnvironmentObject var vm: LibraryViewModel
@@ -296,8 +286,6 @@ struct ShelfCard: View {
     }
 }
 
-// MARK: - Character group grid
-
 struct CharacterGroupGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var draggedGroup: DatabaseManager.CharacterGroup?
@@ -379,8 +367,6 @@ struct CharacterGroupGridView: View {
     }
 }
 
-// MARK: - Series group grid
-
 struct SeriesGroupGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var draggedSeries: String?
@@ -426,7 +412,6 @@ struct SeriesGroupGridView: View {
         }
     }
 
-    // Reached when every series under this group has been removed/renamed/moved elsewhere.
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "square.stack.3d.up.slash")
@@ -442,8 +427,6 @@ struct SeriesGroupGridView: View {
         .padding(40)
     }
 }
-
-// MARK: - Character / series group cards
 
 struct CharacterGroupCard: View {
     let group: DatabaseManager.CharacterGroup
@@ -512,10 +495,7 @@ struct SeriesGroupCard: View {
                 }
             }
             Divider()
-            // "Choose Existing Cover…" can pick any comic in the whole library (not just
-            // this series' own issues, unlike "Set Cover" in Manage Series…); "Custom
-            // Image…" is the fallback for a cover that isn't any comic at all — a promo
-            // poster, fan art, whatever's on disk.
+
             Button("Choose Existing Cover…") { showCoverPicker = true }
             Button("Custom Image…") { pickCoverImage() }
             if group.coverImagePath != nil {
@@ -631,7 +611,7 @@ private struct GroupCard: View {
     }
 
     private func loadThumbnail() {
-        // Custom image path takes priority over derived comic cover
+
         if let path = coverImagePath, let img = PlatformImage.fromFile(path) {
             thumbnail = img
             return
@@ -648,8 +628,6 @@ private struct GroupCard: View {
         }
     }
 }
-
-// MARK: - Issue grid (leaf level)
 
 struct LibraryGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
@@ -685,8 +663,7 @@ struct LibraryGridView: View {
                             else           { vm.selectedComic = comic }
                         }
                         .onDrag {
-                            // moveComic() switches to Custom sort itself, so drag works
-                            // regardless of the currently active sort order.
+
                             draggedId = comic.id
                             return NSItemProvider(object: NSString(string: String(comic.id)))
                         }
@@ -829,8 +806,6 @@ struct LibraryGridView: View {
         if !urls.isEmpty { vm.importFiles(urls) }
     }
 }
-
-// MARK: - Density picker
 
 struct DensityPicker: View {
     @AppStorage("gridDensity") private var densityRaw = GridDensity.regular.rawValue

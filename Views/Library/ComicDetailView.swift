@@ -1,7 +1,5 @@
 import SwiftUI
 
-// MARK: - Bulk reassign sheet
-
 struct BulkReassignView: View {
     let count: Int
     let onApply: (_ series: String?, _ publisher: String?) -> Void
@@ -53,8 +51,6 @@ struct BulkReassignView: View {
         .frame(width: 440)
     }
 }
-
-// MARK: - Edit comic sheet
 
 struct EditComicView: View {
     @Binding var comic: Comic
@@ -134,8 +130,6 @@ struct EditComicView: View {
     }
 }
 
-// MARK: - Shelf chip
-
 struct ShelfChip: View {
     let shelf:    Shelf
     let isOn:     Bool
@@ -155,8 +149,6 @@ struct ShelfChip: View {
         .buttonStyle(.plain)
     }
 }
-
-// MARK: - FlowLayout
 
 struct FlowLayout<T: Identifiable, Content: View>: View {
     let items:   [T]
@@ -192,7 +184,7 @@ struct FlowLayout<T: Identifiable, Content: View>: View {
             else if let s = item as? Shelf { name = s.name }
             else { name = "" }
             let textW  = (name as NSString).size(withAttributes: [.font: font]).width
-            let itemW  = textW + 36 + spacing  // padding (8+8) + close button (~12) + gap
+            let itemW  = textW + 36 + spacing
             if rowWidth + itemW > width && !rows.last!.isEmpty {
                 rows.append([])
                 rowWidth = 0

@@ -51,6 +51,7 @@
 		IB0000000000000000000032 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* BackupService.swift */; };
 		B10000000000000000000013 /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
 		B10000000000000000000014 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
+		B10000000000000000000032 /* ComicPageCoverPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* ComicPageCoverPicker.swift */; };
 		F10000000000000000000001 /* ComicArcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* ComicArcTests.swift */; };
 		F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* ReadingOrderEngineTests.swift */; };
 		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
@@ -93,6 +94,7 @@
 		IB000000000000000000001B /* EnvironmentServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* EnvironmentServices.swift */; };
 		IB000000000000000000001C /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
 		IB000000000000000000001D /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
+		IB0000000000000000000032 /* ComicPageCoverPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* ComicPageCoverPicker.swift */; };
 		IB000000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
 		IB000000000000000000001F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* PrivacyInfo.xcprivacy */; };
 		B00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
@@ -161,6 +163,7 @@
 		A10000000000000000000031 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* ReadingSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionService.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		A10000000000000000000032 /* ComicPageCoverPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicPageCoverPicker.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* ComicArcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcTests.swift; sourceTree = "<group>"; };
 		F1000000000000000000000D /* ReadingOrderEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngineTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000004 /* ComicArcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComicArcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -333,6 +336,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000014 /* SharedComponents.swift */,
+				A10000000000000000000032 /* ComicPageCoverPicker.swift */,
 			);
 			name = Shared;
 			path = Shared;
@@ -585,6 +589,7 @@
 				B10000000000000000000012 /* MacPlatformServices.swift in Sources */,
 				B10000000000000000000013 /* ReadingSessionService.swift in Sources */,
 				B10000000000000000000014 /* SharedComponents.swift in Sources */,
+				B10000000000000000000032 /* ComicPageCoverPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -642,6 +647,7 @@
 				IB000000000000000000001B /* EnvironmentServices.swift in Sources */,
 				IB000000000000000000001C /* ReadingSessionService.swift in Sources */,
 				IB000000000000000000001D /* SharedComponents.swift in Sources */,
+				IB0000000000000000000032 /* ComicPageCoverPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

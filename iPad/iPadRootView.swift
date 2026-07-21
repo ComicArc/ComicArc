@@ -1,8 +1,6 @@
 #if os(iOS)
 import SwiftUI
 
-// MARK: - iPad root navigation
-
 struct iPadRootView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var selectedComic: Comic?
@@ -22,17 +20,12 @@ struct iPadRootView: View {
             .navigationSplitViewStyle(.balanced)
             .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library…")
             .onChange(of: vm.destination) { selectedComic = nil }
-            // Single shared reader-presentation point (matches Mac's ContentView) so every path
-            // that opens a comic — the detail column's Read button, a grid tile's context menu —
-            // goes through the same vm.readerComic instead of each needing its own local state.
+
             .fullScreenCover(item: $vm.readerComic) { comic in
                 iPadReaderView(comic: comic, onClose: { vm.closeReader() })
                     .environmentObject(vm)
             }
 
-            // Matches Mac ContentView's undo toast — same vm.pendingUndo drives both, since
-            // delete/removeFromRun/deleteRun undo wiring lives in the shared LibraryViewModel
-            // and RunsView (both platforms reuse RunsView's components).
             if let action = vm.pendingUndo {
                 VStack {
                     Spacer()
@@ -43,9 +36,6 @@ struct iPadRootView: View {
                 .allowsHitTesting(true)
             }
 
-            // Matches Mac ContentView's scan-report banner — this had no iPad presence at
-            // all before (Mac-only), even though the scan itself and vm.showScanReport are
-            // shared. Anchored to the top since the undo toast already owns the bottom.
             if vm.showScanReport {
                 VStack {
                     iPadScanReportBanner
@@ -110,8 +100,6 @@ struct iPadRootView: View {
     }
 }
 
-// MARK: - Sidebar
-
 private struct iPadSidebar: View {
     @EnvironmentObject var vm: LibraryViewModel
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
@@ -135,10 +123,7 @@ private struct iPadSidebar: View {
             }
             if !vm.publishers.isEmpty {
                 Section("Publishers") {
-                    // onDrag/onDrop (long-press-and-drag) rather than .onMove: .onMove's drag
-                    // handles only appear in List edit mode, which this sidebar doesn't have
-                    // and adding an Edit button just for this felt heavier than reusing the
-                    // same gesture already used for character/series/run reordering elsewhere.
+
                     ForEach(vm.publishers, id: \.self) { pub in
                         Label(pub, systemImage: "building.columns")
                             .foregroundStyle(Design.publisherColor(pub))
@@ -223,8 +208,6 @@ private struct iPadSidebar: View {
     }
 }
 
-// MARK: - Content column
-
 private struct iPadContentColumn: View {
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
@@ -280,8 +263,6 @@ private struct iPadContentColumn: View {
         }
     }
 }
-
-// MARK: - Detail column
 
 private struct iPadDetailColumn: View {
     let comic: Comic?
@@ -347,13 +328,11 @@ private struct iPadDetailColumn: View {
     }
 }
 
-// MARK: - Comic grid
-
 private struct iPadComicGrid: View {
     let comics: [Comic]
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
-    // Drag-reorder here matches Mac's LibraryGridView; same gesture works via long-press on iOS.
+
     @State private var draggedId: Int64?
     @State private var dropTargetId: Int64?
 
@@ -457,8 +436,6 @@ private struct iPadComicTile: View {
         .accessibilityAddTraits(.isButton)
     }
 }
-
-// MARK: - Comic hero + meta
 
 private struct iPadComicHero: View {
     let comic: Comic
@@ -593,8 +570,6 @@ private struct iPadComicMeta: View {
     }
 }
 
-// MARK: - Import button (UIDocumentPicker)
-
 private struct iPadImportButton: View {
     @State private var showPicker = false
     @EnvironmentObject var vm: LibraryViewModel
@@ -611,8 +586,6 @@ private struct iPadImportButton: View {
         }
     }
 }
-
-// MARK: - Settings for iPad
 
 struct iPadSettingsView: View {
     @EnvironmentObject var vm: LibraryViewModel

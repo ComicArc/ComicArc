@@ -15,6 +15,7 @@ struct SeriesManagerView: View {
     @State private var showMergeConfirm = false
     @State private var showOnlyFlagged  = false
     @State private var showSeriesLinkPicker = false
+    @State private var pagePickerIssue: Comic? = nil
 
     private var flaggedCount: Int { issues.filter { ($0.readingOrderConfidence ?? 100) < 85 }.count }
     private var visibleIssues: [Comic] {
@@ -66,9 +67,13 @@ struct SeriesManagerView: View {
         .background(Design.appBackground)
         .task { await loadIssues() }
         .onChange(of: coverComicId) { _, _ in vm.reload() }
+        .sheet(item: $pagePickerIssue) { issue in
+            ComicPageCoverPicker(comic: issue) { image in
+                ThumbnailCache.shared.setCustomCover(comicId: issue.id, image: image)
+                Task { await loadIssues() }
+            }
+        }
     }
-
-    // MARK: - Rename
 
     private var renameSection: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -104,8 +109,6 @@ struct SeriesManagerView: View {
         }
         .padding(24)
     }
-
-    // MARK: - Issues list
 
     private var issuesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -248,14 +251,16 @@ struct SeriesManagerView: View {
                     .buttonStyle(.bordered).controlSize(.mini)
                 }
 
-                Button("Custom…") { changeCover(for: issue) }
-                    .buttonStyle(.bordered).controlSize(.mini).foregroundStyle(.secondary)
+                Menu("Custom…") {
+                    Button("Choose a Page From This Issue…") { pagePickerIssue = issue }
+                    Button("Choose Image File…") { changeCover(for: issue) }
+                }
+                .menuStyle(.borderlessButton).controlSize(.mini).fixedSize()
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
     }
-
-    // MARK: - Helpers
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
@@ -268,8 +273,6 @@ struct SeriesManagerView: View {
     private var sectionDivider: some View {
         Rectangle().fill(Design.borderColor).frame(height: 1)
     }
-
-    // MARK: - Actions
 
     private func loadIssues() async {
         let ser = series; let pub = publisher ?? ""
@@ -345,8 +348,6 @@ struct SeriesManagerView: View {
         }
     }
 }
-
-// MARK: - Small thumbnail for the issues list
 
 private struct IssueThumbnail: View {
     let comic: Comic

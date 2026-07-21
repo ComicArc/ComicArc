@@ -1,14 +1,12 @@
 import SwiftUI
 import Foundation
 
-// MARK: - Platform image type
-
 #if os(macOS)
 import AppKit
 public typealias PlatformImage = NSImage
 
 extension NSImage {
-    /// Resize maintaining aspect ratio to fit within `target`.
+
     static func resized(source: NSImage, to target: CGSize) -> NSImage? {
         guard let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let src = CGSize(width: cg.width, height: cg.height)
@@ -33,7 +31,6 @@ extension NSImage {
         return rep.representation(using: .jpeg, properties: [.compressionFactor: compressionFactor])
     }
 
-    /// Approximate byte size for NSCache cost tracking (width × height × 4 bytes ARGB).
     var byteSize: Int {
         guard let cg = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return 0 }
         return cg.width * cg.height * 4
@@ -76,7 +73,6 @@ extension UIImage {
         jpegData(compressionQuality: compressionFactor)
     }
 
-    /// Approximate byte size for NSCache cost tracking (width × height × 4 bytes ARGB).
     var byteSize: Int { Int(size.width * scale) * Int(size.height * scale) * 4 }
 
     static func renderPDFPage(_ page: CGPDFPage, scale: CGFloat = 1.5) -> UIImage? {
@@ -87,7 +83,7 @@ extension UIImage {
             let cgCtx = ctx.cgContext
             UIColor.white.setFill()
             UIRectFill(CGRect(origin: .zero, size: size))
-            // Flip coordinate system: iOS origin is bottom-left for CoreGraphics
+
             cgCtx.translateBy(x: 0, y: size.height)
             cgCtx.scaleBy(x: scale, y: -scale)
             cgCtx.drawPDFPage(page)
@@ -95,8 +91,6 @@ extension UIImage {
     }
 }
 #endif
-
-// MARK: - Cross-platform SwiftUI Image initializer
 
 extension Image {
     init(platformImage: PlatformImage) {
@@ -107,4 +101,3 @@ extension Image {
         #endif
     }
 }
-

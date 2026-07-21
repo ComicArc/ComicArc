@@ -1,17 +1,5 @@
 import Foundation
 
-// MARK: - Sidebar customization (Discover section: Reading Orders / Stats / History / Duplicates)
-//
-// Publishers and Tags are dynamic, per-library data — reordering those manually wouldn't mean
-// much since their membership changes as the library changes. The "Discover" section, though,
-// is a fixed small set of destinations, exactly the kind of thing worth letting a user hide or
-// reorder to match how they actually use the app (matches Finder's toolbar customization, just
-// for the sidebar).
-//
-// Stored as comma-joined raw-value strings (not an array/set) specifically so both the sidebar
-// (main window) and the customization UI (Settings window — a separate SwiftUI scene on macOS)
-// can back onto the same values via plain @AppStorage(String) and stay in sync automatically;
-// @AppStorage has no built-in support for [String]/Set<String>.
 enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
     case runs, stats, history, duplicates, orderHealth
 

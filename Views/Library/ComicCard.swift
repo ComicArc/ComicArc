@@ -92,8 +92,6 @@ struct ComicCard: View {
         }
     }
 
-    // MARK: - Sub-views
-
     @ViewBuilder
     private var cover: some View {
         ZStack {

@@ -13,12 +13,6 @@ final class LibraryScanner: @unchecked Sendable {
     private let db = DatabaseManager.shared
     private let queue = DispatchQueue(label: "com.comicarc.scanner", qos: .utility)
 
-    // CBR is extracted via the `unar` command-line tool (macOS only) — it isn't readable
-    // in the iOS sandbox, so folder scanning must skip it there rather than import comics
-    // that will always show 0 pages. On macOS it's additionally gated by the "CBR Support"
-    // Settings toggle (default true — absent/unset means "on", matching the toggle's own
-    // @AppStorage default) so a user without `unar` installed can turn off CBR scanning
-    // instead of having every CBR file sit at 0 pages with no explanation.
     static var supportedExtensions: Set<String> {
         #if os(macOS)
         let cbrEnabled = UserDefaults.standard.object(forKey: "cbrEnabled") == nil
@@ -43,12 +37,6 @@ final class LibraryScanner: @unchecked Sendable {
     private func setState(_ block: (inout ScanState) -> Void) { stateLock.lock(); defer { stateLock.unlock() }; block(&_state) }
     func cancel() { setState { $0.cancelled = true } }
 
-    /// Runs `block` after anything already queued on the scanner's serial queue (an in-flight
-    /// scan's remaining chunks, or another addSingle()) has finished. cancel() only flips a
-    /// flag checked between files — it does not wait for the scan to actually stop, so a
-    /// cancelled scan's final flushPending() can still land on the DB queue after the caller
-    /// thinks cancellation is complete. Used by "Clear Library" so it can't run concurrently
-    /// with a scan's tail end and have a few last comics reappear right after clearing.
     func runAfterCurrentWork(_ block: @escaping () -> Void) {
         queue.async(execute: block)
     }
@@ -63,7 +51,6 @@ final class LibraryScanner: @unchecked Sendable {
 
         let fm = FileManager.default
 
-        // Bail early if the volume isn't reachable, before any DB writes.
         guard fm.fileExists(atPath: libraryPath),
               let enumerator = fm.enumerator(
                 at: URL(fileURLWithPath: libraryPath),
@@ -86,8 +73,6 @@ final class LibraryScanner: @unchecked Sendable {
         var knownHashes = db.knownHashes()
         var added = 0
 
-        // Batch inserts into chunks and commit each chunk as one transaction.
-        // One transaction per file = O(n) fsyncs; one transaction per chunk = O(n/chunkSize).
         let chunkSize = 100
         var pending: [DatabaseManager.ComicInsert] = []
 
@@ -129,16 +114,12 @@ final class LibraryScanner: @unchecked Sendable {
         }
         flushPending()
 
-        // Stale-path removal: only run if the library volume is still accessible.
-        // Skipping on disconnect prevents mass soft-deletion when a drive unmounts temporarily.
         if !state.cancelled && fm.fileExists(atPath: libraryPath) {
             let stale = db.stalePaths().filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
             if !stale.isEmpty { db.softDelete(stale) }
             setState { $0.removed = stale.count }
         }
 
-        // Recovery pass: comics that were inserted with page_count=0 (corrupted at import time)
-        // get a second chance now that the file may be readable.
         if !state.cancelled {
             var recovered = 0
             var stillCorrupted = 0
@@ -151,10 +132,6 @@ final class LibraryScanner: @unchecked Sendable {
             setState { $0.recovered = recovered; $0.stillCorrupted = stillCorrupted }
         }
 
-        // Newly-inserted comics above start with position = NULL (seeded only at next app
-        // launch otherwise — see seedMissingPositions' doc comment); seed them now so any new
-        // annual/special just added gets a real position for the chronological pass below to
-        // move, and so custom-sort views don't fall back to raw insertion order in the meantime.
         if !state.cancelled {
             db.seedMissingPositions()
             db.positionSpecialsChronologically()
@@ -165,13 +142,6 @@ final class LibraryScanner: @unchecked Sendable {
         onProgress(state)
     }
 
-    // Serialized on `queue` — the same queue full scans run on — so the
-    // check-then-insert below can't race against another addSingle() call or an in-flight
-    // scan. Without this, two near-simultaneous imports of the same file (e.g. a double
-    // drag-drop, or a manual import racing the file watcher's own onAdded for that same
-    // file) could both pass the "not already known" check before either had inserted,
-    // producing two DB rows for one physical comic — file_hash has no uniqueness
-    // constraint, so nothing else would have caught it.
     func addSingle(url: URL, libraryPath: String) {
         queue.sync {
             let fp = url.path
@@ -197,17 +167,6 @@ final class LibraryScanner: @unchecked Sendable {
         if !stale.isEmpty { db.softDelete(stale) }
     }
 
-    // MARK: - File hash
-
-    // Used to detect "this file moved" (same hash, different path) during a rescan, so a
-    // moved/renamed comic doesn't get treated as deleted+re-added and lose its progress,
-    // rating, tags, etc. Hashing only a 64KB prefix (as this used to) is cheap but real
-    // comic libraries commonly contain files that share tooling-generated headers — an
-    // identical embedded cover/ComicInfo.xml prefix from the same scan batch is enough to
-    // collide two genuinely different issues onto the same hash. Folding in the total file
-    // size and a chunk from near the end costs one extra seek and stays cheap even for a
-    // library with tens of thousands of files, while making an accidental collision between
-    // two different comics implausible.
     private func fileHash(_ path: String) -> String? {
         guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
         defer { fh.closeFile() }
@@ -223,8 +182,6 @@ final class LibraryScanner: @unchecked Sendable {
         hasher.update(data: tail)
         return hasher.finalize().compactMap { String(format: "%02x", $0) }.joined()
     }
-
-    // MARK: - Page count
 
     func pageCount(_ path: String) -> Int {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
@@ -259,17 +216,6 @@ final class LibraryScanner: @unchecked Sendable {
     private let cbrListingLock = NSLock()
     private var cbrListingCache: [String: [String]] = [:]
 
-    // Was 50MB, added earlier as a guess to guard against a mislabeled/malicious oversized
-    // archive hanging the scan queue. That guess was wrong and broke real comics: 40 of 315
-    // CBRs in a real test library (legitimate scanned trade-paperback collections, 100MB-1GB+)
-    // were silently refusing to open — cbrImageListing returned [] for anything over the cap,
-    // so the reader showed nothing with no error. Measured directly: `lsar` lists a 1GB RAR's
-    // contents in ~0.05s and `unar` extracts a single page from it in ~0.1s, both regardless
-    // of total archive size — RAR's central directory makes both operations effectively
-    // size-independent, so a byte-size gate was solving a problem that doesn't exist for this
-    // format while actively blocking large (but completely normal) collected volumes. Kept as
-    // a much more generous backstop — this is now only a sanity bound against something
-    // truly pathological (a multi-terabyte file renamed to .cbr), not a real-world limit.
     private static let maxCBRSizeBytes: UInt64 = 5 * 1024 * 1024 * 1024
 
     private func cbrImageListing(_ path: String) -> [String] {
@@ -292,8 +238,6 @@ final class LibraryScanner: @unchecked Sendable {
     }
     #endif
 
-    // MARK: - Metadata parsing
-
     private struct ComicMeta {
         var title: String; var publisher: String; var character: String?
         var series: String; var issueNumber: String?; var writer: String?
@@ -313,17 +257,10 @@ final class LibraryScanner: @unchecked Sendable {
         if let fc = folderCharacter { character = fc }
         else if let c = ci["Characters"], isCleanCharacterName(c) { character = c }
         else { character = nil }
-        // Filename wins over embedded ComicInfo.xml, same as every other field here (folder
-        // structure is the source of truth, ComicInfo.xml is the fallback — see README).
-        // Real-world libraries mix legacy and current numbering: a file renamed/organized as
-        // "...#442" can still carry an embedded <Number>1</Number> left over from whatever
-        // catalog it was scraped from, which — if trusted — collides with the real issue #1
-        // and breaks reading order for the whole series.
+
         let issueNum = extractIssueNumber(from: filename) ?? ci["IssueNumber"]
         let title = filename
-        // Month is only meaningful alongside a year (a bare "Month" with no "Year" can't be
-        // placed on a timeline), and only trusted when in the valid 1-12 range some ComicInfo.xml
-        // writers don't bother validating.
+
         let year = ci["Year"].flatMap(Int.init)
         let month = year != nil ? ci["Month"].flatMap(Int.init).flatMap { (1...12).contains($0) ? $0 : nil } : nil
         let day = month != nil ? ci["Day"].flatMap(Int.init).flatMap { (1...31).contains($0) ? $0 : nil } : nil
@@ -339,10 +276,7 @@ final class LibraryScanner: @unchecked Sendable {
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
         let libURL = URL(fileURLWithPath: libraryPath).standardized
-        // A trailing separator on the prefix is required: without it, "/Comics" would
-        // hasPrefix-match a sibling folder like "/Comics Backup" or "/ComicsOld", walking
-        // it as though it were inside the library and inventing bogus publisher/series
-        // names from a folder tree the user never configured.
+
         let libPrefix = libURL.path.hasSuffix("/") ? libURL.path : libURL.path + "/"
         let dirURL = url.standardized.deletingLastPathComponent()
         var folders: [String] = []
@@ -364,11 +298,6 @@ final class LibraryScanner: @unchecked Sendable {
         !name.contains(",") && !name.contains("[") && !name.contains("(") && name.count <= 60
     }
 
-    /// Recomputes file_hash for every comic using the current fileHash() algorithm. Needed
-    /// once after fileHash()'s formula changes (e.g. this one now folds in file size and a
-    /// tail chunk, not just a 64KB prefix) — otherwise "detect a moved/renamed file" silently
-    /// stops working for every comic already in the library, since a freshly-computed hash
-    /// would never match what's stored from before the change.
     func rehashAll() {
         let comics = DatabaseManager.shared.allComicPaths()
         for (id, path) in comics {
@@ -437,8 +366,6 @@ final class LibraryScanner: @unchecked Sendable {
 
     private func normalizeSeriesName(_ raw: String) -> String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    // MARK: - Shell helpers (macOS only)
-
     #if os(macOS)
     private let whichLock = NSLock()
     private var whichCache: [String: String?] = [:]
@@ -471,9 +398,6 @@ final class LibraryScanner: @unchecked Sendable {
         let pipe = Pipe()
         proc.standardOutput = pipe; proc.standardError = Pipe()
 
-        // Track the in-flight process so app termination can kill it explicitly instead of
-        // leaving it to be silently reparented to launchd as an orphan (macOS does not kill
-        // child processes just because their parent exited).
         activeProcessLock.lock()
         activeProcess = proc
         activeProcessLock.unlock()
@@ -486,8 +410,6 @@ final class LibraryScanner: @unchecked Sendable {
     private let activeProcessLock = NSLock()
     private var activeProcess: Process?
 
-    /// Called on app termination: kills any `unar` extraction currently in flight so it
-    /// doesn't outlive the app as an orphaned background process.
     func terminateActiveProcess() {
         activeProcessLock.lock()
         let proc = activeProcess
@@ -495,8 +417,6 @@ final class LibraryScanner: @unchecked Sendable {
         if proc?.isRunning == true { proc?.terminate() }
     }
     #endif
-
-    // MARK: - Page reading (for reader)
 
     func page(path: String, index: Int) -> PlatformImage? {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
@@ -541,11 +461,7 @@ final class LibraryScanner: @unchecked Sendable {
         let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
-        // `--` stops unar from parsing a page filename that happens to start with "-" (common
-        // for bonus/variant-cover pages named like "-Insomniacs-.jpg") as a command-line flag —
-        // Process passes args directly via execve with no shell involved, so unlike a shell
-        // script, quoting the string does nothing to protect it here. Without this, any CBR
-        // whose alphabetically-first image starts with "-" silently failed to extract at all.
+
         shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path, "--", images[index]])
         let enumerator = FileManager.default.enumerator(atPath: tmpDir.path)
         while let file = enumerator?.nextObject() as? String {

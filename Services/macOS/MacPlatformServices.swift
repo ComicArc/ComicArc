@@ -1,8 +1,6 @@
 #if os(macOS)
 import AppKit
 
-// MARK: - macOS file service
-
 struct MacFileService: FileServiceProtocol {
     func pickFiles(
         allowsMultiple: Bool,
@@ -37,11 +35,8 @@ struct MacFileService: FileServiceProtocol {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    // No-op: NSSavePanel already wrote the file to the user's chosen location.
     func shareFile(_ url: URL) {}
 }
-
-// MARK: - macOS window service
 
 struct MacWindowService: WindowServiceProtocol {
     func toggleFullScreen() {

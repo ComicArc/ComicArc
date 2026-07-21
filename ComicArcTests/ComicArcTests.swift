@@ -3,8 +3,6 @@ import XCTest
 
 final class ComicArcTests: XCTestCase {
 
-    // MARK: - AppDestination: Codable round-trips
-
     func test_destination_codable_simpleCase() throws {
         for dest: AppDestination in [.library, .continueReading, .favorites, .readingList,
                                       .runs, .stats, .history, .settings] {
@@ -28,8 +26,6 @@ final class ComicArcTests: XCTestCase {
         XCTAssertEqual(try roundTrip(dest), dest)
     }
 
-    // MARK: - AppDestination: properties
-
     func test_destination_title_publisher() {
         XCTAssertEqual(AppDestination.publisher("Marvel").title, "Marvel")
     }
@@ -47,15 +43,13 @@ final class ComicArcTests: XCTestCase {
         }
     }
 
-    // MARK: - LibraryViewModel: navigation transitions
-
     @MainActor
     func test_select_updatesDestination() {
         let vm = LibraryViewModel.shared
         let original = vm.destination
         vm.select(.stats)
         XCTAssertEqual(vm.destination, .stats)
-        vm.select(original) // restore
+        vm.select(original)
     }
 
     @MainActor
@@ -73,7 +67,7 @@ final class ComicArcTests: XCTestCase {
         let vm = LibraryViewModel.shared
         vm.select(.tag("horror"))
         vm.select(.library)
-        // After returning to library, grouped view should be re-enabled
+
         XCTAssertTrue(vm.useGroupedView)
     }
 
@@ -121,7 +115,7 @@ final class ComicArcTests: XCTestCase {
         XCTAssertTrue(vm.useGroupedView)
         vm.select(.tag("action"))
         XCTAssertFalse(vm.useGroupedView)
-        vm.select(.library) // restore
+        vm.select(.library)
     }
 
     @MainActor
@@ -162,8 +156,6 @@ final class ComicArcTests: XCTestCase {
         XCTAssertEqual(try roundTrip(dest), dest)
     }
 
-    // MARK: - AppDestination: UserDefaults persistence
-
     @MainActor
     func test_destination_persistsToUserDefaults() throws {
         let dest = AppDestination.stats
@@ -177,16 +169,12 @@ final class ComicArcTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "test.destination")
     }
 
-    // MARK: - ComicSortClassifier: mainline issues never classified as special
-
     func test_sortClassifier_regularNumberedIssue_isNotSpecial() {
         XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
             issueNumber: "1", title: "Amazing Spider-Man (1963-2012) #001", series: "Amazing Spider-Man"))
         XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
             issueNumber: "442", title: "Amazing Spider-Man (1963-2012) #442", series: "Amazing Spider-Man"))
     }
-
-    // MARK: - ComicSortClassifier: special-issue keywords, from the exact screenshot scenario
 
     func test_sortClassifier_annualInTitle_isSpecial() {
         XCTAssertTrue(ComicSortClassifier.isSpecialIssue(
@@ -212,8 +200,6 @@ final class ComicArcTests: XCTestCase {
         XCTAssertTrue(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "ANNUAL EDITION", series: ""))
     }
 
-    // MARK: - ComicSortClassifier: missing metadata falls back safely
-
     func test_sortClassifier_missingIssueNumber_fallsBackToTitleSeries() {
         XCTAssertFalse(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "Batman #1", series: "Batman"))
         XCTAssertTrue(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "Batman Annual", series: "Batman"))
@@ -223,16 +209,12 @@ final class ComicArcTests: XCTestCase {
         XCTAssertFalse(ComicSortClassifier.isSpecialIssue(issueNumber: nil, title: "", series: ""))
     }
 
-    // MARK: - ComicSortClassifier: doesn't false-positive on ordinary titles/series
-
     func test_sortClassifier_ordinaryStoryArcTitles_areNotSpecial() {
         XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
             issueNumber: "3", title: "The Sinister Six", series: "Amazing Spider-Man"))
         XCTAssertFalse(ComicSortClassifier.isSpecialIssue(
             issueNumber: "12", title: "Batman: Legend Reborn", series: "Detective Comics"))
     }
-
-    // MARK: - ComicSortClassifier: seeded position bands specials after mainline
 
     func test_sortClassifier_seededPosition_specialAlwaysAfterMainline() {
         let mainlinePos = ComicSortClassifier.seededPosition(
@@ -251,9 +233,6 @@ final class ComicArcTests: XCTestCase {
         XCTAssertLessThan(annual1, annual2)
     }
 
-    // Adjacent mainline issues must leave room between their seeded positions — this is the
-    // load-bearing invariant DatabaseManager.positionSpecialsChronologically() depends on to
-    // interpolate a dated annual between two consecutive issues without colliding with either.
     func test_sortClassifier_seededPosition_adjacentMainlineIssuesLeaveInterpolationRoom() {
         let issue12 = ComicSortClassifier.seededPosition(
             issueNumber: "12", title: "Batman #12", series: "Batman", numericIssueOrId: 12)
@@ -265,8 +244,6 @@ final class ComicArcTests: XCTestCase {
         XCTAssertGreaterThan(midpoint, issue12)
         XCTAssertLessThan(midpoint, issue13)
     }
-
-    // MARK: - ComicFileNaming: "Rename Files to Match Library" tool
 
     func test_fileNaming_regularIssue() {
         let name = ComicFileNaming.idealFilename(
@@ -282,8 +259,7 @@ final class ComicArcTests: XCTestCase {
     }
 
     func test_fileNaming_doesNotDuplicateKeywordAlreadyInSeriesName() {
-        // Series name itself already says "Annual" (a dedicated annual-only series/folder) —
-        // appending it again would produce "... Annual Annual #1".
+
         let name = ComicFileNaming.idealFilename(
             series: "Amazing Spider-Man Annual", issueNumber: "1",
             title: "Amazing Spider-Man Annual #1", fileExtension: "cbz")
@@ -303,8 +279,6 @@ final class ComicArcTests: XCTestCase {
             series: "Watchmen", issueNumber: nil, title: "Watchmen", fileExtension: "cbz")
         XCTAssertEqual(name, "Watchmen.cbz")
     }
-
-    // MARK: - Helpers
 
     private func roundTrip<T: Codable>(_ value: T) throws -> T {
         try JSONDecoder().decode(T.self, from: JSONEncoder().encode(value))

@@ -1,12 +1,5 @@
 import SwiftUI
 
-// MARK: - Possible duplicates
-
-// Groups of comics that share the same publisher + series + issue number — most likely the
-// same issue imported twice under different filenames (a re-rip, a rescan after a rename, a
-// variant cover kept alongside the original). Detection is heuristic: two genuinely different
-// printings that happen to share an issue number will also show up here, so this view only
-// ever surfaces candidates — it never deletes or merges anything automatically.
 struct DuplicatesView: View {
     @EnvironmentObject var vm: LibraryViewModel
 
@@ -51,11 +44,6 @@ private struct DuplicateGroupCard: View {
     @State var comics: [Comic]
     @EnvironmentObject var vm: LibraryViewModel
 
-    // Best-effort quality signal: page count is the strongest proxy for a complete, correctly
-    // extracted copy (a bad rip commonly drops pages or fails extraction partway through);
-    // file size breaks ties between two copies with the same page count, since a larger file
-    // at the same page count usually means higher-resolution scans. Neither is exact — this is
-    // a suggestion the user can override, never an automatic delete.
     private func fileSize(_ comic: Comic) -> Int64 {
         (try? FileManager.default.attributesOfItem(atPath: comic.filePath)[.size] as? Int64) ?? 0
     }

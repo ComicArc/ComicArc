@@ -17,6 +17,7 @@ struct IssueDetailPage: View {
     @State private var missingIssues:  [String] = []
     @State private var allShelves:     [Shelf]  = []
     @State private var comicShelfIds:  [Int64]  = []
+    @State private var showPagePicker: Bool     = false
 
     init(comic: Comic, onBack: @escaping () -> Void) {
         self.comic  = comic
@@ -51,9 +52,14 @@ struct IssueDetailPage: View {
         .sheet(isPresented: $showingEdit, onDismiss: { loadData() }) {
             EditComicView(comic: $current)
         }
+        .sheet(isPresented: $showPagePicker) {
+            ComicPageCoverPicker(comic: current) { image in
+                ThumbnailCache.shared.setCustomCover(comicId: current.id, image: image)
+                thumbnail = nil
+                ThumbnailCache.shared.thumbnail(for: current) { thumbnail = $0 }
+            }
+        }
     }
-
-    // MARK: - Top bar
 
     private var topBar: some View {
         HStack(spacing: 12) {
@@ -108,8 +114,6 @@ struct IssueDetailPage: View {
         .background(Design.navBackground)
     }
 
-    // MARK: - Main two-column layout
-
     private var mainColumns: some View {
         HStack(alignment: .top, spacing: 0) {
             coverColumn
@@ -122,8 +126,6 @@ struct IssueDetailPage: View {
         }
         .frame(maxWidth: .infinity)
     }
-
-    // MARK: - Cover column
 
     private var coverColumn: some View {
         VStack(spacing: 28) {
@@ -198,11 +200,17 @@ struct IssueDetailPage: View {
                     vm.toggleReadingList(current)
                 }
 
-                iconAction(
-                    icon: "photo",
-                    color: .secondary,
-                    label: "Cover"
-                ) { changeCover() }
+                Menu {
+                    Button("Choose a Page From This Issue…") { showPagePicker = true }
+                    Button("Choose Image File…") { changeCover() }
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: "photo").font(.system(size: 22)).foregroundStyle(.secondary)
+                        Text("Cover").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
         }
         .padding(40)
@@ -223,8 +231,6 @@ struct IssueDetailPage: View {
         }
         .buttonStyle(.plain)
     }
-
-    // MARK: - Detail column
 
     private var detailColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -333,8 +339,6 @@ struct IssueDetailPage: View {
         }
     }
 
-    // MARK: - Supplementary (full-width below columns)
-
     @ViewBuilder
     private var supplementarySection: some View {
         if !missingIssues.isEmpty || !appearsInRuns.isEmpty || current.notes != nil {
@@ -410,8 +414,6 @@ struct IssueDetailPage: View {
         }
     }
 
-    // MARK: - Helpers
-
     private var divider: some View {
         Rectangle().fill(Design.borderColor).frame(height: 1)
             .padding(.horizontal, 40)
@@ -458,15 +460,12 @@ struct IssueDetailPage: View {
         return "Unread"
     }
 
-    // MARK: - Data
-
     private func loadData() {
         let comicId = current.id
         let series  = current.series
         let pub     = current.publisher
         reviewDraft = current.review ?? ""
-        // Guard against a slow load for a comic the user has since navigated away from
-        // overwriting the thumbnail of whatever is now actually being displayed.
+
         ThumbnailCache.shared.thumbnail(for: current) { img in
             guard comicId == self.current.id else { return }
             self.thumbnail = img

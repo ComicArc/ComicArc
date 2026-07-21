@@ -1,10 +1,5 @@
 import SwiftUI
 
-// Post-scan diagnostics dashboard. Honest framing: of the problem types listed, only
-// "annuals stuck at the end" is a genuine one-click auto-fix (reuses the existing
-// positionSpecialsChronologically()); everything else here detects a problem and deep-links
-// into the screen that already handles it (SeriesManagerView / DuplicatesView) rather than
-// pretending to auto-repair something that needs a human judgment call.
 struct ImportWizardView: View {
     let report: LibraryHealthReport
     @Environment(\.dismiss) private var dismiss

@@ -2,33 +2,20 @@ import SwiftUI
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    // Backs both Dock-icon drag-and-drop and Finder's "Import to ComicArc" service — kept
-    // alive for the app's lifetime since NSApp.servicesProvider holds only a weak-ish
-    // reference in practice (the services dispatch mechanism doesn't retain it for you).
+
     private let servicesProvider = ComicArcServicesProvider()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = servicesProvider
     }
 
-    // Closing the window means the app is fully quit — no lingering in the background with
-    // the watcher, scanner, and DB connection still alive.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    // Quitting should mean quitting: stop the file watcher, cancel any in-flight scan
-    // (and kill the `unar` subprocess it may be blocked on) and cleanly close the
-    // database before the process actually exits, instead of relying on the OS to
-    // reclaim everything abruptly.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         LibraryViewModel.shared.shutdown()
         return .terminateNow
     }
 
-    // Covers three routes at once, all funneled through the same AppKit hook: double-clicking
-    // a .cbz/.cbr/.pdf in Finder ("Open With ComicArc"), dragging one onto the Dock icon while
-    // the app is already running or launching it fresh, and `open -a ComicArc file.cbz` from
-    // the command line. Declaring CFBundleDocumentTypes in Info.plist is what makes macOS
-    // route these events here at all — without it this method is simply never called.
     func application(_ application: NSApplication, open urls: [URL]) {
         let comics = urls.filter { ["cbz", "cbr", "pdf"].contains($0.pathExtension.lowercased()) }
         guard !comics.isEmpty else { return }
@@ -36,11 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// Handler for the "Import to ComicArc" Finder Services menu item (Info.plist NSServices).
-// Must be an NSObject subclass with an @objc method matching the NSMessage key exactly,
-// suffixed with the standard Services selector shape (pboard:userData:error:) — AppKit
-// invokes this by string-based selector lookup, not a Swift protocol, so the signature has
-// to match exactly or the service silently does nothing when clicked.
 final class ComicArcServicesProvider: NSObject {
     @objc func importFilesService(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
         guard let urls = pboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty else {
@@ -104,11 +86,6 @@ struct ComicArcApp: App {
             CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .printItem) {}
 
-            // Settings is now an in-app page (ContentView's detailContent .settings case)
-            // rather than a separate floating Settings{} scene, so ⌘, and the app-menu
-            // "Settings…" item are redirected to select it instead of opening a new window —
-            // replacing the default .appSettings command group is what keeps macOS from
-            // auto-generating its own "Settings…" item pointing at a scene that no longer exists.
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { vm.select(.settings) }
                     .keyboardShortcut(",", modifiers: .command)

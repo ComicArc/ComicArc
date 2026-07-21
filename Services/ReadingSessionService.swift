@@ -1,8 +1,5 @@
 import Foundation
 
-// Central point for all reading-session persistence. Both ReaderView (macOS) and
-// iPadReaderView (iOS) go through here so progress, session logs, and bookmarks
-// are written consistently regardless of platform.
 @MainActor
 final class ReadingSessionService {
     static let shared = ReadingSessionService()

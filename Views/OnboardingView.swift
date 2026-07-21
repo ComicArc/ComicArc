@@ -34,8 +34,6 @@ struct OnboardingView: View {
         .task { unarInstalled = checkUnar() }
     }
 
-    // MARK: - Top bar
-
     private var topBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "diamond.fill")
@@ -54,8 +52,6 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step routing
-
     @ViewBuilder
     private var stepContent: some View {
         switch step {
@@ -66,8 +62,6 @@ struct OnboardingView: View {
         case .complete:      completeStep
         }
     }
-
-    // MARK: - Step 1: Welcome
 
     private var welcomeStep: some View {
         VStack(spacing: 36) {
@@ -129,8 +123,6 @@ struct OnboardingView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Design.borderColor, lineWidth: 1))
     }
 
-    // MARK: - Step 2: CBR Setup
-
     private var cbrSetupStep: some View {
         VStack(spacing: 36) {
             VStack(spacing: 14) {
@@ -149,7 +141,6 @@ struct OnboardingView: View {
                     .frame(maxWidth: 500)
             }
 
-            // Status card
             VStack(spacing: 0) {
                 HStack(spacing: 14) {
                     Image(systemName: unarInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -209,8 +200,6 @@ struct OnboardingView: View {
         .padding(48)
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
-
-    // MARK: - Step 3: Choose library
 
     private var chooseLibraryStep: some View {
         VStack(spacing: 36) {
@@ -286,8 +275,6 @@ struct OnboardingView: View {
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
 
-    // MARK: - Step 4: Scanning
-
     private var scanningStep: some View {
         VStack(spacing: 36) {
             if scanTotal == 0 {
@@ -332,8 +319,6 @@ struct OnboardingView: View {
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
 
-    // MARK: - Step 5: Complete
-
     private var completeStep: some View {
         VStack(spacing: 36) {
             ZStack {
@@ -359,8 +344,6 @@ struct OnboardingView: View {
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
 
-    // MARK: - Bottom dots
-
     private var bottomBar: some View {
         HStack(spacing: 8) {
             ForEach(0..<5, id: \.self) { i in
@@ -384,8 +367,6 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Actions
-
     private func pickFolder() {
         fileService.pickFolder { url in
             if let url { libraryPath = url.path }
@@ -406,7 +387,7 @@ struct OnboardingView: View {
     }
 
     private func checkUnar() -> Bool {
-        // Check bundled copy first (ships inside the app)
+
         if let bundled = Bundle.main.executableURL?
             .deletingLastPathComponent()
             .appendingPathComponent("unar").path,

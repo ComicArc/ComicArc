@@ -9,7 +9,7 @@ final class FileWatcher {
     private var libraryPath: String = ""
     private let onAdded:   (URL)    -> Void
     private let onRemoved: (String) -> Void
-    // Called when the watched root becomes inaccessible (e.g. drive eject)
+
     private let onVolumeUnavailable: (() -> Void)?
 
     init(onAdded: @escaping (URL) -> Void,
@@ -37,7 +37,6 @@ final class FileWatcher {
                     guard let p = cfPaths[i] as? String else { continue }
                     let flag = Int(flagsArr[i])
 
-                    // Volume unmount — notify the app so it can show "Library unavailable"
                     let rootChanged = flag & Int(kFSEventStreamEventFlagRootChanged) != 0
                     let unmounted   = flag & Int(kFSEventStreamEventFlagUnmount)     != 0
                     if rootChanged || unmounted {
@@ -81,7 +80,6 @@ final class FileWatcher {
 
 #else
 
-// iOS: file watching via FSEvents is not available. Imports come through UIDocumentPicker.
 final class FileWatcher {
     init(onAdded: @escaping (URL) -> Void,
          onRemoved: @escaping (String) -> Void,

@@ -1,12 +1,5 @@
 import SwiftUI
 
-// MARK: - Appearance themes
-//
-// Design's color tokens are `static` and read once — cheap, and every existing call site
-// (Design.appBackground, Design.brandBlue, etc., used in dozens of files) keeps working
-// unchanged. The tradeoff: a theme change takes effect on next launch rather than live,
-// same as most apps that let you pick a genuinely different palette rather than just a
-// system light/dark toggle. Settings makes that explicit rather than surprising.
 enum AppTheme: String, CaseIterable, Identifiable {
     case dark, pureBlack, graphite, midnightBlue, forest, sepia
 
@@ -46,8 +39,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 brandGold:     Color(red: 0.918, green: 0.659, blue: 0.082)
             )
         case .pureBlack:
-            // True OLED black — every surface a hair lighter than the last so cards/sheets
-            // still read as distinct layers even at zero luminance for the base background.
+
             return Palette(
                 appBackground: .black,
                 navBackground: Color(red: 0.03, green: 0.03, blue: 0.03),
@@ -64,18 +56,18 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 cardBg:        Color(red: 0.130, green: 0.130, blue: 0.135),
                 surfaceBg:     Color(red: 0.160, green: 0.160, blue: 0.166),
                 borderColor:   Color.white.opacity(0.08),
-                brandBlue:     Color(red: 0.55, green: 0.56, blue: 0.58),
-                brandGold:     Color(red: 0.85, green: 0.72, blue: 0.45)
+                brandBlue:     Color(red: 0.416, green: 0.647, blue: 0.902),
+                brandGold:     Color(red: 0.87, green: 0.73, blue: 0.42)
             )
         case .midnightBlue:
             return Palette(
-                appBackground: Color(red: 0.031, green: 0.043, blue: 0.086),
-                navBackground: Color(red: 0.047, green: 0.063, blue: 0.114),
-                cardBg:        Color(red: 0.067, green: 0.086, blue: 0.153),
-                surfaceBg:     Color(red: 0.086, green: 0.110, blue: 0.192),
-                borderColor:   Color.white.opacity(0.10),
-                brandBlue:     Color(red: 0.353, green: 0.541, blue: 0.941),
-                brandGold:     Color(red: 0.918, green: 0.659, blue: 0.082)
+                appBackground: Color(red: 0.024, green: 0.035, blue: 0.098),
+                navBackground: Color(red: 0.039, green: 0.055, blue: 0.145),
+                cardBg:        Color(red: 0.055, green: 0.078, blue: 0.196),
+                surfaceBg:     Color(red: 0.075, green: 0.102, blue: 0.243),
+                borderColor:   Color(red: 0.4, green: 0.55, blue: 0.95).opacity(0.22),
+                brandBlue:     Color(red: 0.396, green: 0.616, blue: 0.980),
+                brandGold:     Color(red: 0.949, green: 0.694, blue: 0.129)
             )
         case .forest:
             return Palette(
@@ -88,8 +80,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 brandGold:     Color(red: 0.851, green: 0.714, blue: 0.263)
             )
         case .sepia:
-            // The one light theme — warm parchment tones for anyone who finds a pure-dark
-            // reader uncomfortable, rather than assuming everyone wants black.
+
             return Palette(
                 appBackground: Color(red: 0.949, green: 0.918, blue: 0.851),
                 navBackground: Color(red: 0.925, green: 0.890, blue: 0.812),
@@ -106,6 +97,5 @@ enum AppTheme: String, CaseIterable, Identifiable {
         AppTheme(rawValue: UserDefaults.standard.string(forKey: "appTheme") ?? "") ?? .dark
     }
 
-    /// True for the one light palette — drives which SwiftUI color scheme the app forces.
     var isLight: Bool { self == .sepia }
 }

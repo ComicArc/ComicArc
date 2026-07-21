@@ -2,8 +2,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - iPad immersive reader
-
 struct iPadReaderView: View {
     let comic: Comic
     let onClose: () -> Void
@@ -18,18 +16,13 @@ struct iPadReaderView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
-    // Seeded per-series in init() (falling back to this global default for a series that's
-    // never been read before), then persisted per-series as it changes — matches the macOS
-    // reader's per-series preference behavior.
     @State private var scrollMode: Bool
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
     @State private var autoplay = false
     @State private var countdownProgress: Double = 0
     @State private var showFilmstrip = false
     @Environment(\.scenePhase) private var scenePhase
-    // The reader's own width, not the device screen's — UIScreen.main.bounds.width is wrong
-    // in Split View/Slide Over, where the app's window is narrower than the full screen,
-    // making the tap zones for prev/next page misaligned with what's actually on screen.
+
     @State private var viewWidth: CGFloat = 0
 
     init(comic: Comic, onClose: @escaping () -> Void) {
@@ -66,22 +59,16 @@ struct iPadReaderView: View {
         .onAppear { scheduleHide() }
         .onDisappear {
             saveProgress()
-            // Otherwise up to 30 full-resolution decoded pages from this comic stay
-            // resident until unrelated LRU pressure evicts them — worth freeing eagerly
-            // on iOS, where a backgrounded app can be jetsam-killed for memory pressure.
+
             PageCache.shared.evict(comicId: comic.id)
         }
-        // iOS can suspend or kill the app without ever calling onDisappear (a phone call,
-        // the app switcher, a low-memory kill while backgrounded) — flush progress the
-        // moment the scene stops being active rather than only when the view tears down.
+
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { saveProgress() }
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
         .onChange(of: scrollMode) { _, newValue in
-            // Preserve fit mode / RTL / double-page if the Mac reader already set them for
-            // this series — the iPad reader doesn't expose those toggles, so it should only
-            // ever change the one preference it actually controls.
+
             let existing = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
             DatabaseManager.shared.setSeriesReaderPrefs(
                 series: comic.series, publisher: comic.publisher,
@@ -92,8 +79,6 @@ struct iPadReaderView: View {
             )
         }
     }
-
-    // MARK: - Page reader (swipe between pages)
 
     private var pageReader: some View {
         TabView(selection: $currentPage) {
@@ -115,8 +100,6 @@ struct iPadReaderView: View {
         }
     }
 
-    // MARK: - Scroll reader (continuous vertical scroll)
-
     private var scrollReader: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 0) {
@@ -129,8 +112,6 @@ struct iPadReaderView: View {
         .ignoresSafeArea()
         .simultaneousGesture(tapGesture)
     }
-
-    // MARK: - Gestures
 
     private var tapGesture: some Gesture {
         SpatialTapGesture()
@@ -177,8 +158,6 @@ struct iPadReaderView: View {
             }
     }
 
-    // MARK: - Overlay UI (top bar + bottom scrubber)
-
     private var overlayControls: some View {
         VStack {
             if showBars {
@@ -199,9 +178,6 @@ struct iPadReaderView: View {
         .animation(.easeInOut(duration: 0.2), value: showFilmstrip)
     }
 
-    // Reuses PageCache rather than a separate thumbnail cache — LazyHStack only instantiates
-    // visible cells, so at most a screenful of thumbnails actually decode, well within
-    // PageCache's 30-entry LRU budget alongside the reader's own current-page/prefetch entries.
     private var filmstrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -309,12 +285,10 @@ struct iPadReaderView: View {
         )
     }
 
-    // MARK: - Helpers
-
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task {
-            // Matches the macOS reader's 8-second auto-hide delay so both platforms feel the same.
+
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled else { return }
             await MainActor.run {
@@ -336,10 +310,7 @@ struct iPadReaderView: View {
             do {
                 try await Task.sleep(for: .milliseconds(Int(autoplaySpeed * 1000) / steps))
             } catch {
-                // Cancelled — e.g. the user manually swiped to another page. `try?` here
-                // would swallow the CancellationError and let the loop spin through its
-                // remaining iterations instantly, still advancing the page at the end and
-                // silently skipping an extra page on top of the manual swipe.
+
                 countdownProgress = 0
                 return
             }
@@ -352,8 +323,6 @@ struct iPadReaderView: View {
         }
     }
 }
-
-// MARK: - Single page image loader
 
 private struct ReaderPageView: View {
     let comic: Comic
@@ -407,15 +376,11 @@ private struct iPadFilmstripThumb: View {
     }
 }
 
-// MARK: - UIDocumentPicker wrapper
-
 struct iPadDocumentPicker: UIViewControllerRepresentable {
     let onPick: ([URL]) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        // CBR is intentionally excluded: it's extracted via the `unar` command-line
-        // tool on macOS (Scanner/LibraryScanner.swift), which isn't available in the
-        // iOS sandbox, so a CBR imported here would show 0 pages and never open.
+
         let types: [UTType] = [
             UTType(filenameExtension: "cbz") ?? .zip,
             .pdf

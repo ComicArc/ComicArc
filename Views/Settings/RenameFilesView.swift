@@ -1,12 +1,5 @@
 import SwiftUI
 
-// MARK: - Rename Files to Match Library
-
-// A guided, reviewable batch rename: shows exactly what would change before touching
-// anything on disk, lets the user deselect individual files, and only ever renames within
-// the same folder (never moves a file to a different directory) — folder placement is what
-// LibraryScanner.folderComponents() uses for publisher/character/series, so a rename tool
-// that also moved files around would be doing two very different things under one button.
 struct RenameFilesView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
@@ -139,8 +132,6 @@ struct RenameFilesView: View {
         .padding(16)
     }
 
-    // MARK: - Logic
-
     private func load() {
         isLoading = true
         Task.detached(priority: .userInitiated) {
@@ -157,9 +148,7 @@ struct RenameFilesView: View {
                 let newPath = url.deletingLastPathComponent().appendingPathComponent(idealName).path
                 proposed.append((comic, newPath))
             }
-            // Two different comics landing on the same proposed filename (e.g. a duplicate,
-            // or two issues whose issue numbers collide) would silently overwrite one another
-            // on rename — flag as a conflict and leave both deselected rather than risk it.
+
             var pathCounts: [String: Int] = [:]
             for p in proposed { pathCounts[p.newPath, default: 0] += 1 }
 
