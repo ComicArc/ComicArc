@@ -43,6 +43,11 @@ struct ComicArcIPadApp: App {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(vm.libraryPath.isEmpty)
+                Divider()
+                Button("Rename Files to Match Library…") {
+                    NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
 
             CommandMenu("Navigate") {

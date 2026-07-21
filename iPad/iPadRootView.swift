@@ -5,6 +5,7 @@ struct iPadRootView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var selectedComic: Comic?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var showRenameFilesGlobal = false
 
     var body: some View {
         ZStack {
@@ -47,6 +48,12 @@ struct iPadRootView: View {
         }
         .animation(Design.springGentle, value: vm.pendingUndo?.message)
         .animation(Design.springGentle, value: vm.showScanReport)
+        .onReceive(NotificationCenter.default.publisher(for: .triggerRenameFiles)) { _ in
+            showRenameFilesGlobal = true
+        }
+        .sheet(isPresented: $showRenameFilesGlobal) {
+            RenameFilesView().environmentObject(vm)
+        }
     }
 
     private var iPadScanReportBanner: some View {

@@ -106,6 +106,11 @@ struct ComicArcApp: App {
                 }
                 .keyboardShortcut("o", modifiers: .command)
                 Divider()
+                Button("Rename Files to Match Library…") {
+                    NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                Divider()
                 Button("Mark All as Read") { vm.markAllRead() }
                     .disabled(vm.comics.isEmpty)
             }

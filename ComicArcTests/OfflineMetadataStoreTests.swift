@@ -81,6 +81,14 @@ final class OfflineMetadataStoreTests: XCTestCase {
         let match = store.lookupIssue(series: "Amazing Spider-Man", publisher: "Marvel", issueNumber: "12", year: 1964)
         XCTAssertEqual(match?.coverDate, "1964-05-00")
         XCTAssertEqual(match?.confidence, 100)
+        XCTAssertEqual(match?.canonicalSeriesName, "The Amazing Spider-Man")
+        XCTAssertEqual(match?.canonicalIssueNumber, "12")
+    }
+
+    func test_lookupIssue_canonicalNumberUnwrapsParens() {
+        let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "35", year: 2008, comicType: .annual)
+        XCTAssertEqual(match?.canonicalSeriesName, "Amazing Spider-Man Annual")
+        XCTAssertEqual(match?.canonicalIssueNumber, "35")
     }
 
     func test_lookupIssue_wrongYearMatchesOtherRun() {

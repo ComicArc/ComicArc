@@ -8,6 +8,11 @@ struct GCDIssueMatch {
     let coverDate: String?
     let confidence: Int
     let reason: String
+    /// The verified official series name and issue number, straight from the catalog —
+    /// lets callers (e.g. the rename tool) suggest a correct filename even when the local
+    /// series folder is an abbreviation ("ASM") or the local issue number is padded ("001").
+    let canonicalSeriesName: String
+    let canonicalIssueNumber: String
 }
 
 struct GCDSeriesBond {
@@ -139,11 +144,11 @@ final class OfflineMetadataStore {
         let normSeries = Self.normalizeSeriesName(series)
         guard !normSeries.isEmpty else { return nil }
 
-        struct Candidate { let id: Int; let publisherName: String?; let yearBegan: Int?; let yearEnded: Int?; let issueCount: Int }
+        struct Candidate { let id: Int; let name: String; let publisherName: String?; let yearBegan: Int?; let yearEnded: Int?; let issueCount: Int }
         func fetchCandidates(column: String, value: String) -> [Candidate] {
             var results: [Candidate] = []
             let sql = """
-                SELECT s.id, p.name, s.year_began, s.year_ended, s.issue_count
+                SELECT s.id, s.name, p.name, s.year_began, s.year_ended, s.issue_count
                 FROM series s LEFT JOIN publisher p ON p.id = s.publisher_id
                 WHERE s.\(column) = ?
             """
@@ -153,11 +158,12 @@ final class OfflineMetadataStore {
                 sqlite3_bind_text(stmt, 1, value, -1, SQLITE_TRANSIENT)
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     let id = Int(sqlite3_column_int(stmt, 0))
-                    let pub = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
-                    let yb = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 2)) : nil
-                    let ye = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
-                    let count = Int(sqlite3_column_int(stmt, 4))
-                    results.append(Candidate(id: id, publisherName: pub, yearBegan: yb, yearEnded: ye, issueCount: count))
+                    let name = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                    let pub = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+                    let yb = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
+                    let ye = sqlite3_column_type(stmt, 4) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 4)) : nil
+                    let count = Int(sqlite3_column_int(stmt, 5))
+                    results.append(Candidate(id: id, name: name, publisherName: pub, yearBegan: yb, yearEnded: ye, issueCount: count))
                 }
                 sqlite3_finalize(stmt)
             }
@@ -214,12 +220,13 @@ final class OfflineMetadataStore {
             let reason = score >= 85
                 ? "Matched to the offline comics database (publisher and year confirmed)"
                 : "Matched to the offline comics database"
-            return GCDIssueMatch(gcdIssueId: issueRow.id, coverDate: issueRow.keyDate, confidence: confidence, reason: reason)
+            return GCDIssueMatch(gcdIssueId: issueRow.id, coverDate: issueRow.keyDate, confidence: confidence, reason: reason,
+                                  canonicalSeriesName: candidate.name, canonicalIssueNumber: issueRow.canonicalNumber)
         }
         return nil
     }
 
-    private struct IssueRow { let id: Int; let keyDate: String? }
+    private struct IssueRow { let id: Int; let keyDate: String?; let canonicalNumber: String }
 
     private func queryIssue(seriesId: Int, issueNumber: String) -> IssueRow? {
         // Three tiers, tried in order: (1) exact string match — handles non-numeric labels
@@ -230,14 +237,14 @@ final class OfflineMetadataStore {
         // fire when the requested number actually parses as numeric, so neither can misfire
         // on an unrelated non-numeric label.
         let sql = """
-            SELECT id, key_date, 0 AS rank, sort_code FROM issue
+            SELECT id, key_date, number, 0 AS rank, sort_code FROM issue
             WHERE series_id = ? AND number = ? AND variant_of_id IS NULL
             UNION ALL
-            SELECT id, key_date, 1 AS rank, sort_code FROM issue
+            SELECT id, key_date, number, 1 AS rank, sort_code FROM issue
             WHERE series_id = ? AND variant_of_id IS NULL
                   AND ? IS NOT NULL AND CAST(number AS REAL) = ?
             UNION ALL
-            SELECT id, key_date, 2 AS rank, sort_code FROM issue
+            SELECT id, key_date, number, 2 AS rank, sort_code FROM issue
             WHERE series_id = ? AND variant_of_id IS NULL
                   AND ? IS NOT NULL AND number LIKE '%(' || ? || ')'
             ORDER BY rank, sort_code LIMIT 1
@@ -270,11 +277,21 @@ final class OfflineMetadataStore {
                 let id = Int(sqlite3_column_int(stmt, 0))
                 let dateRaw = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
                 let date = (dateRaw?.isEmpty == false) ? dateRaw : nil
-                result = IssueRow(id: id, keyDate: date)
+                let rawNumber = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? issueNumber
+                result = IssueRow(id: id, keyDate: date, canonicalNumber: Self.trueContinuingNumber(from: rawNumber))
             }
             sqlite3_finalize(stmt)
         }
         return result
+    }
+
+    /// GCD stores restart-numbered issues as e.g. "1 (35)" — the parenthetical is the real
+    /// continuing number readers actually care about, so prefer it when present.
+    private static func trueContinuingNumber(from rawNumber: String) -> String {
+        if let openParen = rawNumber.firstIndex(of: "("), let closeParen = rawNumber.firstIndex(of: ")"), openParen < closeParen {
+            return String(rawNumber[rawNumber.index(after: openParen)..<closeParen])
+        }
+        return rawNumber
     }
 
     // MARK: - Series continuation bonds (feeds automatic Series Links)

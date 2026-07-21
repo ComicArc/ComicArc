@@ -400,6 +400,8 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN gcd_cover_date TEXT")
         exec("ALTER TABLE comics ADD COLUMN gcd_match_confidence INTEGER")
         exec("ALTER TABLE comics ADD COLUMN gcd_match_reason TEXT")
+        exec("ALTER TABLE comics ADD COLUMN gcd_series_name TEXT")
+        exec("ALTER TABLE comics ADD COLUMN gcd_issue_number TEXT")
 
         exec("""
         UPDATE comics SET position =
@@ -726,9 +728,11 @@ final class DatabaseManager: @unchecked Sendable {
                     comicType: comicType
                 ) else { continue }
                 _ = run("""
-                    UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = ?, gcd_match_reason = ?
+                    UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = ?, gcd_match_reason = ?,
+                           gcd_series_name = ?, gcd_issue_number = ?
                     WHERE id = ?
-                    """, args: [match.gcdIssueId, match.coverDate, match.confidence, match.reason, row.id])
+                    """, args: [match.gcdIssueId, match.coverDate, match.confidence, match.reason,
+                                match.canonicalSeriesName, match.canonicalIssueNumber, row.id])
             }
             exec("COMMIT")
         }
@@ -886,7 +890,8 @@ final class DatabaseManager: @unchecked Sendable {
             readingOrderPosition: sqlite3_column_type(s, 24) != SQLITE_NULL ? colInt(s, 24) : nil,
             readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil,
             readingOrderReason: colText(s, 26),
-            gcdMatchConfidence: sqlite3_column_type(s, 27) != SQLITE_NULL ? colInt(s, 27) : nil
+            gcdMatchConfidence: sqlite3_column_type(s, 27) != SQLITE_NULL ? colInt(s, 27) : nil,
+            gcdSeriesName: colText(s, 28), gcdIssueNumber: colText(s, 29)
         )
     }
 
@@ -900,7 +905,7 @@ final class DatabaseManager: @unchecked Sendable {
                (f.comic_id IS NOT NULL) as is_favorite,
                (rl.comic_id IS NOT NULL) as in_reading_list,
                r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
-               c.gcd_match_confidence
+               c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id

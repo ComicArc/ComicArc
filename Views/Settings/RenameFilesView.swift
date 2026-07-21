@@ -46,7 +46,7 @@ struct RenameFilesView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Rename Files to Match Library").font(.title3.bold())
-                Text("Renames comic files on disk to \"Series #Issue\" — the format ComicArc reads most reliably. Folders are never moved, only the filename inside each one.")
+                Text("Renames comic files on disk to \"Series #Issue\" — the format ComicArc reads most reliably. Folders are never moved, only the filename inside each one. A checkmark means the name was verified against the offline comics database, not just guessed from the current filename.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -88,6 +88,11 @@ struct RenameFilesView: View {
                                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                     .foregroundStyle(candidate.conflict ? .orange : Design.brandGold)
                                     .lineLimit(1)
+                                if candidate.verified {
+                                    Image(systemName: "checkmark.seal.fill")
+                                        .font(.caption2).foregroundStyle(.green)
+                                        .help("Verified against the offline comics database")
+                                }
                             }
                         }
                         Spacer()
@@ -136,17 +141,22 @@ struct RenameFilesView: View {
         isLoading = true
         Task.detached(priority: .userInitiated) {
             let comics = DatabaseManager.shared.allComics()
-            var proposed: [(comic: Comic, newPath: String)] = []
+            var proposed: [(comic: Comic, newPath: String, verified: Bool)] = []
             for comic in comics {
                 let url = URL(fileURLWithPath: comic.filePath)
                 let currentName = url.lastPathComponent
+                // A verified match in the offline comics database is real catalog data — prefer
+                // it over the local series/issue fields, which can be an abbreviated folder name
+                // ("ASM") or a zero-padded number that doesn't reflect what the issue is really
+                // titled/numbered.
                 let idealName = ComicFileNaming.idealFilename(
-                    series: comic.series, issueNumber: comic.issueNumber,
+                    series: comic.gcdSeriesName ?? comic.series,
+                    issueNumber: comic.gcdIssueNumber ?? comic.issueNumber,
                     title: comic.title, fileExtension: comic.fileExtension
                 )
                 guard currentName != idealName else { continue }
                 let newPath = url.deletingLastPathComponent().appendingPathComponent(idealName).path
-                proposed.append((comic, newPath))
+                proposed.append((comic, newPath, comic.gcdSeriesName != nil))
             }
 
             var pathCounts: [String: Int] = [:]
@@ -159,7 +169,8 @@ struct RenameFilesView: View {
                     oldPath: p.comic.filePath,
                     newPath: p.newPath,
                     conflict: conflict,
-                    isSelected: !conflict
+                    isSelected: !conflict,
+                    verified: p.verified
                 )
             }
             await MainActor.run {
@@ -213,6 +224,7 @@ private struct RenameCandidate: Identifiable {
     let newPath: String
     let conflict: Bool
     var isSelected: Bool
+    let verified: Bool
 
     var id: Int64 { comicId }
     var oldName: String { URL(fileURLWithPath: oldPath).lastPathComponent }

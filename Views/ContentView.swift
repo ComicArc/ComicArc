@@ -4,6 +4,7 @@ extension Notification.Name {
     static let showTutorial        = Notification.Name("showTutorial")
     static let showReaderShortcuts = Notification.Name("showReaderShortcuts")
     static let triggerImport       = Notification.Name("triggerImport")
+    static let triggerRenameFiles  = Notification.Name("triggerRenameFiles")
 }
 
 struct ContentView: View {
@@ -13,6 +14,7 @@ struct ContentView: View {
 
     @AppStorage("tutorialSeen") private var tutorialSeen = false
     @State private var showTutorial = false
+    @State private var showRenameFiles = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
@@ -82,6 +84,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .triggerImport)) { _ in
             importFiles()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .triggerRenameFiles)) { _ in
+            showRenameFiles = true
+        }
         .sheet(isPresented: $vm.showSeriesManager) {
             if let series = vm.selectedSeries {
                 SeriesManagerView(series: series, publisher: vm.activePublisher)
@@ -92,6 +97,9 @@ struct ContentView: View {
             if let report = vm.libraryHealthReport {
                 ImportWizardView(report: report).environmentObject(vm)
             }
+        }
+        .sheet(isPresented: $showRenameFiles) {
+            RenameFilesView().environmentObject(vm)
         }
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             Task { await handleWindowDrop(providers) }
