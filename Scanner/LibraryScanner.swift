@@ -101,7 +101,8 @@ final class LibraryScanner: @unchecked Sendable {
                         languageIso: meta.languageIso, fileHash: hash,
                         coverMonth: meta.coverMonth, coverDay: meta.coverDay,
                         alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
-                        seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber
+                        seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
+                        volume: meta.volume
                     ))
                     added += 1; knownPaths.insert(fp)
                     if let h = hash { knownHashes.insert(h) }
@@ -247,6 +248,7 @@ final class LibraryScanner: @unchecked Sendable {
         var storyArc: String?; var languageIso: String?
         var alternateNumber: String?; var storyArcNumber: String?; var seriesGroup: String?
         var comicInfoIssueNumber: String?
+        var volume: String?
     }
 
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
@@ -273,7 +275,8 @@ final class LibraryScanner: @unchecked Sendable {
                          storyArc: ci["StoryArc"], languageIso: ci["LanguageISO"],
                          alternateNumber: ci["AlternateNumber"], storyArcNumber: ci["StoryArcNumber"],
                          seriesGroup: ci["SeriesGroup"].map(normalizeSeriesName),
-                         comicInfoIssueNumber: ci["IssueNumber"])
+                         comicInfoIssueNumber: ci["IssueNumber"],
+                         volume: ci["Volume"])
     }
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
@@ -328,7 +331,7 @@ final class LibraryScanner: @unchecked Sendable {
         _ = try? archive.extract(entry, consumer: { data.append($0) })
         let keys: Set<String> = ["Series", "Title", "IssueNumber", "Publisher", "Writer", "Penciller",
                                   "Year", "Month", "Day", "StoryArc", "LanguageISO", "Characters",
-                                  "AlternateNumber", "StoryArcNumber", "SeriesGroup"]
+                                  "AlternateNumber", "StoryArcNumber", "SeriesGroup", "Volume"]
 #if os(macOS)
         guard let root = try? XMLDocument(data: data).rootElement() else { return [:] }
         var result: [String: String] = [:]

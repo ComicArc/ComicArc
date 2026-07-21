@@ -82,6 +82,7 @@ final class ComicArcTests: XCTestCase {
             (.runs,            .runs),
             (.stats,           .stats),
             (.history,         .history),
+            (.readingOrderManager, .readingOrderManager),
         ]
         for (dest, expected) in mapping {
             vm.select(dest)

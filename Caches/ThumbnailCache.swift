@@ -25,7 +25,14 @@ final class ThumbnailCache: @unchecked Sendable {
     private let thumbSize = CGSize(width: 160, height: 240)
 
     func thumbnail(for comic: Comic, completion: @escaping (PlatformImage?) -> Void) {
-        let comicId = comic.id
+        thumbnail(id: comic.id, filePath: comic.filePath, completion: completion)
+    }
+
+    /// Same as `thumbnail(for:completion:)` but takes only what's actually needed (id + path),
+    /// so callers that don't already have a full `Comic` loaded (e.g. a group card that only
+    /// knows its cover comic's id) don't have to pay for a full multi-table row fetch just to
+    /// generate a thumbnail.
+    func thumbnail(id comicId: Int64, filePath: String, completion: @escaping (PlatformImage?) -> Void) {
         let key = NSNumber(value: comicId)
         if let cached = cache.object(forKey: key) { completion(cached); return }
 
@@ -47,7 +54,7 @@ final class ThumbnailCache: @unchecked Sendable {
                 result = img
             } else {
                 try? FileManager.default.removeItem(at: diskURL)
-                let img = extract(from: comic.filePath)
+                let img = extract(from: filePath)
                 let thumb = img.flatMap { PlatformImage.resized(source: $0, to: thumbSize) }
                 if let thumb { cache.setObject(thumb, forKey: key, cost: thumb.byteSize); save(thumb, to: diskURL) }
                 result = thumb

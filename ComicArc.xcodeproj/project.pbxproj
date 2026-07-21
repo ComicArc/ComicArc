@@ -37,6 +37,7 @@
 		B00000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
 		B00000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* LibraryHealthAnalyzer.swift */; };
 		B00000000000000000000065 /* ImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000065 /* ImportWizardView.swift */; };
+		B00000000000000000000067 /* ReadingOrderManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000067 /* ReadingOrderManagerView.swift */; };
 		B00000000000000000000066 /* SeriesLinkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000066 /* SeriesLinkPickerView.swift */; };
 		B10000000000000000000001 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
 		B10000000000000000000002 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
@@ -89,6 +90,7 @@
 		IB0000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
 		IB0000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* LibraryHealthAnalyzer.swift */; };
 		IB0000000000000000000065 /* ImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000065 /* ImportWizardView.swift */; };
+		IB0000000000000000000067 /* ReadingOrderManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000067 /* ReadingOrderManagerView.swift */; };
 		IB0000000000000000000066 /* SeriesLinkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000066 /* SeriesLinkPickerView.swift */; };
 		IB0000000000000000000017 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
 		IB0000000000000000000018 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
@@ -146,6 +148,7 @@
 		A00000000000000000000062 /* ReadingOrderEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngine.swift; sourceTree = "<group>"; };
 		A00000000000000000000063 /* LibraryHealthAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryHealthAnalyzer.swift; sourceTree = "<group>"; };
 		A00000000000000000000065 /* ImportWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportWizardView.swift; sourceTree = "<group>"; };
+		A00000000000000000000067 /* ReadingOrderManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderManagerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000066 /* SeriesLinkPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesLinkPickerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000013 /* icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "assets/icon.icns"; sourceTree = "<group>"; };
@@ -368,6 +371,7 @@
 				A00000000000000000000023 /* IssueDetailPage.swift */,
 				A00000000000000000000024 /* SeriesManagerView.swift */,
 				A00000000000000000000065 /* ImportWizardView.swift */,
+				A00000000000000000000067 /* ReadingOrderManagerView.swift */,
 				A00000000000000000000066 /* SeriesLinkPickerView.swift */,
 				A00000000000000000000030 /* DuplicatesView.swift */,
 			);
@@ -578,6 +582,7 @@
 				B00000000000000000000023 /* IssueDetailPage.swift in Sources */,
 				B00000000000000000000024 /* SeriesManagerView.swift in Sources */,
 				B00000000000000000000065 /* ImportWizardView.swift in Sources */,
+				B00000000000000000000067 /* ReadingOrderManagerView.swift in Sources */,
 				B00000000000000000000066 /* SeriesLinkPickerView.swift in Sources */,
 				B00000000000000000000025 /* TutorialView.swift in Sources */,
 				B00000000000000000000030 /* DuplicatesView.swift in Sources */,
@@ -639,6 +644,7 @@
 				IB0000000000000000000014 /* IssueDetailPage.swift in Sources */,
 				IB0000000000000000000015 /* SeriesManagerView.swift in Sources */,
 				IB0000000000000000000065 /* ImportWizardView.swift in Sources */,
+				IB0000000000000000000067 /* ReadingOrderManagerView.swift in Sources */,
 				IB0000000000000000000066 /* SeriesLinkPickerView.swift in Sources */,
 				IB0000000000000000000016 /* TutorialView.swift in Sources */,
 				IB0000000000000000000030 /* DuplicatesView.swift in Sources */,

@@ -8,6 +8,14 @@ final class ReadingOrderEngineTests: XCTestCase {
         XCTAssertEqual(ReadingOrderEngine.classify(issueNumber: "12", title: "Batman #12", series: "Batman"), .regular)
     }
 
+    func test_comicType_rawValueRoundTrips() {
+        for type in [ComicType.regular, .annual, .oneShot, .special, .giantSize, .kingSize, .alpha,
+                     .omega, .issueZero, .pointIssue, .directorsCut, .preview, .fcbd, .ashcan,
+                     .holidaySpecial, .tradePaperback, .hardcover, .omnibus, .graphicNovel, .compendium] {
+            XCTAssertEqual(ComicType(rawValue: type.rawValue), type, "rawValue round-trip failed for \(type)")
+        }
+    }
+
     func test_classify_annual() {
         XCTAssertEqual(ReadingOrderEngine.classify(issueNumber: "1", title: "Batman Annual #1", series: "Batman"), .annual)
     }
@@ -189,12 +197,12 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
 
     private func insertComic(series: String, publisher: String = "Marvel", issue: String?,
                               title: String, year: Int? = nil, month: Int? = nil,
-                              comicInfoIssueNumber: String? = nil) {
+                              comicInfoIssueNumber: String? = nil, volume: String? = nil) {
         db.batchInsert([DatabaseManager.ComicInsert(
             title: title, filePath: "/tmp/\(UUID().uuidString).cbz", publisher: publisher,
             character: nil, series: series, issueNumber: issue, pageCount: 20,
             writer: nil, penciller: nil, year: year, storyArc: nil, languageIso: nil, fileHash: nil,
-            coverMonth: month, comicInfoIssueNumber: comicInfoIssueNumber
+            coverMonth: month, comicInfoIssueNumber: comicInfoIssueNumber, volume: volume
         )])
     }
 
@@ -380,6 +388,65 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertTrue(hits.contains { $0.series == "Relaunch" && $0.count == 2 })
     }
 
+    func test_seriesWithMultipleFirstIssues_excludesAnnuals() {
+        insertComic(series: "Robin", issue: "1", title: "Robin #1")
+        insertComic(series: "Robin", issue: "1", title: "Robin Annual #1")
+        let hits = db.seriesWithMultipleFirstIssues()
+        XCTAssertFalse(hits.contains { $0.series == "Robin" })
+    }
+
+    func test_seriesWithMultipleFirstIssues_stillDetectsRealCollisionAlongsideAnnual() {
+        insertComic(series: "Robin", issue: "1", title: "Robin #1")
+        insertComic(series: "Robin", issue: "1", title: "Robin #1 (2nd Printing)")
+        insertComic(series: "Robin", issue: "1", title: "Robin Annual #1")
+        let hits = db.seriesWithMultipleFirstIssues()
+        XCTAssertTrue(hits.contains { $0.series == "Robin" && $0.count == 2 })
+    }
+
+    // MARK: - duplicateGroups()
+
+    func test_duplicateGroups_flagsSameTypeCollision() {
+        insertComic(series: "Robin", issue: "1", title: "Robin #1")
+        insertComic(series: "Robin", issue: "1", title: "Robin #1 (2nd Printing)")
+        let groups = db.duplicateGroups()
+        XCTAssertTrue(groups.contains { $0.count == 2 && $0.allSatisfy { $0.series == "Robin" } })
+    }
+
+    func test_duplicateGroups_doesNotFlagAnnualAgainstRegularIssue() {
+        insertComic(series: "Robin", issue: "1", title: "Robin #1")
+        insertComic(series: "Robin", issue: "1", title: "Robin Annual #1")
+        let groups = db.duplicateGroups()
+        XCTAssertTrue(groups.isEmpty, "Robin #1 and Robin Annual #1 must never be flagged as duplicates")
+    }
+
+    func test_duplicateGroups_doesNotFlagAnnualAgainstRegularIssue_ASM() {
+        insertComic(series: "ASM", issue: "18", title: "The Amazing Spider-Man #18")
+        insertComic(series: "ASM", issue: "18", title: "The Amazing Spider-Man Annual #18")
+        let groups = db.duplicateGroups()
+        XCTAssertTrue(groups.isEmpty, "ASM #18 and ASM Annual #18 must never be flagged as duplicates")
+    }
+
+    func test_duplicateGroups_doesNotFlagAcrossDifferentYears() {
+        insertComic(series: "Legacy", issue: "1", title: "Legacy #1", year: 1990)
+        insertComic(series: "Legacy", issue: "1", title: "Legacy #1", year: 2020)
+        let groups = db.duplicateGroups()
+        XCTAssertTrue(groups.isEmpty, "different-year #1s from different runs should not be flagged")
+    }
+
+    func test_duplicateGroups_toleratesOneYearSlop() {
+        insertComic(series: "Legacy", issue: "1", title: "Legacy #1", year: 1990)
+        insertComic(series: "Legacy", issue: "1", title: "Legacy #1", year: 1991)
+        let groups = db.duplicateGroups()
+        XCTAssertEqual(groups.count, 1, "cover-date vs on-sale-date slop of 1 year should still be treated as the same run")
+    }
+
+    func test_duplicateGroups_doesNotFlagAcrossDifferentVolumes() {
+        insertComic(series: "Legacy", issue: "1", title: "Legacy #1", volume: "1963")
+        insertComic(series: "Legacy", issue: "1", title: "Legacy #1", volume: "2014")
+        let groups = db.duplicateGroups()
+        XCTAssertTrue(groups.isEmpty, "different explicit Volume values should not be flagged as duplicates")
+    }
+
     func test_libraryHealthAnalyzer_reportIsEmptyForCleanLibrary() {
         for n in 1...5 { insertComic(series: "Clean", issue: "\(n)", title: "Clean #\(n)", comicInfoIssueNumber: "\(n)") }
         db.recomputeReadingOrder()
@@ -465,5 +532,62 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertEqual(links.count, 1) // still just the manual one, not replaced/duplicated
         XCTAssertEqual(links.first?.parentSeries, "SomeOtherParent")
         XCTAssertEqual(links.first?.source, "manual")
+    }
+
+    // MARK: - Legacy numbering / filename-mode safety guarantees
+
+    func test_legacyNumber_alwaysWinsForMainlineIssues() {
+        // A dated mainline issue must still sort strictly by its legacy number, never by date,
+        // even when its cover date would suggest a different order than its issue number.
+        insertComic(series: "Chrono", issue: "1", title: "Chrono #1", year: 2020, month: 6)
+        insertComic(series: "Chrono", issue: "2", title: "Chrono #2", year: 2020, month: 1) // earlier date, higher number
+        db.recomputeReadingOrder(mode: .intelligent)
+        let comics = db.allComics(series: "Chrono", sortOrder: .manual)
+        let issue1 = comics.first { $0.title == "Chrono #1" }!
+        let issue2 = comics.first { $0.title == "Chrono #2" }!
+        XCTAssertLessThan(issue1.readingOrderPosition!, issue2.readingOrderPosition!)
+        XCTAssertEqual(issue1.readingOrderConfidence, 100)
+        XCTAssertEqual(issue2.readingOrderConfidence, 100)
+    }
+
+    func test_filenameMode_roundTripsExactlyToOriginalPosition() {
+        for n in 1...5 { insertComic(series: "Roundtrip", issue: "\(n)", title: "Roundtrip #\(n)") }
+        insertComic(series: "Roundtrip", issue: "1", title: "Roundtrip Annual #1")
+        let original = db.allComics(series: "Roundtrip", sortOrder: .manual).map(\.position)
+
+        db.recomputeReadingOrder(mode: .intelligent)
+        db.recomputeReadingOrder(mode: .legacyNumber)
+        db.recomputeReadingOrder(mode: .publicationDate)
+        db.recomputeReadingOrder(mode: .filename)
+
+        let afterRoundTrip = db.allComics(series: "Roundtrip", sortOrder: .manual).map(\.position)
+        XCTAssertEqual(original, afterRoundTrip, "switching modes must never mutate the underlying filename/legacy position")
+    }
+
+    // MARK: - Reading Order Manager (autoPlacedSpecialIssues)
+
+    func test_autoPlacedSpecialIssues_excludesManualAndAlwaysLastBand() {
+        for n in 1...20 { insertComic(series: "Cosmic", issue: "\(n)", title: "Cosmic #\(n)", year: 2000, month: (n % 12) + 1) }
+        insertComic(series: "Cosmic", issue: "1", title: "Cosmic Annual #1", year: 2000, month: 6) // tier1/2, confidence 60-100
+        insertComic(series: "Solo", issue: "1", title: "Solo Special #1") // no mainline siblings -> always-last band, confidence 0
+        db.recomputeReadingOrder(mode: .intelligent)
+
+        let suggestions = db.autoPlacedSpecialIssues()
+        XCTAssertTrue(suggestions.contains { $0.title == "Cosmic Annual #1" })
+        XCTAssertFalse(suggestions.contains { $0.title == "Solo Special #1" }, "confidence-0 always-last placements aren't real suggestions to review")
+        XCTAssertTrue(suggestions.allSatisfy { ($0.readingOrderConfidence ?? 0) >= 1 && ($0.readingOrderConfidence ?? 0) <= 99 })
+    }
+
+    func test_autoPlacedSpecialIssues_excludesManuallyOverriddenIssues() {
+        for n in 1...20 { insertComic(series: "Cosmic", issue: "\(n)", title: "Cosmic #\(n)", year: 2000, month: (n % 12) + 1) }
+        insertComic(series: "Cosmic", issue: "1", title: "Cosmic Annual #1", year: 2000, month: 6)
+        db.recomputeReadingOrder(mode: .intelligent)
+        let annual = db.allComics(series: "Cosmic", sortOrder: .manual).first { $0.title.contains("Annual") }!
+
+        db.setReadingOrderOverride(comicId: annual.id, position: annual.position)
+        db.recomputeReadingOrder(mode: .intelligent)
+
+        let suggestions = db.autoPlacedSpecialIssues()
+        XCTAssertFalse(suggestions.contains { $0.id == annual.id }, "a manually-confirmed placement (confidence 100) shouldn't still show up as a pending suggestion")
     }
 }

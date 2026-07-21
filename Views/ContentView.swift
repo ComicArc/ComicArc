@@ -152,6 +152,8 @@ struct ContentView: View {
             ReadingHistoryView()
         case .duplicates:
             DuplicatesView()
+        case .readingOrderManager:
+            ReadingOrderManagerView()
         case .settings:
             SettingsView()
         }
@@ -366,6 +368,11 @@ struct SidebarView: View {
                         if !vm.duplicateGroups.isEmpty {
                             navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
                                    trailingText: "\(vm.duplicateGroups.count)")
+                        }
+                    } else if discoverItem == .readingOrderManager {
+                        if !vm.autoPlacedIssues.isEmpty {
+                            navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                   trailingText: "\(vm.autoPlacedIssues.count)")
                         }
                     } else {
                         navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)

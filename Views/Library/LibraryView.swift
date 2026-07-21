@@ -620,8 +620,8 @@ private struct GroupCard: View {
             if let img = ThumbnailCache.shared.thumbnailFromCache(comicId: coverId) {
                 await MainActor.run { thumbnail = img }; return
             }
-            if let comic = DatabaseManager.shared.comic(id: coverId) {
-                ThumbnailCache.shared.thumbnail(for: comic) { img in
+            if let path = DatabaseManager.shared.filePath(forComicId: coverId) {
+                ThumbnailCache.shared.thumbnail(id: coverId, filePath: path) { img in
                     DispatchQueue.main.async { thumbnail = img }
                 }
             }

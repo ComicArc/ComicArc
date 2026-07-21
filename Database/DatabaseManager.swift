@@ -44,6 +44,16 @@ final class DatabaseManager: @unchecked Sendable {
             let special = ComicSortClassifier.isSpecialIssue(issueNumber: text(0), title: text(1), series: text(2))
             sqlite3_result_int(context, special ? 1 : 0)
         }, nil, nil, nil)
+
+        sqlite3_create_function_v2(db, "comic_type", 3, SQLITE_UTF8, nil, { context, argc, argv in
+            guard let context, let argv, argc >= 3 else { return }
+            func text(_ i: Int32) -> String {
+                guard let p = sqlite3_value_text(argv[Int(i)]) else { return "" }
+                return String(cString: p)
+            }
+            let type = ReadingOrderEngine.classify(issueNumber: text(0), title: text(1), series: text(2))
+            sqlite3_result_text(context, type.rawValue, -1, SQLITE_TRANSIENT)
+        }, nil, nil, nil)
     }
 
     private func recoverIfCorrupted(dbURL: URL) {
@@ -403,6 +413,13 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN gcd_series_name TEXT")
         exec("ALTER TABLE comics ADD COLUMN gcd_issue_number TEXT")
 
+        // Captured from ComicInfo.xml's <Volume> tag when present — disambiguates two runs of
+        // the same series (e.g. a 1963 and a 2014 "Amazing Spider-Man") that would otherwise
+        // both claim issue #1, without touching series/publisher identity itself.
+        exec("ALTER TABLE comics ADD COLUMN volume TEXT")
+
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_pub_series_issue ON comics(publisher, series, issue_number) WHERE deleted_at IS NULL")
+
         exec("""
         UPDATE comics SET position =
             is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
@@ -412,8 +429,21 @@ final class DatabaseManager: @unchecked Sendable {
 
         resortSpecialIssuesIfNeeded()
         widenMainlinePositionStrideIfNeeded()
+        recomputeOnceAfterUpgradeIfNeeded()
+    }
+
+    /// `positionSpecialsChronologically()`/`recomputeReadingOrder()` used to run unconditionally
+    /// on every single launch (a full-table scan/sort/writeback), which is pure waste on every
+    /// steady-state launch — every real mutation point (scan completion, GCD download, series-
+    /// link change, mode switch, import) already independently triggers its own recompute. Gate
+    /// this to run once, only to backfill libraries that predate this feature.
+    private func recomputeOnceAfterUpgradeIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'readingOrderRecomputeGateV1'") > 0
+        guard !alreadyRun else { return }
         positionSpecialsChronologically()
         recomputeReadingOrder()
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('readingOrderRecomputeGateV1')")
     }
 
     private func resortSpecialIssuesIfNeeded() {
@@ -865,6 +895,7 @@ final class DatabaseManager: @unchecked Sendable {
             rows("""
                 SELECT publisher, series, COUNT(*) FROM comics
                 WHERE deleted_at IS NULL AND CAST(NULLIF(issue_number, '') AS REAL) = 1
+                      AND comic_type(issue_number, title, series) = 'regular'
                 GROUP BY publisher, series HAVING COUNT(*) > 1
                 """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
         }
@@ -887,6 +918,7 @@ final class DatabaseManager: @unchecked Sendable {
             series: colText(s, 5) ?? "General", issueNumber: colText(s, 6),
             pageCount: colInt(s, 7), writer: colText(s, 8), penciller: colText(s, 9),
             year: sqlite3_column_type(s, 10) != SQLITE_NULL ? colInt(s, 10) : nil,
+            volume: colText(s, 30),
             storyArc: colText(s, 11), languageIso: colText(s, 12), notes: colText(s, 13),
             addedAt: colText(s, 14) ?? "", deletedAt: colText(s, 15),
             position: colInt(s, 16), fileHash: colText(s, 17),
@@ -912,7 +944,7 @@ final class DatabaseManager: @unchecked Sendable {
                (f.comic_id IS NOT NULL) as is_favorite,
                (rl.comic_id IS NOT NULL) as in_reading_list,
                r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
-               c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number
+               c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id
@@ -981,6 +1013,15 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    /// Cheap single-column lookup for callers (like thumbnail generation) that only need the file
+    /// path, avoiding `comic(id:)`'s full multi-table join.
+    func filePath(forComicId id: Int64) -> String? {
+        queue.sync {
+            rows("SELECT file_path FROM comics WHERE id = ? AND deleted_at IS NULL", args: [id],
+                 map: { colText($0, 0) ?? "" }).first
+        }
+    }
+
     func inProgress(limit: Int = 20) -> [Comic] {
         queue.sync {
             rows("""
@@ -1025,6 +1066,7 @@ final class DatabaseManager: @unchecked Sendable {
         var storyArcNumber: String? = nil
         var seriesGroup: String? = nil
         var comicInfoIssueNumber: String? = nil
+        var volume: String? = nil
     }
 
     func insert(comic: (title: String, filePath: String, publisher: String, character: String?,
@@ -1044,7 +1086,8 @@ final class DatabaseManager: @unchecked Sendable {
                 _insertRow(c.title, c.filePath, c.publisher, c.character,
                            c.series, c.issueNumber, c.pageCount, c.writer,
                            c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash, c.coverMonth,
-                           c.coverDay, c.alternateNumber, c.storyArcNumber, c.seriesGroup, c.comicInfoIssueNumber)
+                           c.coverDay, c.alternateNumber, c.storyArcNumber, c.seriesGroup, c.comicInfoIssueNumber,
+                           c.volume)
             }
             exec("COMMIT")
         }
@@ -1055,18 +1098,20 @@ final class DatabaseManager: @unchecked Sendable {
                              _ penciller: String?, _ year: Int?, _ storyArc: String?, _ languageIso: String?,
                              _ fileHash: String?, _ coverMonth: Int? = nil, _ coverDay: Int? = nil,
                              _ alternateNumber: String? = nil, _ storyArcNumber: String? = nil,
-                             _ seriesGroup: String? = nil, _ comicInfoIssueNumber: String? = nil) {
+                             _ seriesGroup: String? = nil, _ comicInfoIssueNumber: String? = nil,
+                             _ volume: String? = nil) {
         _ = run("""
         INSERT OR IGNORE INTO comics
             (title, file_path, publisher, character, series, issue_number,
              page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
-             cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number, volume)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, args: [title, filePath, publisher, character,
                     series, issueNumber, pageCount, writer,
                     penciller, year.map { Int64($0) }, storyArc,
                     languageIso, fileHash, coverMonth.map { Int64($0) },
-                    coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup, comicInfoIssueNumber])
+                    coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup, comicInfoIssueNumber,
+                    volume])
     }
 
     func zeroPageCountPaths() -> [(id: Int64, path: String)] {
@@ -1312,24 +1357,32 @@ final class DatabaseManager: @unchecked Sendable {
 
     func duplicateGroups() -> [[Comic]] {
         queue.sync {
+            // comic_type(...) is included in the GROUP BY / JOIN key so an annual and a regular
+            // issue that happen to share an issue number are never treated as duplicates of each
+            // other — see comic_type registration in registerCustomFunctions().
             let flat = rows("""
                 \(comicSelect)
                 JOIN (
-                    SELECT publisher, series, issue_number
+                    SELECT publisher, series, issue_number,
+                           comic_type(issue_number, title, series) AS ctype
                     FROM comics
                     WHERE deleted_at IS NULL AND issue_number IS NOT NULL AND issue_number != ''
-                    GROUP BY publisher, series, issue_number
+                    GROUP BY publisher, series, issue_number, ctype
                     HAVING COUNT(*) > 1
-                ) dup ON dup.publisher = c.publisher AND dup.series = c.series AND dup.issue_number = c.issue_number
+                ) dup ON dup.publisher = c.publisher AND dup.series = c.series
+                     AND dup.issue_number = c.issue_number
+                     AND dup.ctype = comic_type(c.issue_number, c.title, c.series)
                 WHERE c.deleted_at IS NULL
-                ORDER BY c.publisher, c.series, CAST(c.issue_number AS INTEGER)
+                ORDER BY c.publisher, c.series, CAST(c.issue_number AS INTEGER),
+                         comic_type(c.issue_number, c.title, c.series)
             """, map: comicRow)
 
             guard !flat.isEmpty else { return [] }
             var groups: [[Comic]] = []
-            var currentKey: (String, String, String)? = nil
+            var currentKey: (String, String, String, ComicType)? = nil
             for comic in flat {
-                let key = (comic.publisher, comic.series, comic.issueNumber ?? "")
+                let type = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title, series: comic.series)
+                let key = (comic.publisher, comic.series, comic.issueNumber ?? "", type)
                 if currentKey == nil || currentKey! != key {
                     groups.append([comic])
                     currentKey = key
@@ -1337,7 +1390,51 @@ final class DatabaseManager: @unchecked Sendable {
                     groups[groups.count - 1].append(comic)
                 }
             }
-            return groups
+
+            // Two comics sharing (publisher, series, issue_number, type) can still be different
+            // volumes/runs rather than real duplicates — split them apart when the metadata says
+            // so. Conservative: only ever removes false positives, never adds new ones, since it
+            // only acts when the disambiguating metadata is actually present.
+            return groups.flatMap(splitByVolumeOrYear)
+        }
+    }
+
+    /// Splits a duplicate-candidate group into subgroups when members have differing, explicit
+    /// `volume` values, or `year` values that differ by more than 1 (allowing slop between cover
+    /// date and on-sale date within a single real print run). Members with no signal on either
+    /// side are never split apart by that signal.
+    private func splitByVolumeOrYear(_ group: [Comic]) -> [[Comic]] {
+        guard group.count > 1 else { return [group] }
+        var buckets: [[Comic]] = []
+        outer: for comic in group {
+            for i in buckets.indices {
+                let compatible = buckets[i].allSatisfy { existing in
+                    if let v1 = comic.volume, let v2 = existing.volume, v1 != v2 { return false }
+                    if let y1 = comic.year, let y2 = existing.year, abs(y1 - y2) > 1 { return false }
+                    return true
+                }
+                if compatible {
+                    buckets[i].append(comic)
+                    continue outer
+                }
+            }
+            buckets.append([comic])
+        }
+        return buckets.filter { $0.count > 1 }
+    }
+
+    /// Comics the Reading Order Engine auto-placed via tiers 1-4 (a real signal-based placement,
+    /// not the always-last band and not a manual/legacy-number position) — these are exactly the
+    /// "suggestions" the Reading Order Manager screen lets a user review individually.
+    func autoPlacedSpecialIssues() -> [Comic] {
+        queue.sync {
+            rows("""
+                \(comicSelect)
+                WHERE c.deleted_at IS NULL
+                      AND c.reading_order_confidence IS NOT NULL
+                      AND c.reading_order_confidence BETWEEN 1 AND 99
+                ORDER BY c.publisher, c.series, c.reading_order_position
+            """, map: comicRow)
         }
     }
 

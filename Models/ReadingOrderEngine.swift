@@ -1,6 +1,6 @@
 import Foundation
 
-enum ComicType: Equatable {
+enum ComicType: String, Equatable {
     case regular
     case annual
     case oneShot
@@ -29,6 +29,24 @@ enum ComicType: Equatable {
             return false
         default:
             return true
+        }
+    }
+
+    /// Suffix appended to an ideal filename (see `ComicFileNaming`) to distinguish this
+    /// type from a regular issue. `nil` means no suffix is needed.
+    var fileNameSuffix: String? {
+        switch self {
+        case .annual:         return "Annual"
+        case .oneShot:        return "One-Shot"
+        case .special:        return "Special"
+        case .giantSize:      return "Giant-Size"
+        case .kingSize:       return "King-Size"
+        case .holidaySpecial: return "Holiday Special"
+        case .directorsCut:   return "Director's Cut"
+        case .fcbd:           return "FCBD"
+        case .ashcan:         return "Ashcan"
+        case .preview:        return "Preview"
+        default:              return nil
         }
     }
 }

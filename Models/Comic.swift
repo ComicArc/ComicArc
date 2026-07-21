@@ -12,6 +12,7 @@ struct Comic: Identifiable, Equatable, Hashable {
     var writer: String?
     var penciller: String?
     var year: Int?
+    var volume: String?
     var storyArc: String?
     var languageIso: String?
     var notes: String?
@@ -26,7 +27,6 @@ struct Comic: Identifiable, Equatable, Hashable {
     var review: String? = nil
     var isFavorite: Bool = false
     var inReadingList: Bool = false
-    var tags: [String] = []
 
     var readingOrderPosition: Int? = nil
     var readingOrderConfidence: Int? = nil

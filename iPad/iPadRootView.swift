@@ -165,6 +165,12 @@ private struct iPadSidebar: View {
                                 .tag(item.destination)
                                 .badge(vm.duplicateGroups.count)
                         }
+                    } else if item == .readingOrderManager {
+                        if !vm.autoPlacedIssues.isEmpty {
+                            Label(item.title, systemImage: item.icon)
+                                .tag(item.destination)
+                                .badge(vm.autoPlacedIssues.count)
+                        }
                     } else {
                         Label(item.title, systemImage: item.icon).tag(item.destination)
                     }
@@ -237,6 +243,9 @@ private struct iPadContentColumn: View {
             case .duplicates:
                 DuplicatesView().environmentObject(vm)
                     .navigationTitle("Possible Duplicates")
+            case .readingOrderManager:
+                ReadingOrderManagerView().environmentObject(vm)
+                    .navigationTitle("Reading Order Suggestions")
             case .settings:
                 iPadSettingsView()
                     .navigationTitle("Settings")

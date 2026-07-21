@@ -33,9 +33,15 @@ struct ImportWizardView: View {
                             icon: "arrow.up.arrow.down.circle.fill",
                             detail: "\(report.needsSpecialReposition.reduce(0) { $0 + $1.count }) issue(s) across \(report.needsSpecialReposition.count) series. This tries to place them better using their cover date and story."
                         ) {
-                            Button(isRepositioning ? "Fixing…" : "Fix Automatically") { repositionSpecials() }
-                                .buttonStyle(.borderedProminent).tint(Design.brandGold)
-                                .disabled(isRepositioning)
+                            HStack {
+                                Button(isRepositioning ? "Fixing…" : "Fix Automatically") { repositionSpecials() }
+                                    .buttonStyle(.borderedProminent).tint(Design.brandGold)
+                                    .disabled(isRepositioning)
+                                Button("Review Individually") {
+                                    vm.destination = .readingOrderManager
+                                    dismiss()
+                                }.buttonStyle(.bordered)
+                            }
                         }
                     }
                     if report.duplicateGroupCount > 0 {

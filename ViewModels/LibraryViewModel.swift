@@ -14,6 +14,7 @@ enum AppDestination: Hashable, Codable {
     case stats
     case history
     case duplicates
+    case readingOrderManager
     case settings
 
     var title: String {
@@ -28,6 +29,7 @@ enum AppDestination: Hashable, Codable {
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
+        case .readingOrderManager:  return "Reading Order Suggestions"
         case .settings:             return "Settings"
         }
     }
@@ -44,6 +46,7 @@ enum AppDestination: Hashable, Codable {
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
         case .duplicates:           return "doc.on.doc"
+        case .readingOrderManager:  return "checkmark.seal"
         case .settings:             return "gear"
         }
     }
@@ -125,6 +128,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var showSeriesManager: Bool = false
 
     @Published var duplicateGroups:   [[Comic]] = []
+    @Published var autoPlacedIssues:  [Comic] = []
 
     var selectedSection: SidebarSection {
         switch destination {
@@ -132,6 +136,7 @@ final class LibraryViewModel: ObservableObject {
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
+        case .readingOrderManager: return .readingOrderManager
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
         case .readingList:     return .readingList
@@ -150,7 +155,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, readingOrderManager, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -541,7 +546,11 @@ final class LibraryViewModel: ObservableObject {
     func refreshDuplicates() {
         Task.detached(priority: .utility) { [db] in
             let groups = db.duplicateGroups()
-            await MainActor.run { self.duplicateGroups = groups }
+            let autoPlaced = db.autoPlacedSpecialIssues()
+            await MainActor.run {
+                self.duplicateGroups = groups
+                self.autoPlacedIssues = autoPlaced
+            }
         }
     }
 
@@ -798,6 +807,15 @@ final class LibraryViewModel: ObservableObject {
     func reorderComics(orderedIds: [Int64]) {
         db.reorderComics(orderedIds: orderedIds)
         if sortOrder != .manual { sortOrder = .manual }
+    }
+
+    /// Pins an auto-placed special/annual back to its plain (filename/legacy) position, reusing
+    /// the same manual-override mechanism Series Manager uses — so it survives future recomputes
+    /// and is undoable via "Undo My Manual Fixes" in Settings, exactly like any manual edit.
+    func rejectAutoPlacement(_ comic: Comic) {
+        db.setReadingOrderOverride(comicId: comic.id, position: comic.position, reason: "Manually placed")
+        db.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+        reload()
     }
 
     @discardableResult
