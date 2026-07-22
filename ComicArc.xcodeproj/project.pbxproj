@@ -107,6 +107,7 @@
 		B00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
 		B00000000000000000000013 /* icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* icon.icns */; };
 		E00000000000000000000003 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000002 /* ZIPFoundation */; };
+		E00000000000000000000022 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000021 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -188,6 +189,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E00000000000000000000003 /* ZIPFoundation in Frameworks */,
+				E00000000000000000000022 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -435,6 +437,7 @@
 			name = ComicArc;
 			packageProductDependencies = (
 				E00000000000000000000002 /* ZIPFoundation */,
+				E00000000000000000000021 /* Sparkle */,
 			);
 			productName = ComicArc;
 			productReference = A00000000000000000000016 /* ComicArc.app */;
@@ -532,6 +535,7 @@
 			mainGroup = C00000000000000000000001;
 			packageReferences = (
 				E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */,
+				E00000000000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = C00000000000000000000002 /* Products */;
 			projectDirPath = "";
@@ -992,6 +996,17 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		E00000000000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCLocalSwiftPackageReference section */
 		E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -1009,6 +1024,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		E00000000000000000000021 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E00000000000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 

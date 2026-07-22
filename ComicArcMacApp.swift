@@ -1,9 +1,13 @@
 import SwiftUI
+#if os(macOS)
+import Sparkle
+#endif
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let servicesProvider = ComicArcServicesProvider()
+    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Guards against duplicate running copies (e.g. double-clicking the Dock icon while a
@@ -37,6 +41,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let comics = urls.filter { ["cbz", "cbr", "pdf"].contains($0.pathExtension.lowercased()) }
         guard !comics.isEmpty else { return }
         LibraryViewModel.shared.importFiles(comics)
+    }
+}
+
+private final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+
+    init(updater: SPUUpdater) {
+        updater.publisher(for: \.canCheckForUpdates)
+            .assign(to: &$canCheckForUpdates)
+    }
+}
+
+struct CheckForUpdatesView: View {
+    @ObservedObject private var viewModel: CheckForUpdatesViewModel
+    private let updater: SPUUpdater
+
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        self.viewModel = CheckForUpdatesViewModel(updater: updater)
+    }
+
+    var body: some View {
+        Button("Check for Updates…") { updater.checkForUpdates() }
+            .disabled(!viewModel.canCheckForUpdates)
     }
 }
 
@@ -101,6 +129,10 @@ struct ComicArcApp: App {
         }
         #if os(macOS)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: appDelegate.updaterController.updater)
+            }
+
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .printItem) {}
