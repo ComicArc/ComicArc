@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if let existing = others.first {
-            existing.activate(options: [.activateIgnoringOtherApps])
+            existing.activate()
             NSApp.terminate(nil)
         }
     }
