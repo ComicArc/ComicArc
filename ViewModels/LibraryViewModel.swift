@@ -813,9 +813,24 @@ final class LibraryViewModel: ObservableObject {
     /// the same manual-override mechanism Series Manager uses — so it survives future recomputes
     /// and is undoable via "Undo My Manual Fixes" in Settings, exactly like any manual edit.
     func rejectAutoPlacement(_ comic: Comic) {
-        db.setReadingOrderOverride(comicId: comic.id, position: comic.position, reason: "Manually placed")
-        db.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
-        reload()
+        Task.detached(priority: .userInitiated) { [db] in
+            db.setReadingOrderOverride(comicId: comic.id, position: comic.position, reason: "Manually placed")
+            db.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+            await MainActor.run { self.reload(); self.refreshDuplicates() }
+        }
+    }
+
+    /// "Looks Right" in the Reading Order Manager: locks the comic's current, already-computed
+    /// position in place with a durable override, so it survives future recomputes and stops
+    /// reappearing as a pending suggestion — distinct from "Not Right", which reverts to the
+    /// plain filename/legacy position instead.
+    func confirmAutoPlacement(_ comic: Comic) {
+        Task.detached(priority: .userInitiated) { [db] in
+            let pinned = comic.readingOrderPosition ?? comic.position
+            db.setReadingOrderOverride(comicId: comic.id, position: pinned, reason: "Confirmed correct")
+            db.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
+            await MainActor.run { self.reload(); self.refreshDuplicates() }
+        }
     }
 
     @discardableResult

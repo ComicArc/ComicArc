@@ -13,6 +13,7 @@ struct Comic: Identifiable, Equatable, Hashable {
     var penciller: String?
     var year: Int?
     var volume: String?
+    var format: String?
     var storyArc: String?
     var languageIso: String?
     var notes: String?

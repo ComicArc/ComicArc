@@ -72,7 +72,33 @@ enum ReadingOrderEngine {
         ("SPECIAL", .special),
     ]
 
-    static func classify(issueNumber: String?, title: String, series: String) -> ComicType {
+    /// ComicInfo.xml's own `<Format>` tag ("Annual", "TPB", "One-Shot", ...) — checked before the
+    /// title/series keyword scan when present, since it's the file's own explicit metadata rather
+    /// than an inference from free text. "Digital Chapter" and unrecognized values fall through
+    /// to the normal keyword/numeric classification.
+    private static let comicInfoFormatMap: [(String, ComicType)] = [
+        ("ANNUAL", .annual),
+        ("ONE-SHOT", .oneShot), ("ONESHOT", .oneShot), ("ONE SHOT", .oneShot),
+        ("SPECIAL", .special),
+        ("GIANT-SIZE", .giantSize), ("GIANT SIZE", .giantSize), ("GIANT", .giantSize),
+        ("KING-SIZE", .kingSize), ("KING SIZE", .kingSize),
+        ("FCBD", .fcbd), ("FREE COMIC BOOK DAY", .fcbd),
+        ("ASHCAN", .ashcan),
+        ("PREVIEW", .preview),
+        ("OMNIBUS", .omnibus), ("COMPENDIUM", .compendium),
+        ("HARDCOVER", .hardcover),
+        ("GRAPHIC NOVEL", .graphicNovel),
+        ("TPB", .tradePaperback), ("TRADE PAPERBACK", .tradePaperback),
+    ]
+
+    static func classify(issueNumber: String?, title: String, series: String, format: String? = nil) -> ComicType {
+        if let format, !format.isEmpty {
+            let upper = format.uppercased()
+            if let match = comicInfoFormatMap.first(where: { upper.contains($0.0) }) {
+                return match.1
+            }
+        }
+
         let haystack = [issueNumber ?? "", title, series].joined(separator: " ").uppercased()
 
         for (keyword, type) in typeKeywords where haystack.contains(keyword) {
@@ -132,7 +158,7 @@ enum ReadingOrderEngine {
     static func computeSeriesPositions(_ inputs: [ReadingOrderInput]) -> [Int64: ReadingOrderResult] {
         var results: [Int64: ReadingOrderResult] = [:]
 
-        for (_, group) in Dictionary(grouping: inputs, by: \.groupKey) {
+        for (groupKey, group) in Dictionary(grouping: inputs, by: \.groupKey) {
 
             var mainline: [(input: ReadingOrderInput, position: Int)] = []
             for input in group where !input.comicType.needsPlacement {
@@ -153,6 +179,14 @@ enum ReadingOrderEngine {
             let specials = group.filter { $0.comicType.needsPlacement }
             var placedIds = Set<Int64>()
 
+            // Tier 1/2 candidates are collected first, then interpolated per-bracket below —
+            // two specials that would otherwise land in the exact same date gap (e.g. two
+            // annuals in the same month) get distinct, ordered positions instead of colliding
+            // on the identical integer.
+            var tier1ByBracket: [Int: [(special: ReadingOrderInput, specialKey: Int)]] = [:]
+            var tier2Before: [(special: ReadingOrderInput, specialKey: Int)] = []
+            var tier2After: [(special: ReadingOrderInput, specialKey: Int)] = []
+
             for special in specials {
                 guard let sy = special.year, let sm = special.month else { continue }
                 let specialKey = dateKey(year: sy, month: sm, day: special.day)
@@ -162,47 +196,89 @@ enum ReadingOrderEngine {
                 }
 
                 if let afterIdx, afterIdx > 0 {
-
-                    let before = mainlineDated[afterIdx - 1]
-                    let after  = mainlineDated[afterIdx]
-                    guard after.position - before.position > 1 else { continue }
-                    let pos = before.position + (after.position - before.position) / 2
-                    results[special.id] = ReadingOrderResult(
-                        position: pos, confidence: 100,
-                        reason: "Cover date places it between \(before.input.title.isEmpty ? "the previous" : before.input.title) and \(after.input.title.isEmpty ? "the next" : after.input.title) issue"
-                    )
-                    placedIds.insert(special.id)
+                    tier1ByBracket[afterIdx - 1, default: []].append((special, specialKey))
                 } else if mainlineDated.count == 1 {
-
-                    let only = mainlineDated[0]
-                    let onlyKey = dateKey(year: only.input.year!, month: only.input.month!, day: only.input.day)
-                    let pos = specialKey < onlyKey ? only.position - 1 : only.position + 1
-                    results[special.id] = ReadingOrderResult(
-                        position: pos, confidence: 85,
-                        reason: "Cover date places it \(specialKey < onlyKey ? "before" : "after") \(only.input.title.isEmpty ? "the only dated issue in this series" : only.input.title) (only one dated neighbor available)"
-                    )
-                    placedIds.insert(special.id)
+                    let onlyKey = dateKey(year: mainlineDated[0].input.year!, month: mainlineDated[0].input.month!, day: mainlineDated[0].input.day)
+                    if specialKey < onlyKey { tier2Before.append((special, specialKey)) }
+                    else { tier2After.append((special, specialKey)) }
                 }
             }
 
+            for (beforeIdx, bracket) in tier1ByBracket {
+                let before = mainlineDated[beforeIdx]
+                let after  = mainlineDated[beforeIdx + 1]
+                guard after.position - before.position > 1 else { continue }
+                let sorted = bracket.sorted {
+                    $0.specialKey != $1.specialKey ? $0.specialKey < $1.specialKey : sequenceKey($0.special) < sequenceKey($1.special)
+                }
+                let n = sorted.count
+                for (idx, item) in sorted.enumerated() {
+                    let pos = n == 1
+                        ? before.position + (after.position - before.position) / 2
+                        : before.position + Int((Double(after.position - before.position) * (Double(idx + 1) / Double(n + 1))).rounded())
+                    results[item.special.id] = ReadingOrderResult(
+                        position: pos, confidence: 100,
+                        reason: "Cover date places it between \(before.input.title.isEmpty ? "the previous" : before.input.title) and \(after.input.title.isEmpty ? "the next" : after.input.title) issue"
+                    )
+                    placedIds.insert(item.special.id)
+                }
+            }
+
+            if let only = mainlineDated.first, mainlineDated.count == 1 {
+                for (side, reversed, offset) in [(tier2Before, true, -1), (tier2After, false, 1)] {
+                    let sorted = side.sorted {
+                        $0.specialKey != $1.specialKey
+                            ? (reversed ? $0.specialKey > $1.specialKey : $0.specialKey < $1.specialKey)
+                            : sequenceKey($0.special) < sequenceKey($1.special)
+                    }
+                    for (idx, item) in sorted.enumerated() {
+                        let pos = only.position + offset * (idx + 1)
+                        results[item.special.id] = ReadingOrderResult(
+                            position: pos, confidence: 85,
+                            reason: "Cover date places it \(offset < 0 ? "before" : "after") \(only.input.title.isEmpty ? "the only dated issue in this series" : only.input.title) (only one dated neighbor available)"
+                        )
+                        placedIds.insert(item.special.id)
+                    }
+                }
+            }
+
+            // Tier 3: story-arc match. Grouped by which mainline issue they matched so multiple
+            // specials sharing the same arc get distinct, ordered positions after it, not the
+            // identical `match.position + 1`. A special whose year also matches its matched
+            // mainline issue's year is corroborated by two independent signals, not one, and
+            // gets a modestly higher confidence to reflect that.
+            var tier3ByMatch: [Int64: (matchPos: Int, matchTitle: String, matchYear: Int?, items: [(special: ReadingOrderInput, arc: String)])] = [:]
             for special in specials where !placedIds.contains(special.id) {
                 guard let arc = special.storyArc, !arc.isEmpty else { continue }
                 guard let match = mainline.first(where: { $0.input.storyArc == arc }) else { continue }
-                results[special.id] = ReadingOrderResult(
-                    position: match.position + 1, confidence: 85,
-                    reason: "Shares story arc \"\(arc)\" with \(match.input.title.isEmpty ? "a mainline issue" : match.input.title)"
-                )
-                placedIds.insert(special.id)
+                tier3ByMatch[match.input.id, default: (match.position, match.input.title, match.input.year, [])].items.append((special, arc))
+            }
+            for (_, bucket) in tier3ByMatch {
+                let sorted = bucket.items.sorted { sequenceKey($0.special) < sequenceKey($1.special) }
+                for (idx, item) in sorted.enumerated() {
+                    let corroborated = item.special.year != nil && item.special.year == bucket.matchYear
+                    results[item.special.id] = ReadingOrderResult(
+                        position: bucket.matchPos + idx + 1, confidence: corroborated ? 90 : 85,
+                        reason: "Shares story arc \"\(item.arc)\" with \(bucket.matchTitle.isEmpty ? "a mainline issue" : bucket.matchTitle)"
+                    )
+                    placedIds.insert(item.special.id)
+                }
             }
 
             guard let minPos = mainline.first?.position, let maxPos = mainline.last?.position,
                   maxPos > minPos, mainline.count >= 2 else {
 
+                // No mainline siblings to place relative to. `alwaysLastBand` is shared across
+                // every series, so a deterministic (not Swift's randomized String hash — that
+                // would differ across app launches and break idempotency) hash of the group key
+                // buckets each series into its own band, keeping unrelated series' always-last
+                // specials from colliding on the same position.
+                let band = alwaysLastBand + stableHash(groupKey) * mainlineStride
                 let undated = specials.filter { !placedIds.contains($0.id) }
                     .sorted { sequenceKey($0) < sequenceKey($1) }
                 for (idx, special) in undated.enumerated() {
                     results[special.id] = ReadingOrderResult(
-                        position: alwaysLastBand + idx, confidence: 0,
+                        position: band + idx, confidence: 0,
                         reason: "No mainline issues found in this series to place it relative to"
                     )
                 }
@@ -232,5 +308,17 @@ enum ReadingOrderEngine {
 
     private static func formatNumber(_ n: Double) -> String {
         n == n.rounded(.towardZero) ? String(Int(n)) : String(n)
+    }
+
+    /// Deterministic (not randomized like Swift's `Hashable`) hash, so the same group key always
+    /// buckets to the same value across separate app launches — required since Tier 5's band
+    /// offset is a persisted `reading_order_position` value that must stay idempotent.
+    private static func stableHash(_ s: String) -> Int {
+        var hash: UInt64 = 14695981039346656037
+        for byte in s.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 1099511628211
+        }
+        return Int(hash % 1_000_000)
     }
 }

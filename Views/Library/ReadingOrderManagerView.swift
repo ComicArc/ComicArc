@@ -3,11 +3,12 @@ import SwiftUI
 struct ReadingOrderManagerView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var dismissedIds: Set<Int64> = []
+    @State private var visibleGroups: [(key: String, comics: [Comic])] = []
 
-    private var visibleGroups: [(key: String, comics: [Comic])] {
+    private func recomputeVisibleGroups() {
         let visible = vm.autoPlacedIssues.filter { !dismissedIds.contains($0.id) }
         let grouped = Dictionary(grouping: visible) { "\($0.publisher), \($0.series)" }
-        return grouped.sorted { $0.key < $1.key }.map { (key: $0.key, comics: $0.value) }
+        visibleGroups = grouped.sorted { $0.key < $1.key }.map { (key: $0.key, comics: $0.value) }
     }
 
     var body: some View {
@@ -24,7 +25,10 @@ struct ReadingOrderManagerView: View {
                         ForEach(visibleGroups, id: \.key) { group in
                             SuggestionGroupCard(
                                 title: group.key, comics: group.comics,
-                                onLooksRight: { comic in dismissedIds.insert(comic.id) },
+                                onLooksRight: { comic in
+                                    vm.confirmAutoPlacement(comic)
+                                    dismissedIds.insert(comic.id)
+                                },
                                 onNotRight: { comic in
                                     vm.rejectAutoPlacement(comic)
                                     dismissedIds.insert(comic.id)
@@ -39,6 +43,9 @@ struct ReadingOrderManagerView: View {
         .background(Design.appBackground)
         .navigationTitle("Reading Order Suggestions")
         .task { vm.refreshDuplicates() }
+        .onChange(of: vm.autoPlacedIssues) { _, _ in recomputeVisibleGroups() }
+        .onChange(of: dismissedIds) { _, _ in recomputeVisibleGroups() }
+        .onAppear { recomputeVisibleGroups() }
     }
 
     private var emptyState: some View {

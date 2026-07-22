@@ -196,13 +196,16 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     private func insertComic(series: String, publisher: String = "Marvel", issue: String?,
-                              title: String, year: Int? = nil, month: Int? = nil,
-                              comicInfoIssueNumber: String? = nil, volume: String? = nil) {
+                              title: String, year: Int? = nil, month: Int? = nil, day: Int? = nil,
+                              comicInfoIssueNumber: String? = nil, volume: String? = nil,
+                              format: String? = nil, fileHash: String? = nil,
+                              alternateNumber: String? = nil) {
         db.batchInsert([DatabaseManager.ComicInsert(
             title: title, filePath: "/tmp/\(UUID().uuidString).cbz", publisher: publisher,
             character: nil, series: series, issueNumber: issue, pageCount: 20,
-            writer: nil, penciller: nil, year: year, storyArc: nil, languageIso: nil, fileHash: nil,
-            coverMonth: month, comicInfoIssueNumber: comicInfoIssueNumber, volume: volume
+            writer: nil, penciller: nil, year: year, storyArc: nil, languageIso: nil, fileHash: fileHash,
+            coverMonth: month, coverDay: day, alternateNumber: alternateNumber,
+            comicInfoIssueNumber: comicInfoIssueNumber, volume: volume, format: format
         )])
     }
 
@@ -589,5 +592,103 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
 
         let suggestions = db.autoPlacedSpecialIssues()
         XCTAssertFalse(suggestions.contains { $0.id == annual.id }, "a manually-confirmed placement (confidence 100) shouldn't still show up as a pending suggestion")
+    }
+
+    // MARK: - Production readiness pass
+
+    func test_tier1_twoAnnualsInSameGap_getDistinctPositions() {
+        for n in 1...5 { insertComic(series: "Multi", issue: "\(n)", title: "Multi #\(n)", year: 2000, month: n * 2) }
+        insertComic(series: "Multi", issue: "1", title: "Multi Annual #1", year: 2000, month: 5, day: 1)
+        insertComic(series: "Multi", issue: "2", title: "Multi Annual #2", year: 2000, month: 5, day: 15)
+        db.recomputeReadingOrder(mode: .intelligent)
+        let comics = db.allComics(series: "Multi", sortOrder: .manual)
+        let a1 = comics.first { $0.title == "Multi Annual #1" }!
+        let a2 = comics.first { $0.title == "Multi Annual #2" }!
+        XCTAssertNotEqual(a1.readingOrderPosition, a2.readingOrderPosition, "two annuals in the same date gap must not collide on the same position")
+        XCTAssertLessThan(a1.readingOrderPosition!, a2.readingOrderPosition!, "earlier-dated annual should sort first")
+    }
+
+    func test_tier5_unrelatedSeriesAlwaysLastSpecials_dontCollide() {
+        insertComic(series: "SoloA", issue: "1", title: "SoloA Special #1")
+        insertComic(series: "SoloB", issue: "1", title: "SoloB Special #1")
+        db.recomputeReadingOrder(mode: .intelligent)
+        let a = db.allComics(series: "SoloA", sortOrder: .manual).first!
+        let b = db.allComics(series: "SoloB", sortOrder: .manual).first!
+        XCTAssertNotEqual(a.readingOrderPosition, b.readingOrderPosition, "always-last specials from different series must not collide")
+    }
+
+    func test_groupKey_splitsByVolumeForReadingOrder() {
+        // Two same-numbered runs of the same series name, disambiguated only by Volume. An
+        // annual should be placed using its OWN run's mainline dates — if the two runs were
+        // wrongly treated as one reading-order group, the 1990 annual (dated near the 1990
+        // mainline issues) would instead be interpolated against the unrelated 2020 issues.
+        insertComic(series: "Relaunched", issue: "1", title: "Relaunched #1", year: 1990, month: 1, volume: "1990")
+        insertComic(series: "Relaunched", issue: "2", title: "Relaunched #2", year: 1990, month: 3, volume: "1990")
+        insertComic(series: "Relaunched", issue: "1", title: "Relaunched #1", year: 2020, month: 1, volume: "2020")
+        insertComic(series: "Relaunched", issue: "2", title: "Relaunched #2", year: 2020, month: 3, volume: "2020")
+        insertComic(series: "Relaunched", issue: "1", title: "Relaunched Annual #1", year: 1990, month: 2, volume: "1990")
+        db.recomputeReadingOrder(mode: .intelligent)
+        let comics = db.allComics(series: "Relaunched", sortOrder: .manual)
+        let annual = comics.first { $0.title.contains("Annual") }!
+        let run1990Issue1 = comics.first { $0.title == "Relaunched #1" && $0.volume == "1990" }!
+        let run1990Issue2 = comics.first { $0.title == "Relaunched #2" && $0.volume == "1990" }!
+        XCTAssertGreaterThan(annual.readingOrderPosition!, run1990Issue1.readingOrderPosition!)
+        XCTAssertLessThan(annual.readingOrderPosition!, run1990Issue2.readingOrderPosition!)
+        XCTAssertEqual(annual.readingOrderConfidence, 100, "should be placed via its own run's date interpolation, not left unplaced by cross-run contamination")
+    }
+
+    func test_alternateNumber_preferredForSeriesLinkChild() {
+        insertComic(series: "OldRun", issue: "700", title: "OldRun #700")
+        insertComic(series: "NewRun", issue: "1", title: "NewRun #1", alternateNumber: "701")
+        db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "OldRun", childPublisher: "Marvel", childSeries: "NewRun")
+        db.recomputeReadingOrder(mode: .intelligent)
+        let old = db.allComics(series: "OldRun", sortOrder: .manual).first!
+        let new = db.allComics(series: "NewRun", sortOrder: .manual).first!
+        XCTAssertLessThan(old.readingOrderPosition!, new.readingOrderPosition!, "chained continuation should sort after the parent using its continuity number")
+    }
+
+    func test_addSeriesLink_rejectsDirectCycle() {
+        XCTAssertTrue(db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "A", childPublisher: "Marvel", childSeries: "B"))
+        XCTAssertFalse(db.addSeriesLink(parentPublisher: "Marvel", parentSeries: "B", childPublisher: "Marvel", childSeries: "A"),
+                       "linking B as a continuation of A after A is already a continuation of B would form a cycle")
+    }
+
+    func test_seriesLinkCycles_detectsExistingCycle() {
+        // Force a pre-existing cycle directly (bypassing the new guard) to prove detection works
+        // defensively even for data that predates it.
+        _ = db.exec("INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source) VALUES ('Marvel','X','Marvel','Y',1,'manual')")
+        _ = db.exec("INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source) VALUES ('Marvel','Y','Marvel','X',2,'manual')")
+        let cycles = db.seriesLinkCycles()
+        XCTAssertFalse(cycles.isEmpty, "an existing X<->Y cycle should be detected")
+    }
+
+    func test_classify_prefersComicInfoFormatOverKeywords() {
+        let type = ReadingOrderEngine.classify(issueNumber: "1", title: "Batman", series: "Batman", format: "Annual")
+        XCTAssertEqual(type, .annual, "ComicInfo's own Format field should classify even when no keyword appears in the title/series text")
+    }
+
+    func test_duplicateGroups_flagsByteIdenticalFilesAcrossDifferentVolumes() {
+        // Same hash, but different volume would normally split them apart via splitByVolumeOrYear
+        // — the hash match must still catch them since it's strictly stronger evidence.
+        insertComic(series: "Reprint", issue: "1", title: "Reprint #1", volume: "1990", fileHash: "abc123")
+        insertComic(series: "Reprint", issue: "1", title: "Reprint #1", volume: "2020", fileHash: "abc123")
+        let groups = db.duplicateGroups()
+        XCTAssertTrue(groups.contains { $0.count == 2 && $0.allSatisfy { $0.fileHash == "abc123" } },
+                     "byte-identical files must be flagged even when volume metadata would otherwise split them apart")
+    }
+
+    func test_confirmAutoPlacement_persistsAcrossFreshDatabaseInstance() {
+        for n in 1...20 { insertComic(series: "Persist", issue: "\(n)", title: "Persist #\(n)", year: 2000, month: (n % 12) + 1) }
+        insertComic(series: "Persist", issue: "1", title: "Persist Annual #1", year: 2000, month: 6)
+        db.recomputeReadingOrder(mode: .intelligent)
+        let annual = db.allComics(series: "Persist", sortOrder: .manual).first { $0.title.contains("Annual") }!
+
+        db.setReadingOrderOverride(comicId: annual.id, position: annual.readingOrderPosition!, reason: "Confirmed correct")
+        db.recomputeReadingOrder(mode: .intelligent)
+
+        // Simulate an app relaunch: a brand-new DatabaseManager instance against the same file.
+        let reopened = DatabaseManager(dbPath: tempPath)
+        let suggestions = reopened.autoPlacedSpecialIssues()
+        XCTAssertFalse(suggestions.contains { $0.id == annual.id }, "a confirmed placement must stay confirmed across a fresh app launch, not just within one session")
     }
 }

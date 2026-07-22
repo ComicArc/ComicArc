@@ -82,31 +82,59 @@ final class LibraryScanner: @unchecked Sendable {
             pending.removeAll()
         }
 
+        // Touched by newly-inserted comics this scan, in the two different grouping formats the
+        // reading-order pipeline actually uses (see recomputeReadingOrder/recomputeGCDMatches vs.
+        // positionSpecialsChronologically — they group by different keys whenever SeriesGroup is
+        // set), so the post-scan passes can be scoped to what actually changed instead of always
+        // doing a full-library pass. Only used when nothing was removed this scan (see below).
+        var touchedRawKeys: Set<String> = []
+        var touchedEffectiveKeys: Set<String> = []
+
+        func insertNewComic(url: URL, fp: String, hash: String?) {
+            let meta = parseMeta(url: url, libraryPath: libraryPath)
+            pending.append(DatabaseManager.ComicInsert(
+                title: meta.title, filePath: fp, publisher: meta.publisher,
+                character: meta.character, series: meta.series,
+                issueNumber: meta.issueNumber, pageCount: pageCount(fp),
+                writer: meta.writer, penciller: meta.penciller,
+                year: meta.year, storyArc: meta.storyArc,
+                languageIso: meta.languageIso, fileHash: hash,
+                coverMonth: meta.coverMonth, coverDay: meta.coverDay,
+                alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
+                seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
+                volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo
+            ))
+            added += 1; knownPaths.insert(fp)
+            if let hash { knownHashes.insert(hash) }
+            touchedRawKeys.insert("\(meta.publisher):\(meta.series)")
+            let effectiveSeries = meta.seriesGroup?.isEmpty == false ? meta.seriesGroup! : meta.series
+            let effectiveKey = meta.volume?.isEmpty == false
+                ? "\(meta.publisher):\(effectiveSeries):\(meta.volume!)" : "\(meta.publisher):\(effectiveSeries)"
+            touchedEffectiveKeys.insert(effectiveKey)
+            if pending.count >= chunkSize { flushPending() }
+        }
+
+        var anyRemoved = false
+
         for (i, url) in allFiles.enumerated() {
             if state.cancelled { break }
             let fp = url.path
             if !knownPaths.contains(fp) {
                 let hash = fileHash(fp)
                 if let h = hash, knownHashes.contains(h) {
-                    db.updateFilePath(forHash: h, newPath: fp)
-                    knownPaths.insert(fp)
+                    // A known hash usually means this file just moved/got renamed — repoint the
+                    // existing row. But if the OLD path still exists too, these are two genuinely
+                    // separate copies, not a move; repointing would silently orphan one of them
+                    // (no DB record, no warning). Insert the new path as its own row instead — it
+                    // then correctly surfaces via the file-hash duplicate check.
+                    if let existingPath = db.path(forHash: h), fm.fileExists(atPath: existingPath) {
+                        insertNewComic(url: url, fp: fp, hash: h)
+                    } else {
+                        db.updateFilePath(forHash: h, newPath: fp)
+                        knownPaths.insert(fp)
+                    }
                 } else {
-                    let meta = parseMeta(url: url, libraryPath: libraryPath)
-                    pending.append(DatabaseManager.ComicInsert(
-                        title: meta.title, filePath: fp, publisher: meta.publisher,
-                        character: meta.character, series: meta.series,
-                        issueNumber: meta.issueNumber, pageCount: pageCount(fp),
-                        writer: meta.writer, penciller: meta.penciller,
-                        year: meta.year, storyArc: meta.storyArc,
-                        languageIso: meta.languageIso, fileHash: hash,
-                        coverMonth: meta.coverMonth, coverDay: meta.coverDay,
-                        alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
-                        seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
-                        volume: meta.volume
-                    ))
-                    added += 1; knownPaths.insert(fp)
-                    if let h = hash { knownHashes.insert(h) }
-                    if pending.count >= chunkSize { flushPending() }
+                    insertNewComic(url: url, fp: fp, hash: hash)
                 }
             }
             let done = i + 1
@@ -117,7 +145,7 @@ final class LibraryScanner: @unchecked Sendable {
 
         if !state.cancelled && fm.fileExists(atPath: libraryPath) {
             let stale = db.stalePaths().filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
-            if !stale.isEmpty { db.softDelete(stale) }
+            if !stale.isEmpty { db.softDelete(stale); anyRemoved = true }
             setState { $0.removed = stale.count }
         }
 
@@ -128,17 +156,32 @@ final class LibraryScanner: @unchecked Sendable {
                 if state.cancelled { break }
                 let count = pageCount(path)
                 if count > 0 { db.updatePageCount(comicId: id, count: count); recovered += 1 }
-                else { stillCorrupted += 1 }
+                else { db.incrementScanRetryCount(comicId: id); stillCorrupted += 1 }
             }
             setState { $0.recovered = recovered; $0.stillCorrupted = stillCorrupted }
         }
 
-        if !state.cancelled {
+        // Nothing changed at all — skip the recompute passes entirely rather than paying their
+        // full-library cost for a no-op scan.
+        let somethingChanged = added > 0 || anyRemoved
+        if !state.cancelled && somethingChanged {
             db.seedMissingPositions()
-            db.positionSpecialsChronologically()
-            db.recomputeGCDMatches()
-            db.autoPopulateSeriesLinksFromGCD()
-            db.recomputeReadingOrder()
+            // A removal could affect any series' placement (a deleted mainline issue can shift
+            // its neighbors), and figuring out which series lost a comic would mean looking it up
+            // before the soft-delete — not worth the complexity for a rarer path. Scope only the
+            // common "scan added some new comics, removed nothing" case; fall back to a full pass
+            // otherwise.
+            if anyRemoved {
+                db.positionSpecialsChronologically()
+                db.recomputeGCDMatches()
+                db.autoPopulateSeriesLinksFromGCD()
+                db.recomputeReadingOrder()
+            } else {
+                db.positionSpecialsChronologically(affectedGroupKeys: touchedRawKeys)
+                db.recomputeGCDMatches(affectedGroupKeys: touchedEffectiveKeys)
+                db.autoPopulateSeriesLinksFromGCD()
+                db.recomputeReadingOrder(affectedGroupKeys: touchedEffectiveKeys)
+            }
         }
 
         setState { $0.running = false }
@@ -249,6 +292,8 @@ final class LibraryScanner: @unchecked Sendable {
         var alternateNumber: String?; var storyArcNumber: String?; var seriesGroup: String?
         var comicInfoIssueNumber: String?
         var volume: String?
+        var format: String?
+        var hasComicInfo: Bool
     }
 
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
@@ -276,7 +321,8 @@ final class LibraryScanner: @unchecked Sendable {
                          alternateNumber: ci["AlternateNumber"], storyArcNumber: ci["StoryArcNumber"],
                          seriesGroup: ci["SeriesGroup"].map(normalizeSeriesName),
                          comicInfoIssueNumber: ci["IssueNumber"],
-                         volume: ci["Volume"])
+                         volume: ci["Volume"], format: ci["Format"],
+                         hasComicInfo: !ci.isEmpty)
     }
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
@@ -321,6 +367,9 @@ final class LibraryScanner: @unchecked Sendable {
             updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename)))
         }
         DatabaseManager.shared.batchUpdateFolderMeta(updates)
+        // A deliberate resync should always give previously-corrupt files a fresh chance, not
+        // stay capped by whatever attempts they'd already used up across past routine scans.
+        DatabaseManager.shared.resetScanRetryCounts()
     }
 
     private func comicInfoXML(url: URL) -> [String: String] {
@@ -331,7 +380,7 @@ final class LibraryScanner: @unchecked Sendable {
         _ = try? archive.extract(entry, consumer: { data.append($0) })
         let keys: Set<String> = ["Series", "Title", "IssueNumber", "Publisher", "Writer", "Penciller",
                                   "Year", "Month", "Day", "StoryArc", "LanguageISO", "Characters",
-                                  "AlternateNumber", "StoryArcNumber", "SeriesGroup", "Volume"]
+                                  "AlternateNumber", "StoryArcNumber", "SeriesGroup", "Volume", "Format"]
 #if os(macOS)
         guard let root = try? XMLDocument(data: data).rootElement() else { return [:] }
         var result: [String: String] = [:]
