@@ -328,8 +328,6 @@ struct SettingsView: View {
         .onAppear { if cbrEnabled { checkUnarAsync() } }
         .onChange(of: gcdDownloadState) { _, newValue in
             guard newValue == .success else { return }
-            // A download that never gets matched against the existing library is pointless —
-            // the whole point is fixing placement without a separate manual "Recheck" step.
             isFixingOrder = true
             Task.detached(priority: .userInitiated) {
                 DatabaseManager.shared.recomputeGCDMatches()
@@ -392,9 +390,6 @@ struct SettingsView: View {
     private func recheckReadingOrder() {
         isFixingOrder = true
         Task.detached(priority: .userInitiated) {
-            // Also re-runs GCD matching, not just placement — otherwise downloading the
-            // comics database after the initial scan would never actually get used until
-            // the next full library scan.
             DatabaseManager.shared.recomputeGCDMatches()
             DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
             DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)

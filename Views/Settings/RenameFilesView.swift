@@ -145,10 +145,6 @@ struct RenameFilesView: View {
             for comic in comics {
                 let url = URL(fileURLWithPath: comic.filePath)
                 let currentName = url.lastPathComponent
-                // A verified match in the offline comics database is real catalog data — prefer
-                // it over the local series/issue fields, which can be an abbreviated folder name
-                // ("ASM") or a zero-padded number that doesn't reflect what the issue is really
-                // titled/numbered.
                 let idealName = ComicFileNaming.idealFilename(
                     series: comic.gcdSeriesName ?? comic.series,
                     issueNumber: comic.gcdIssueNumber ?? comic.issueNumber,

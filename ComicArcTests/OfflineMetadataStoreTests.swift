@@ -97,14 +97,13 @@ final class OfflineMetadataStoreTests: XCTestCase {
     }
 
     func test_lookupIssue_noPublisherOrYearSignalReturnsNil() {
-        // No corroborating signal at all — must not guess.
         let match = store.lookupIssue(series: "Amazing Spider-Man", publisher: nil, issueNumber: "12", year: nil)
         XCTAssertNil(match)
     }
 
     func test_lookupIssue_prefersNonVariant() {
         let match = store.lookupIssue(series: "Amazing Spider-Man", publisher: "Marvel", issueNumber: "12", year: 1964)
-        XCTAssertEqual(match?.gcdIssueId, 1000) // not the variant (1003)
+        XCTAssertEqual(match?.gcdIssueId, 1000)
     }
 
     func test_lookupIssue_unknownSeriesReturnsNil() {
@@ -125,34 +124,26 @@ final class OfflineMetadataStoreTests: XCTestCase {
     }
 
     func test_lookupIssue_matchesAbbreviatedSeriesFolderName() {
-        // The real-world gap this exists for: a series folder named "ASM (1963)" instead of
-        // the full name — must resolve to the same series a full-name folder would.
         let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "12", year: 1964)
         XCTAssertEqual(match?.coverDate, "1964-05-00")
     }
 
     func test_lookupIssue_abbreviationStillRequiresRealSignal() {
-        // "ASM" alone with no publisher/year corroboration must not silently guess between
-        // the two same-named Marvel runs.
         let match = store.lookupIssue(series: "ASM", publisher: nil, issueNumber: "12", year: nil)
         XCTAssertNil(match)
     }
 
     func test_lookupIssue_abbreviationDoesNotMatchWrongSeries() {
-        // "USM" should resolve to Ultimate Spider-Man, not the unrelated ASM/Superior runs.
         let match = store.lookupIssue(series: "USM (2000)", publisher: "Marvel", issueNumber: "1", year: 2000)
         XCTAssertEqual(match?.gcdIssueId, 1004)
     }
 
     func test_lookupIssue_ordinarySpacedNameIsNotTreatedAsAbbreviation() {
-        // A normal full-word series name should never accidentally hit the initials path.
         let match = store.lookupIssue(series: "Superior Spider-Man", publisher: "Marvel", issueNumber: "999", year: 2013)
-        XCTAssertNil(match) // issue #999 doesn't exist for this series — must not fall back to ASM's #12 etc.
+        XCTAssertNil(match)
     }
 
     func test_lookupIssue_annualResolvesToCompanionSeries() {
-        // Real-world gap: "ASM (1963) Annual #001" filed in the same local folder as the
-        // ongoing series must resolve to GCD's separate "...Annual" series, not the ongoing one.
         let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "001", year: 1964, comicType: .annual)
         XCTAssertEqual(match?.gcdIssueId, 2000)
         XCTAssertEqual(match?.coverDate, "1964-09-00")
@@ -164,21 +155,16 @@ final class OfflineMetadataStoreTests: XCTestCase {
     }
 
     func test_lookupIssue_regularIssueDoesNotSearchAnnualCompanion() {
-        // A plain numbered issue must never accidentally match into the Annual series.
         let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "12", year: 1964, comicType: .regular)
         XCTAssertEqual(match?.gcdIssueId, 1000)
     }
 
     func test_lookupIssue_retriesLowerScoredCandidateWhenTopChoiceLacksIssue() {
-        // Series 201 (39 issues) outscores series 200 (28 issues) on issue_count alone, but
-        // #29 only exists in 200 — must not give up after trying just the top-scored candidate.
         let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "29", year: nil, comicType: .annual)
         XCTAssertEqual(match?.gcdIssueId, 2003)
     }
 
     func test_lookupIssue_matchesRestartNumberingWithTrueNumberInParens() {
-        // GCD stores this one as "1 (35)" — the true continuing number 35 needs to resolve
-        // even though the display number restarted at 1.
         let match = store.lookupIssue(series: "ASM (1963)", publisher: "Marvel", issueNumber: "35", year: 2008, comicType: .annual)
         XCTAssertEqual(match?.gcdIssueId, 2002)
     }

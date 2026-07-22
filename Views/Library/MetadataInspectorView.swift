@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Read-only diagnostic panel: exactly why ComicArc placed a comic where it did, and what
-/// metadata it actually found. Reachable from a comic's context menu or (in IssueDetailPage)
-/// its toolbar, since a right-click surface doesn't exist on that page.
 struct MetadataInspectorView: View {
     let comicId: Int64
     @Environment(\.dismiss) private var dismiss

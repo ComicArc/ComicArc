@@ -406,8 +406,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertTrue(hits.contains { $0.series == "Robin" && $0.count == 2 })
     }
 
-    // MARK: - duplicateGroups()
-
     func test_duplicateGroups_flagsSameTypeCollision() {
         insertComic(series: "Robin", issue: "1", title: "Robin #1")
         insertComic(series: "Robin", issue: "1", title: "Robin #1 (2nd Printing)")
@@ -466,8 +464,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertTrue(report.multipleFirstIssues.contains { $0.series == "Messy" })
     }
 
-    // MARK: - Series link auto-population (real-world regression coverage)
-
     private func buildBondFixture(at path: String) {
         var fdb: OpaquePointer?
         sqlite3_open(path, &fdb)
@@ -495,11 +491,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     func test_autoPopulateSeriesLinksFromGCD_resolvesAbbreviatedLocalFolders() {
-        // Real-world regression: a local library organizes these under abbreviated folder
-        // names ("TOS (Modern)", "Cap America") rather than GCD's full official names — the
-        // auto-linker must use the same abbreviation-aware matching lookupIssue does, not a
-        // bare exact-normalized-name comparison (which would silently link nothing, exactly
-        // the bug found by testing this against a real library).
         insertComic(series: "TOS (Modern)", issue: "99", title: "TOS (Modern) #99")
         insertComic(series: "Captain America", issue: "100", title: "Captain America #100")
 
@@ -532,18 +523,14 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         db.autoPopulateSeriesLinksFromGCD(store: bondStore)
 
         let links = db.seriesLinks()
-        XCTAssertEqual(links.count, 1) // still just the manual one, not replaced/duplicated
+        XCTAssertEqual(links.count, 1)
         XCTAssertEqual(links.first?.parentSeries, "SomeOtherParent")
         XCTAssertEqual(links.first?.source, "manual")
     }
 
-    // MARK: - Legacy numbering / filename-mode safety guarantees
-
     func test_legacyNumber_alwaysWinsForMainlineIssues() {
-        // A dated mainline issue must still sort strictly by its legacy number, never by date,
-        // even when its cover date would suggest a different order than its issue number.
         insertComic(series: "Chrono", issue: "1", title: "Chrono #1", year: 2020, month: 6)
-        insertComic(series: "Chrono", issue: "2", title: "Chrono #2", year: 2020, month: 1) // earlier date, higher number
+        insertComic(series: "Chrono", issue: "2", title: "Chrono #2", year: 2020, month: 1)
         db.recomputeReadingOrder(mode: .intelligent)
         let comics = db.allComics(series: "Chrono", sortOrder: .manual)
         let issue1 = comics.first { $0.title == "Chrono #1" }!
@@ -567,12 +554,10 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertEqual(original, afterRoundTrip, "switching modes must never mutate the underlying filename/legacy position")
     }
 
-    // MARK: - Reading Order Manager (autoPlacedSpecialIssues)
-
     func test_autoPlacedSpecialIssues_excludesManualAndAlwaysLastBand() {
         for n in 1...20 { insertComic(series: "Cosmic", issue: "\(n)", title: "Cosmic #\(n)", year: 2000, month: (n % 12) + 1) }
-        insertComic(series: "Cosmic", issue: "1", title: "Cosmic Annual #1", year: 2000, month: 6) // tier1/2, confidence 60-100
-        insertComic(series: "Solo", issue: "1", title: "Solo Special #1") // no mainline siblings -> always-last band, confidence 0
+        insertComic(series: "Cosmic", issue: "1", title: "Cosmic Annual #1", year: 2000, month: 6)
+        insertComic(series: "Solo", issue: "1", title: "Solo Special #1")
         db.recomputeReadingOrder(mode: .intelligent)
 
         let suggestions = db.autoPlacedSpecialIssues()
@@ -593,8 +578,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         let suggestions = db.autoPlacedSpecialIssues()
         XCTAssertFalse(suggestions.contains { $0.id == annual.id }, "a manually-confirmed placement (confidence 100) shouldn't still show up as a pending suggestion")
     }
-
-    // MARK: - Production readiness pass
 
     func test_tier1_twoAnnualsInSameGap_getDistinctPositions() {
         for n in 1...5 { insertComic(series: "Multi", issue: "\(n)", title: "Multi #\(n)", year: 2000, month: n * 2) }
@@ -618,10 +601,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     func test_groupKey_splitsByVolumeForReadingOrder() {
-        // Two same-numbered runs of the same series name, disambiguated only by Volume. An
-        // annual should be placed using its OWN run's mainline dates — if the two runs were
-        // wrongly treated as one reading-order group, the 1990 annual (dated near the 1990
-        // mainline issues) would instead be interpolated against the unrelated 2020 issues.
         insertComic(series: "Relaunched", issue: "1", title: "Relaunched #1", year: 1990, month: 1, volume: "1990")
         insertComic(series: "Relaunched", issue: "2", title: "Relaunched #2", year: 1990, month: 3, volume: "1990")
         insertComic(series: "Relaunched", issue: "1", title: "Relaunched #1", year: 2020, month: 1, volume: "2020")
@@ -654,8 +633,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     func test_seriesLinkCycles_detectsExistingCycle() {
-        // Force a pre-existing cycle directly (bypassing the new guard) to prove detection works
-        // defensively even for data that predates it.
         _ = db.exec("INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source) VALUES ('Marvel','X','Marvel','Y',1,'manual')")
         _ = db.exec("INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source) VALUES ('Marvel','Y','Marvel','X',2,'manual')")
         let cycles = db.seriesLinkCycles()
@@ -668,8 +645,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     func test_duplicateGroups_flagsByteIdenticalFilesAcrossDifferentVolumes() {
-        // Same hash, but different volume would normally split them apart via splitByVolumeOrYear
-        // — the hash match must still catch them since it's strictly stronger evidence.
         insertComic(series: "Reprint", issue: "1", title: "Reprint #1", volume: "1990", fileHash: "abc123")
         insertComic(series: "Reprint", issue: "1", title: "Reprint #1", volume: "2020", fileHash: "abc123")
         let groups = db.duplicateGroups()
@@ -686,13 +661,10 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         db.setReadingOrderOverride(comicId: annual.id, position: annual.readingOrderPosition!, reason: "Confirmed correct")
         db.recomputeReadingOrder(mode: .intelligent)
 
-        // Simulate an app relaunch: a brand-new DatabaseManager instance against the same file.
         let reopened = DatabaseManager(dbPath: tempPath)
         let suggestions = reopened.autoPlacedSpecialIssues()
         XCTAssertFalse(suggestions.contains { $0.id == annual.id }, "a confirmed placement must stay confirmed across a fresh app launch, not just within one session")
     }
-
-    // MARK: - Library Health Report expansion
 
     func test_seriesWithNumberingGaps_detectsGap() {
         insertComic(series: "Gappy", issue: "1", title: "Gappy #1")
@@ -723,8 +695,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
     }
 
     func test_missingComicInfoCount_excludesNullRows() {
-        // insertComic's default ComicInsert leaves hasComicInfo nil (unset) — must not count
-        // toward "missing," matching the upgrade-safety guarantee.
         insertComic(series: "Untracked", issue: "1", title: "Untracked #1")
         XCTAssertEqual(db.missingComicInfoCount(), 0)
     }
@@ -747,8 +717,6 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         XCTAssertTrue(report.numberingGaps.contains { $0.series == "Gappy2" })
         XCTAssertTrue(report.multipleVolumes.contains { $0.series == "MultiVol2" })
     }
-
-    // MARK: - Metadata Inspector
 
     func test_metadataInspectorInfo_returnsExpectedFields() {
         insertComic(series: "Inspected", issue: "1", title: "Inspected Annual #1",

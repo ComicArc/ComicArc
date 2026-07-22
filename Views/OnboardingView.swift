@@ -396,9 +396,6 @@ struct OnboardingView: View {
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
         .onChange(of: gcdDownloadState) { _, newValue in
             guard newValue == .success else { return }
-            // A download with nothing matched against the library that was just scanned would
-            // be pointless — the whole point is annuals/specials getting placed correctly the
-            // first time, not after a second rescan the user doesn't know to trigger.
             isMatchingAfterDownload = true
             Task.detached(priority: .userInitiated) {
                 DatabaseManager.shared.recomputeGCDMatches()

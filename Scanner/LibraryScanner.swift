@@ -82,11 +82,6 @@ final class LibraryScanner: @unchecked Sendable {
             pending.removeAll()
         }
 
-        // Touched by newly-inserted comics this scan, in the two different grouping formats the
-        // reading-order pipeline actually uses (see recomputeReadingOrder/recomputeGCDMatches vs.
-        // positionSpecialsChronologically — they group by different keys whenever SeriesGroup is
-        // set), so the post-scan passes can be scoped to what actually changed instead of always
-        // doing a full-library pass. Only used when nothing was removed this scan (see below).
         var touchedRawKeys: Set<String> = []
         var touchedEffectiveKeys: Set<String> = []
 
@@ -122,11 +117,6 @@ final class LibraryScanner: @unchecked Sendable {
             if !knownPaths.contains(fp) {
                 let hash = fileHash(fp)
                 if let h = hash, knownHashes.contains(h) {
-                    // A known hash usually means this file just moved/got renamed — repoint the
-                    // existing row. But if the OLD path still exists too, these are two genuinely
-                    // separate copies, not a move; repointing would silently orphan one of them
-                    // (no DB record, no warning). Insert the new path as its own row instead — it
-                    // then correctly surfaces via the file-hash duplicate check.
                     if let existingPath = db.path(forHash: h), fm.fileExists(atPath: existingPath) {
                         insertNewComic(url: url, fp: fp, hash: h)
                     } else {
@@ -161,16 +151,9 @@ final class LibraryScanner: @unchecked Sendable {
             setState { $0.recovered = recovered; $0.stillCorrupted = stillCorrupted }
         }
 
-        // Nothing changed at all — skip the recompute passes entirely rather than paying their
-        // full-library cost for a no-op scan.
         let somethingChanged = added > 0 || anyRemoved
         if !state.cancelled && somethingChanged {
             db.seedMissingPositions()
-            // A removal could affect any series' placement (a deleted mainline issue can shift
-            // its neighbors), and figuring out which series lost a comic would mean looking it up
-            // before the soft-delete — not worth the complexity for a rarer path. Scope only the
-            // common "scan added some new comics, removed nothing" case; fall back to a full pass
-            // otherwise.
             if anyRemoved {
                 db.positionSpecialsChronologically()
                 db.recomputeGCDMatches()
@@ -367,8 +350,6 @@ final class LibraryScanner: @unchecked Sendable {
             updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename)))
         }
         DatabaseManager.shared.batchUpdateFolderMeta(updates)
-        // A deliberate resync should always give previously-corrupt files a fresh chance, not
-        // stay capped by whatever attempts they'd already used up across past routine scans.
         DatabaseManager.shared.resetScanRetryCounts()
     }
 

@@ -32,8 +32,6 @@ enum ComicType: String, Equatable {
         }
     }
 
-    /// Suffix appended to an ideal filename (see `ComicFileNaming`) to distinguish this
-    /// type from a regular issue. `nil` means no suffix is needed.
     var fileNameSuffix: String? {
         switch self {
         case .annual:         return "Annual"
@@ -72,10 +70,6 @@ enum ReadingOrderEngine {
         ("SPECIAL", .special),
     ]
 
-    /// ComicInfo.xml's own `<Format>` tag ("Annual", "TPB", "One-Shot", ...) — checked before the
-    /// title/series keyword scan when present, since it's the file's own explicit metadata rather
-    /// than an inference from free text. "Digital Chapter" and unrecognized values fall through
-    /// to the normal keyword/numeric classification.
     private static let comicInfoFormatMap: [(String, ComicType)] = [
         ("ANNUAL", .annual),
         ("ONE-SHOT", .oneShot), ("ONESHOT", .oneShot), ("ONE SHOT", .oneShot),
@@ -179,10 +173,6 @@ enum ReadingOrderEngine {
             let specials = group.filter { $0.comicType.needsPlacement }
             var placedIds = Set<Int64>()
 
-            // Tier 1/2 candidates are collected first, then interpolated per-bracket below —
-            // two specials that would otherwise land in the exact same date gap (e.g. two
-            // annuals in the same month) get distinct, ordered positions instead of colliding
-            // on the identical integer.
             var tier1ByBracket: [Int: [(special: ReadingOrderInput, specialKey: Int)]] = [:]
             var tier2Before: [(special: ReadingOrderInput, specialKey: Int)] = []
             var tier2After: [(special: ReadingOrderInput, specialKey: Int)] = []
@@ -242,11 +232,6 @@ enum ReadingOrderEngine {
                 }
             }
 
-            // Tier 3: story-arc match. Grouped by which mainline issue they matched so multiple
-            // specials sharing the same arc get distinct, ordered positions after it, not the
-            // identical `match.position + 1`. A special whose year also matches its matched
-            // mainline issue's year is corroborated by two independent signals, not one, and
-            // gets a modestly higher confidence to reflect that.
             var tier3ByMatch: [Int64: (matchPos: Int, matchTitle: String, matchYear: Int?, items: [(special: ReadingOrderInput, arc: String)])] = [:]
             for special in specials where !placedIds.contains(special.id) {
                 guard let arc = special.storyArc, !arc.isEmpty else { continue }
@@ -268,11 +253,6 @@ enum ReadingOrderEngine {
             guard let minPos = mainline.first?.position, let maxPos = mainline.last?.position,
                   maxPos > minPos, mainline.count >= 2 else {
 
-                // No mainline siblings to place relative to. `alwaysLastBand` is shared across
-                // every series, so a deterministic (not Swift's randomized String hash — that
-                // would differ across app launches and break idempotency) hash of the group key
-                // buckets each series into its own band, keeping unrelated series' always-last
-                // specials from colliding on the same position.
                 let band = alwaysLastBand + stableHash(groupKey) * mainlineStride
                 let undated = specials.filter { !placedIds.contains($0.id) }
                     .sorted { sequenceKey($0) < sequenceKey($1) }
@@ -310,9 +290,6 @@ enum ReadingOrderEngine {
         n == n.rounded(.towardZero) ? String(Int(n)) : String(n)
     }
 
-    /// Deterministic (not randomized like Swift's `Hashable`) hash, so the same group key always
-    /// buckets to the same value across separate app launches — required since Tier 5's band
-    /// offset is a persisted `reading_order_position` value that must stay idempotent.
     private static func stableHash(_ s: String) -> Int {
         var hash: UInt64 = 14695981039346656037
         for byte in s.utf8 {

@@ -35,9 +35,6 @@ final class DatabaseManager: @unchecked Sendable {
     }
 
     private func registerCustomFunctions() {
-        // SQLITE_DETERMINISTIC: both functions are pure (same inputs always produce the same
-        // output, no side effects, no dependence on other DB state), so the query planner can
-        // treat/cache them accordingly instead of assuming they could vary per call.
         let deterministicUTF8 = Int32(SQLITE_UTF8) | Int32(SQLITE_DETERMINISTIC)
 
         sqlite3_create_function_v2(db, "is_special_issue", 3, deterministicUTF8, nil, { context, argc, argv in
@@ -412,10 +409,6 @@ final class DatabaseManager: @unchecked Sendable {
         """)
         exec("ALTER TABLE series_links ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
 
-        // Offline comics-database match (see Services/OfflineMetadataStore.swift) — a real
-        // publication date/order looked up from a downloaded reference database, entirely
-        // separate from anything derived from the file itself. Feeds ReadingOrderEngine's
-        // highest-confidence tier when present; never required, never overwrites the file.
         exec("ALTER TABLE comics ADD COLUMN gcd_issue_id INTEGER")
         exec("ALTER TABLE comics ADD COLUMN gcd_cover_date TEXT")
         exec("ALTER TABLE comics ADD COLUMN gcd_match_confidence INTEGER")
@@ -423,23 +416,12 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN gcd_series_name TEXT")
         exec("ALTER TABLE comics ADD COLUMN gcd_issue_number TEXT")
 
-        // Captured from ComicInfo.xml's <Volume> tag when present — disambiguates two runs of
-        // the same series (e.g. a 1963 and a 2014 "Amazing Spider-Man") that would otherwise
-        // both claim issue #1, without touching series/publisher identity itself.
         exec("ALTER TABLE comics ADD COLUMN volume TEXT")
 
-        // ComicInfo's own <Format> tag ("Annual", "TPB", "One-Shot", ...) — a more authoritative
-        // type signal than inferring from title/series text, when present.
         exec("ALTER TABLE comics ADD COLUMN format TEXT")
 
-        // Whether the last scan found ANY ComicInfo.xml data for this file. Left NULL (not 0/false)
-        // for every pre-existing row so upgrading never floods an existing library with "missing
-        // ComicInfo.xml" warnings — it only reports comics scanned after this column existed.
         exec("ALTER TABLE comics ADD COLUMN has_comicinfo INTEGER")
 
-        // How many times a scan has retried a permanently-zero-page (corrupt/unreadable) file.
-        // Capped in zeroPageCountPaths() so a library with corrupt files doesn't pay the cost of
-        // re-opening every one of them on every single scan, forever.
         exec("ALTER TABLE comics ADD COLUMN scan_retry_count INTEGER NOT NULL DEFAULT 0")
 
         exec("CREATE INDEX IF NOT EXISTS idx_comics_pub_series_issue ON comics(publisher, series, issue_number) WHERE deleted_at IS NULL")
@@ -456,11 +438,6 @@ final class DatabaseManager: @unchecked Sendable {
         recomputeOnceAfterUpgradeIfNeeded()
     }
 
-    /// `positionSpecialsChronologically()`/`recomputeReadingOrder()` used to run unconditionally
-    /// on every single launch (a full-table scan/sort/writeback), which is pure waste on every
-    /// steady-state launch — every real mutation point (scan completion, GCD download, series-
-    /// link change, mode switch, import) already independently triggers its own recompute. Gate
-    /// this to run once, only to backfill libraries that predate this feature.
     private func recomputeOnceAfterUpgradeIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'readingOrderRecomputeGateV1'") > 0
@@ -538,9 +515,6 @@ final class DatabaseManager: @unchecked Sendable {
 
                 var placedIds = Set<Int64>()
                 if mainlineDated.count >= 2 {
-                    // Bracket first, then interpolate distinct positions per bracket — two
-                    // specials landing in the same date gap must not collide on the same
-                    // midpoint (mirrors the identical fix in ReadingOrderEngine's Tier 1).
                     var byBracket: [Int: [(id: Int64, specialKey: Int)]] = [:]
                     for special in allSpecials {
                         guard let y = special.year, let m = special.month else { continue }
@@ -597,10 +571,6 @@ final class DatabaseManager: @unchecked Sendable {
                 let gcdCoverDate: String?; let alternateNumber: String?; let format: String?
             }
 
-            // Read once, used both to widen a scoped recompute to whole link chains (below) and,
-            // for `.intelligent` mode, to know which series are explicit continuations of another
-            // (so AlternateNumber — the issue's number in the overall/legacy continuity — can be
-            // preferred over its local per-series number; see the `.intelligent` case below).
             let links: [(parentKey: String, childKey: String)] = rows(
                 "SELECT parent_publisher, parent_series, child_publisher, child_series FROM series_links ORDER BY sequence_order"
             ) { s in
@@ -642,9 +612,6 @@ final class DatabaseManager: @unchecked Sendable {
 
             switch mode {
             case .intelligent:
-                // A verified cover date from the offline comics database always outranks a
-                // locally-parsed one — it's real editorial data, not inference — so it feeds
-                // the engine's existing date-interpolation tier as if it were a perfect filename.
                 var usedGCDDate: Set<Int64> = []
                 let inputs = allRows.map { row -> ReadingOrderEngine.ReadingOrderInput in
                     var y = row.year, m = row.month, d = row.day
@@ -652,11 +619,6 @@ final class DatabaseManager: @unchecked Sendable {
                         y = parsed.year; m = parsed.month; d = parsed.day
                         usedGCDDate.insert(row.id)
                     }
-                    // A series that's an explicit, user-confirmed continuation of another (a
-                    // series_links child) prefers its AlternateNumber — the issue's number in the
-                    // overall/legacy continuity (e.g. Superior Spider-Man #1 = legacy #700) — over
-                    // its own local numbering, so the chain reads in true continuity order. Only
-                    // activates where both signals are explicit; never guesses at series identity.
                     let isChild = childSeriesKeys.contains("\(row.publisher):\(row.series)")
                     let legacyNumber = (isChild ? row.alternateNumber.flatMap(ReadingOrderEngine.parseLegacyNumber) : nil)
                         ?? ReadingOrderEngine.parseLegacyNumber(row.issueNumber)
@@ -767,7 +729,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// GCD's key_date format is "YYYY-MM-DD" with "00" for an unknown month/day segment.
     private static func parseGCDDate(_ raw: String) -> (year: Int, month: Int?, day: Int?)? {
         let parts = raw.split(separator: "-")
         guard parts.count == 3, let year = Int(parts[0]), year > 0 else { return nil }
@@ -776,10 +737,6 @@ final class DatabaseManager: @unchecked Sendable {
         return (year, month, day)
     }
 
-    /// Matches every comic against the offline comics database (if downloaded) by series name,
-    /// publisher, issue number, and year — conservative by design, see OfflineMetadataStore.
-    /// A comic that already has a match keeps it unless recompute finds a different one, and a
-    /// comic with no match at all is left completely alone (no columns touched).
     func recomputeGCDMatches(affectedGroupKeys: Set<String>? = nil) {
         guard OfflineMetadataStore.shared.isAvailable else { return }
         queue.sync {
@@ -820,11 +777,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Auto-derives series_links from the offline database's known real-world series
-    /// continuations (see OfflineMetadataStore.allSeriesBonds), matched against the user's own
-    /// library by normalized series name + publisher. Only ever touches links this function
-    /// created itself (source = 'gcd') — a manual link the user made always takes precedence
-    /// and is never overwritten or removed here.
     func autoPopulateSeriesLinksFromGCD(store: OfflineMetadataStore = .shared) {
         let bonds = store.allSeriesBonds()
         guard !bonds.isEmpty else { return }
@@ -835,11 +787,6 @@ final class DatabaseManager: @unchecked Sendable {
             ) { s in LibSeries(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General") }
             guard librarySeries.count > 1 else { return }
 
-            // Same name-resolution rules as lookupIssue (exact normalized match, or a local
-            // abbreviation like "ASM" matching the GCD name's computed initials), plus a
-            // publisher check here as a safety net since there's no issue number to
-            // corroborate against — an abbreviation coincidentally matching the wrong
-            // publisher's series would otherwise be indistinguishable from a real one.
             func resolve(gcdName: String, gcdPublisher: String) -> LibSeries? {
                 let candidates = librarySeries.filter {
                     OfflineMetadataStore.seriesNamesMatch(local: $0.series, gcdName: gcdName) &&
@@ -906,10 +853,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// `source` distinguishes a link the user made explicitly ("manual", always wins, never
-    /// auto-removed) from one derived automatically from the offline comics database
-    /// ("gcd") — auto-derived links are safe to re-derive/replace on a future database refresh,
-    /// manual ones never are.
     @discardableResult
     func addSeriesLink(parentPublisher: String, parentSeries: String, childPublisher: String, childSeries: String,
                        source: String = "manual") -> Bool {
@@ -919,11 +862,6 @@ final class DatabaseManager: @unchecked Sendable {
                                     args: [childPublisher, childSeries])
             guard before == 0 else { return false }
 
-            // Reject a link that would form a cycle (A→B, then B→A, directly or through a longer
-            // chain) — a cycle leaves every node in it without a parent-free root, which silently
-            // disables chain-offset stamping for the whole cluster with no error surfaced. Walk
-            // the proposed parent's existing ancestor chain; if the proposed child already
-            // appears in it, this link would close a loop.
             let childKey = "\(childPublisher):\(childSeries)"
             var ancestor: String? = "\(parentPublisher):\(parentSeries)"
             var hops = 0
@@ -951,17 +889,10 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Detects any existing cycle in `series_links` (should be unreachable going forward now that
-    /// `addSeriesLink` rejects cycle-forming links, but a defensive check for data that predates
-    /// that guard). Each returned array is one cycle's series keys, in chain order. Feeds the
-    /// Library Health Report's "broken reading orders" check.
     func seriesLinkCycles() -> [[String]] {
         queue.sync { _seriesLinkCyclesUnlocked() }
     }
 
-    /// Breaks every detected cycle by removing its most-recently-linked edge (the highest
-    /// `sequence_order` link whose child is one of the cycle's members) — the one-click fix
-    /// offered by the Library Health Report for "broken reading orders."
     func breakSeriesLinkCycles() {
         queue.sync {
             for cycle in _seriesLinkCyclesUnlocked() {
@@ -1035,9 +966,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Gaps in a series' regular-issue numbering (e.g. #1, #2, #4 — missing #3). One SQL pass
-    /// across every series at once (a window function over the whole table) rather than a
-    /// per-series loop, so this stays cheap at library-wide scale.
     func seriesWithNumberingGaps() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -1059,8 +987,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Series with more than one distinct, explicit `volume` value — usually two different runs
-    /// filed under the same series name (see the reading-order groupKey volume split).
     func seriesWithMultipleVolumes() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -1071,24 +997,14 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Comics scanned since `has_comicinfo` started being captured that had no usable ComicInfo.xml
-    /// data at all. NULL (comics scanned before this existed) is deliberately excluded — see the
-    /// column's migration comment.
     func missingComicInfoCount() -> Int {
         queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND has_comicinfo = 0") }
     }
 
-    /// Comics whose archive has never yielded any pages, independent of the scan-retry cap (that
-    /// cap governs how many more times a scan will *retry* opening them, not how many are counted
-    /// here — a report should reflect the true current total).
     func corruptArchiveCount() -> Int {
         queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND page_count = 0") }
     }
 
-    /// Two regular issues in the same series whose issue numbers are numerically equal but
-    /// textually different ("Batman #1" vs "Batman #01") — invisible to the exact-string-match
-    /// duplicate check, and not necessarily a real duplicate (could be a legitimate zero-padding
-    /// difference), so this is report-only, never auto-delete.
     func seriesWithNumberingMismatches() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -1222,9 +1138,6 @@ final class DatabaseManager: @unchecked Sendable {
         let duplicateMatchCount: Int
     }
 
-    /// Everything the Metadata Inspector shows for one comic — deliberately a separate,
-    /// rarely-called query rather than adding these columns to the hot-path `comicSelect`/`Comic`
-    /// used by every library browse/sort.
     func metadataInspectorInfo(comicId: Int64) -> MetadataInspectorInfo? {
         queue.sync {
             guard let comic = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [comicId], map: comicRow).first else {
@@ -1263,8 +1176,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Cheap single-column lookup for callers (like thumbnail generation) that only need the file
-    /// path, avoiding `comic(id:)`'s full multi-table join.
     func filePath(forComicId id: Int64) -> String? {
         queue.sync {
             rows("SELECT file_path FROM comics WHERE id = ? AND deleted_at IS NULL", args: [id],
@@ -1367,10 +1278,6 @@ final class DatabaseManager: @unchecked Sendable {
                     volume, format, hasComicInfo.map { $0 ? Int64(1) : Int64(0) }])
     }
 
-    /// Capped at 3 retries so a library with permanently-corrupt files doesn't pay the cost of
-    /// re-opening every one of them on every single scan, forever. "Resync Library" resets the
-    /// counter (see `reparseAllMeta`), so a deliberate user-triggered resync always gives
-    /// previously-corrupt files a fresh chance.
     func zeroPageCountPaths() -> [(id: Int64, path: String)] {
         queue.sync {
             rows("SELECT id, file_path FROM comics WHERE page_count = 0 AND deleted_at IS NULL AND scan_retry_count < 3",
@@ -1622,9 +1529,6 @@ final class DatabaseManager: @unchecked Sendable {
 
     func duplicateGroups() -> [[Comic]] {
         queue.sync {
-            // comic_type(...) is included in the GROUP BY / JOIN key so an annual and a regular
-            // issue that happen to share an issue number are never treated as duplicates of each
-            // other — see comic_type registration in registerCustomFunctions().
             let flat = rows("""
                 \(comicSelect)
                 JOIN (
@@ -1656,17 +1560,8 @@ final class DatabaseManager: @unchecked Sendable {
                 }
             }
 
-            // Two comics sharing (publisher, series, issue_number, type) can still be different
-            // volumes/runs rather than real duplicates — split them apart when the metadata says
-            // so. Conservative: only ever removes false positives, never adds new ones, since it
-            // only acts when the disambiguating metadata is actually present.
             var result = groups.flatMap(splitByVolumeOrYear)
 
-            // Byte-identical files are always duplicates, independent of the metadata heuristics
-            // above — a hash match is strictly stronger evidence than a shared issue number, so
-            // it's unioned in rather than ever excluded by the volume/year split. Only added when
-            // it's not already exactly represented by a metadata-based group, to avoid showing
-            // the same pair twice.
             let hashMatches: [Comic] = rows("""
                 \(comicSelect)
                 JOIN (
@@ -1691,9 +1586,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Same identity rules `duplicateGroups()` uses (comic type match, volume/year tolerance,
-    /// always-on file-hash match), scoped to a single comic — so the Metadata Inspector's
-    /// duplicate count can never drift from what the Duplicates screen would actually show.
     func duplicateMatchCount(for comicId: Int64) -> Int {
         queue.sync { _duplicateMatchCountUnlocked(for: comicId) }
     }
@@ -1721,10 +1613,6 @@ final class DatabaseManager: @unchecked Sendable {
         return matchedIds.count
     }
 
-    /// Splits a duplicate-candidate group into subgroups when members have differing, explicit
-    /// `volume` values, or `year` values that differ by more than 1 (allowing slop between cover
-    /// date and on-sale date within a single real print run). Members with no signal on either
-    /// side are never split apart by that signal.
     private func splitByVolumeOrYear(_ group: [Comic]) -> [[Comic]] {
         guard group.count > 1 else { return [group] }
         var buckets: [[Comic]] = []
@@ -1745,9 +1633,6 @@ final class DatabaseManager: @unchecked Sendable {
         return buckets.filter { $0.count > 1 }
     }
 
-    /// Comics the Reading Order Engine auto-placed via tiers 1-4 (a real signal-based placement,
-    /// not the always-last band and not a manual/legacy-number position) — these are exactly the
-    /// "suggestions" the Reading Order Manager screen lets a user review individually.
     func autoPlacedSpecialIssues() -> [Comic] {
         queue.sync {
             rows("""
@@ -2092,9 +1977,6 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// The path currently on record for a known file hash — used by the scanner to tell a real
-    /// move/rename (old path gone) from two genuinely separate copies of the same file (old path
-    /// still exists), so the latter doesn't silently orphan one copy with no DB record.
     func path(forHash hash: String) -> String? {
         queue.sync {
             scalarText("SELECT file_path FROM comics WHERE file_hash = ? AND deleted_at IS NULL", args: [hash])
