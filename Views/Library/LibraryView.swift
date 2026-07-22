@@ -235,6 +235,7 @@ struct ShelfCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnail: PlatformImage?
     @State private var isHovered = false
+    @State private var showMetadataInspector = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -277,7 +278,9 @@ struct ShelfCard: View {
             Button("Continue Reading") { vm.readerComic = comic }
             Divider()
             Button("Mark as Read") { vm.markRead(comic) }
+            Button("Metadata Inspector…") { showMetadataInspector = true }
         }
+        .sheet(isPresented: $showMetadataInspector) { MetadataInspectorView(comicId: comic.id) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(comic.title)
         .accessibilityValue("Page \(comic.progress + 1) of \(comic.pageCount), \(Int(comic.progressPercent * 100))% complete")

@@ -1040,6 +1040,76 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    /// Gaps in a series' regular-issue numbering (e.g. #1, #2, #4 — missing #3). One SQL pass
+    /// across every series at once (a window function over the whole table) rather than a
+    /// per-series loop, so this stays cheap at library-wide scale.
+    func seriesWithNumberingGaps() -> [(publisher: String, series: String, count: Int)] {
+        queue.sync {
+            rows("""
+                WITH nums AS (
+                    SELECT DISTINCT publisher, series, CAST(issue_number AS INTEGER) AS n
+                    FROM comics
+                    WHERE deleted_at IS NULL AND issue_number GLOB '[0-9]*'
+                          AND comic_type(issue_number, title, series, format) = 'regular'
+                ),
+                ranked AS (
+                    SELECT publisher, series, n,
+                           LAG(n) OVER (PARTITION BY publisher, series ORDER BY n) AS prev
+                    FROM nums
+                )
+                SELECT publisher, series, COUNT(*) FROM ranked
+                WHERE prev IS NOT NULL AND n - prev > 1
+                GROUP BY publisher, series
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
+        }
+    }
+
+    /// Series with more than one distinct, explicit `volume` value — usually two different runs
+    /// filed under the same series name (see the reading-order groupKey volume split).
+    func seriesWithMultipleVolumes() -> [(publisher: String, series: String, count: Int)] {
+        queue.sync {
+            rows("""
+                SELECT publisher, series, COUNT(DISTINCT volume) FROM comics
+                WHERE deleted_at IS NULL AND volume IS NOT NULL AND volume != ''
+                GROUP BY publisher, series HAVING COUNT(DISTINCT volume) > 1
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
+        }
+    }
+
+    /// Comics scanned since `has_comicinfo` started being captured that had no usable ComicInfo.xml
+    /// data at all. NULL (comics scanned before this existed) is deliberately excluded — see the
+    /// column's migration comment.
+    func missingComicInfoCount() -> Int {
+        queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND has_comicinfo = 0") }
+    }
+
+    /// Comics whose archive has never yielded any pages, independent of the scan-retry cap (that
+    /// cap governs how many more times a scan will *retry* opening them, not how many are counted
+    /// here — a report should reflect the true current total).
+    func corruptArchiveCount() -> Int {
+        queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND page_count = 0") }
+    }
+
+    /// Two regular issues in the same series whose issue numbers are numerically equal but
+    /// textually different ("Batman #1" vs "Batman #01") — invisible to the exact-string-match
+    /// duplicate check, and not necessarily a real duplicate (could be a legitimate zero-padding
+    /// difference), so this is report-only, never auto-delete.
+    func seriesWithNumberingMismatches() -> [(publisher: String, series: String, count: Int)] {
+        queue.sync {
+            rows("""
+                SELECT a.publisher, a.series, COUNT(*) FROM comics a
+                JOIN comics b ON a.publisher = b.publisher AND a.series = b.series AND a.id < b.id
+                WHERE a.deleted_at IS NULL AND b.deleted_at IS NULL
+                      AND a.issue_number IS NOT NULL AND b.issue_number IS NOT NULL
+                      AND CAST(a.issue_number AS REAL) = CAST(b.issue_number AS REAL)
+                      AND a.issue_number != b.issue_number
+                      AND comic_type(a.issue_number, a.title, a.series, a.format) = 'regular'
+                      AND comic_type(b.issue_number, b.title, b.series, b.format) = 'regular'
+                GROUP BY a.publisher, a.series
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
+        }
+    }
+
     private func comicRow(_ s: OpaquePointer) -> Comic {
         Comic(
             id: colInt64(s, 0), title: colText(s, 1) ?? "", filePath: colText(s, 2) ?? "",
@@ -1139,6 +1209,67 @@ final class DatabaseManager: @unchecked Sendable {
     func comic(id: Int64) -> Comic? {
         queue.sync {
             rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [id], map: comicRow).first
+        }
+    }
+
+    struct MetadataInspectorInfo {
+        let comic: Comic
+        let comicType: ComicType
+        let legacyNumber: Double?
+        let coverMonth: Int?
+        let coverDay: Int?
+        let comicInfoIssueNumber: String?
+        let alternateNumber: String?
+        let storyArcNumber: String?
+        let seriesGroup: String?
+        let gcdMatchReason: String?
+        let hasComicInfo: Bool?
+        let duplicateMatchCount: Int
+    }
+
+    /// Everything the Metadata Inspector shows for one comic — deliberately a separate,
+    /// rarely-called query rather than adding these columns to the hot-path `comicSelect`/`Comic`
+    /// used by every library browse/sort.
+    func metadataInspectorInfo(comicId: Int64) -> MetadataInspectorInfo? {
+        queue.sync {
+            guard let comic = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [comicId], map: comicRow).first else {
+                return nil
+            }
+            struct Extra {
+                let coverMonth: Int?; let coverDay: Int?; let comicInfoIssueNumber: String?
+                let alternateNumber: String?; let storyArcNumber: String?; let seriesGroup: String?
+                let gcdMatchReason: String?; let hasComicInfo: Int?
+            }
+            guard let extra = rows("""
+                SELECT cover_month, cover_day, comicinfo_issue_number, alternate_number,
+                       story_arc_number, series_group, gcd_match_reason, has_comicinfo
+                FROM comics WHERE id = ?
+                """, args: [comicId]) { s in
+                Extra(coverMonth: sqlite3_column_type(s, 0) != SQLITE_NULL ? colInt(s, 0) : nil,
+                      coverDay: sqlite3_column_type(s, 1) != SQLITE_NULL ? colInt(s, 1) : nil,
+                      comicInfoIssueNumber: colText(s, 2), alternateNumber: colText(s, 3),
+                      storyArcNumber: colText(s, 4), seriesGroup: colText(s, 5), gcdMatchReason: colText(s, 6),
+                      hasComicInfo: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil)
+            }.first else { return nil }
+
+            let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
+                                                         series: comic.series, format: comic.format)
+            let legacyNumber = ReadingOrderEngine.parseLegacyNumber(comic.issueNumber)
+            let duplicateCount = scalarInt("""
+                SELECT COUNT(*) - 1 FROM comics
+                WHERE deleted_at IS NULL AND publisher = ? AND series = ? AND issue_number = ?
+                      AND comic_type(issue_number, title, series, format) = ?
+                """, args: [comic.publisher, comic.series, comic.issueNumber ?? "", comicType.rawValue])
+
+            return MetadataInspectorInfo(
+                comic: comic, comicType: comicType, legacyNumber: legacyNumber,
+                coverMonth: extra.coverMonth, coverDay: extra.coverDay,
+                comicInfoIssueNumber: extra.comicInfoIssueNumber, alternateNumber: extra.alternateNumber,
+                storyArcNumber: extra.storyArcNumber, seriesGroup: extra.seriesGroup,
+                gcdMatchReason: extra.gcdMatchReason,
+                hasComicInfo: extra.hasComicInfo.map { $0 != 0 },
+                duplicateMatchCount: max(0, duplicateCount)
+            )
         }
     }
 

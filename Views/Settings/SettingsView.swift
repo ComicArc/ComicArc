@@ -271,6 +271,9 @@ struct SettingsView: View {
                     Button("Import Backup…") { importBackup() }
                     Button("View Trash…") { showTrash = true }
                     Divider()
+                    Button("Run Library Health Check…") { vm.runManualHealthCheck() }
+                        .help("Scan for duplicates, missing issues, multiple volumes, missing metadata, corrupt archives, and broken reading-order links")
+                    Divider()
                     Button {
                         vm.resyncLibrary()
                     } label: {

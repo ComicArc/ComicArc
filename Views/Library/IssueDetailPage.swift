@@ -12,6 +12,7 @@ struct IssueDetailPage: View {
     @State private var newTagText:     String   = ""
     @State private var thumbnail:      PlatformImage? = nil
     @State private var showingEdit:    Bool     = false
+    @State private var showMetadataInspector: Bool = false
     @State private var reviewDraft:    String   = ""
     @State private var appearsInRuns:  [Run]    = []
     @State private var missingIssues:  [String] = []
@@ -52,6 +53,9 @@ struct IssueDetailPage: View {
         .sheet(isPresented: $showingEdit, onDismiss: { loadData() }) {
             EditComicView(comic: $current)
         }
+        .sheet(isPresented: $showMetadataInspector) {
+            MetadataInspectorView(comicId: current.id)
+        }
         .sheet(isPresented: $showPagePicker) {
             ComicPageCoverPicker(comic: current) { image in
                 ThumbnailCache.shared.setCustomCover(comicId: current.id, image: image)
@@ -83,6 +87,13 @@ struct IssueDetailPage: View {
                 .lineLimit(1)
 
             Spacer()
+
+            Button { showMetadataInspector = true } label: {
+                Label("Metadata Inspector", systemImage: "info.circle")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .help("See exactly why ComicArc placed this issue where it did")
 
             Button { showingEdit = true } label: {
                 Label("Edit", systemImage: "pencil")

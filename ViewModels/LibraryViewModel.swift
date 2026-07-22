@@ -561,6 +561,20 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    /// Unlike `refreshLibraryHealth()` (which only surfaces a report when there's something to
+    /// review, so the post-scan banner stays quiet on a clean scan), this always shows the sheet
+    /// — including ImportWizardView's own "Nothing to report" state — since a user who explicitly
+    /// asked for a health check deserves an explicit "all clear," not a silently blank sheet.
+    func runManualHealthCheck() {
+        Task.detached(priority: .utility) {
+            let report = LibraryHealthAnalyzer.analyze()
+            await MainActor.run {
+                self.libraryHealthReport = report
+                self.showImportWizard = true
+            }
+        }
+    }
+
     func openReader(_ comic: Comic) { readerComic = comic }
     func openReader(id: Int64) { if let c = db.comic(id: id) { readerComic = c } }
     func closeReader() { readerComic = nil }

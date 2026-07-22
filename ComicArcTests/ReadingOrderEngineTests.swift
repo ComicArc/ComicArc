@@ -691,4 +691,81 @@ final class ReadingOrderEngineDatabaseTests: XCTestCase {
         let suggestions = reopened.autoPlacedSpecialIssues()
         XCTAssertFalse(suggestions.contains { $0.id == annual.id }, "a confirmed placement must stay confirmed across a fresh app launch, not just within one session")
     }
+
+    // MARK: - Library Health Report expansion
+
+    func test_seriesWithNumberingGaps_detectsGap() {
+        insertComic(series: "Gappy", issue: "1", title: "Gappy #1")
+        insertComic(series: "Gappy", issue: "2", title: "Gappy #2")
+        insertComic(series: "Gappy", issue: "4", title: "Gappy #4")
+        let gaps = db.seriesWithNumberingGaps()
+        XCTAssertTrue(gaps.contains { $0.series == "Gappy" })
+    }
+
+    func test_seriesWithNumberingGaps_noFalsePositiveForCompleteRun() {
+        for n in 1...5 { insertComic(series: "Complete", issue: "\(n)", title: "Complete #\(n)") }
+        let gaps = db.seriesWithNumberingGaps()
+        XCTAssertFalse(gaps.contains { $0.series == "Complete" })
+    }
+
+    func test_seriesWithMultipleVolumes_detectsDistinctVolumes() {
+        insertComic(series: "MultiVol", issue: "1", title: "MultiVol #1", volume: "1990")
+        insertComic(series: "MultiVol", issue: "1", title: "MultiVol #1", volume: "2020")
+        let volumes = db.seriesWithMultipleVolumes()
+        XCTAssertTrue(volumes.contains { $0.series == "MultiVol" })
+    }
+
+    func test_seriesWithNumberingMismatches_detectsZeroPaddingDifference() {
+        insertComic(series: "Padded", issue: "1", title: "Padded #1")
+        insertComic(series: "Padded", issue: "01", title: "Padded #01")
+        let mismatches = db.seriesWithNumberingMismatches()
+        XCTAssertTrue(mismatches.contains { $0.series == "Padded" })
+    }
+
+    func test_missingComicInfoCount_excludesNullRows() {
+        // insertComic's default ComicInsert leaves hasComicInfo nil (unset) — must not count
+        // toward "missing," matching the upgrade-safety guarantee.
+        insertComic(series: "Untracked", issue: "1", title: "Untracked #1")
+        XCTAssertEqual(db.missingComicInfoCount(), 0)
+    }
+
+    func test_corruptArchiveCount_countsZeroPageComics() {
+        insertComic(series: "Broken", issue: "1", title: "Broken #1")
+        let comic = db.allComics(series: "Broken", sortOrder: .manual).first!
+        _ = db.exec("UPDATE comics SET page_count = 0 WHERE id = \(comic.id)")
+        let count = db.corruptArchiveCount()
+        XCTAssertGreaterThanOrEqual(count, 1)
+    }
+
+    func test_libraryHealthAnalyzer_includesAllNewChecks() {
+        insertComic(series: "Gappy2", issue: "1", title: "Gappy2 #1")
+        insertComic(series: "Gappy2", issue: "3", title: "Gappy2 #3")
+        insertComic(series: "MultiVol2", issue: "1", title: "MultiVol2 #1", volume: "1990")
+        insertComic(series: "MultiVol2", issue: "1", title: "MultiVol2 #1", volume: "2020")
+        let report = LibraryHealthAnalyzer.analyze(db: db)
+        XCTAssertFalse(report.isEmpty)
+        XCTAssertTrue(report.numberingGaps.contains { $0.series == "Gappy2" })
+        XCTAssertTrue(report.multipleVolumes.contains { $0.series == "MultiVol2" })
+    }
+
+    // MARK: - Metadata Inspector
+
+    func test_metadataInspectorInfo_returnsExpectedFields() {
+        insertComic(series: "Inspected", issue: "1", title: "Inspected Annual #1",
+                    volume: "2020", format: "Annual", alternateNumber: "700")
+        let comic = db.allComics(series: "Inspected", sortOrder: .manual).first!
+        let info = db.metadataInspectorInfo(comicId: comic.id)
+        XCTAssertNotNil(info)
+        XCTAssertEqual(info?.comicType, .annual)
+        XCTAssertEqual(info?.alternateNumber, "700")
+        XCTAssertEqual(info?.comic.volume, "2020")
+    }
+
+    func test_metadataInspectorInfo_duplicateCountReflectsRealMatches() {
+        insertComic(series: "Dup", issue: "1", title: "Dup #1")
+        insertComic(series: "Dup", issue: "1", title: "Dup #1 (2nd Printing)")
+        let comics = db.allComics(series: "Dup", sortOrder: .manual)
+        let info = db.metadataInspectorInfo(comicId: comics.first!.id)
+        XCTAssertEqual(info?.duplicateMatchCount, 1)
+    }
 }

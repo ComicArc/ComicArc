@@ -6,6 +6,7 @@ struct ImportWizardView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var isRepositioning = false
     @State private var showRenameFiles = false
+    @State private var isBreakingCycles = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +64,58 @@ struct ImportWizardView: View {
                             detail: "Could be a relaunch, a reprint, or a numbering mix-up — take a quick look and decide which is which.",
                             items: report.multipleFirstIssues
                         )
+                    }
+                    if !report.numberingGaps.isEmpty {
+                        seriesListSection(
+                            title: "Missing issues",
+                            icon: "questionmark.circle.fill",
+                            detail: "These series have a gap in their numbering — could be an issue you don't own, or one that hasn't been imported yet.",
+                            items: report.numberingGaps
+                        )
+                    }
+                    if !report.multipleVolumes.isEmpty {
+                        seriesListSection(
+                            title: "Multiple volumes under one series name",
+                            icon: "square.stack.fill",
+                            detail: "These series have more than one distinct volume filed together. Link them as a continuation in Series Manager if they're really one story.",
+                            items: report.multipleVolumes
+                        )
+                    }
+                    if !report.numberingMismatches.isEmpty {
+                        seriesListSection(
+                            title: "Possible numbering mismatches",
+                            icon: "number",
+                            detail: "Issue numbers that are the same value but written differently (like #1 and #01) — could be a real duplicate, or just inconsistent naming.",
+                            items: report.numberingMismatches
+                        )
+                    }
+                    if !report.brokenSeriesLinkCycles.isEmpty {
+                        section(
+                            title: "Broken reading-order links",
+                            icon: "link.badge.plus",
+                            detail: "\(report.brokenSeriesLinkCycles.count) series-link chain(s) form a loop, which silently breaks their reading order. This removes the most recently added link in each loop."
+                        ) {
+                            Button(isBreakingCycles ? "Fixing…" : "Fix Automatically") { breakCycles() }
+                                .buttonStyle(.borderedProminent).tint(Design.brandGold)
+                                .disabled(isBreakingCycles)
+                        }
+                    }
+                    if report.missingComicInfoCount > 0 {
+                        section(
+                            title: "Missing ComicInfo.xml",
+                            icon: "doc.questionmark",
+                            detail: "\(report.missingComicInfoCount) comic(s) scanned with no ComicInfo.xml metadata found. ComicArc still works from the filename and folder structure, but embedded metadata (writer, cover date, story arc) won't be available."
+                        ) { EmptyView() }
+                    }
+                    if report.corruptArchiveCount > 0 {
+                        section(
+                            title: "Corrupt or unreadable archives",
+                            icon: "exclamationmark.triangle.fill",
+                            detail: "\(report.corruptArchiveCount) comic(s) have no readable pages. Resyncing gives them a fresh attempt in case the earlier failure was temporary."
+                        ) {
+                            Button("Resync Library") { vm.resyncLibrary() }
+                                .buttonStyle(.bordered)
+                        }
                     }
                     if report.isEmpty {
                         Text("Nothing to report — your library looks good.").foregroundStyle(.secondary).padding(24)
@@ -132,6 +185,19 @@ struct ImportWizardView: View {
             DatabaseManager.shared.recomputeReadingOrder(affectedGroupKeys: keys)
             await MainActor.run {
                 isRepositioning = false
+                vm.reload()
+                vm.refreshLibraryHealth()
+            }
+        }
+    }
+
+    private func breakCycles() {
+        isBreakingCycles = true
+        Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.breakSeriesLinkCycles()
+            DatabaseManager.shared.recomputeReadingOrder()
+            await MainActor.run {
+                isBreakingCycles = false
                 vm.reload()
                 vm.refreshLibraryHealth()
             }

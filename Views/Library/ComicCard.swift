@@ -12,6 +12,7 @@ struct ComicCard: View {
     @Environment(\.fileService) private var fileService
     @State private var thumbnail: PlatformImage?
     @State private var isHovered = false
+    @State private var showMetadataInspector = false
 
     private var isBulkSelected: Bool { vm.selectedComicIds.contains(comic.id) }
 
@@ -81,6 +82,7 @@ struct ComicCard: View {
             }
         )
         .contextMenu { contextMenu }
+        .sheet(isPresented: $showMetadataInspector) { MetadataInspectorView(comicId: comic.id) }
         .onAppear { loadThumbnail() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
@@ -161,6 +163,7 @@ struct ComicCard: View {
 
             Button("Set as Series Cover") { LibraryViewModel.shared.setSeriesCover(comic) }
             Button("Select Multiple")     { vm.toggleBulkMode() }
+            Button("Metadata Inspector…") { showMetadataInspector = true }
 
             Divider()
 
