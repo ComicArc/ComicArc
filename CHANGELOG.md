@@ -4,6 +4,30 @@ All notable changes to ComicArc are documented here.
 
 ---
 
+## [2.2.0] — 2026-07-22
+
+### Auto-Updates
+- ComicArc now checks for updates automatically in the background and offers **ComicArc → Check for Updates…** at any time, powered by Sparkle
+
+### Library
+- New **Metadata Inspector**: a read-only panel showing exactly why a comic was placed where it is, resolved vs. raw ComicInfo.xml values, computed comic type, legacy number, full publication date, reading-order position/confidence/reason, GCD match info, and duplicate-match count, reachable from either context menu and from the issue detail page toolbar
+- Library Health Report now also flags numbering gaps, series filed under more than one distinct Volume, numeric-equivalent issue-number mismatches ("#1" vs "#01", report-only), broken series-link cycles (one-click fix), missing ComicInfo.xml, and corrupt archives; it can now be run manually from Settings instead of only after a scan
+- New **Reading Order Manager** for reviewing and confirming automatic placements; its "Looks Right" action now actually persists the confirmation instead of only updating the screen (the same item no longer reappeared for review every session)
+- Fixed annuals and specials being wrongly flagged as duplicates of regular issues that happen to share an issue number (e.g. Robin #1 vs. Robin Annual #1) — duplicate detection is now aware of comic type, with a secondary split on differing Volume or a publication-year gap greater than 1
+- Fixed multiple annuals/specials landing in the same year computing the exact same reading-order position with no tie-break, and fixed unrelated series' unplaceable specials colliding on an identical "always last" position
+- Fixed a duplicate-count mismatch where the Metadata Inspector could disagree with what the Duplicates screen actually shows for the same comic
+- Re-importing a comic whose file hash matches one already in the library no longer silently orphans the existing entry when the original file is still on disk
+- Renamed the custom, user-built cross-series reading-list feature from "Reading Order(s)" to **Reading Paths** throughout the app, so "Reading Order" now refers to only the automatic placement engine
+- Removed Shelves (Currently Reading / Want to Read / Finished / DNF): it had no way to create, rename, or manage a shelf, and mostly duplicated existing features (Continue Reading, progress tracking, Reading List)
+
+### iPad
+- Settings now has full parity with Mac: Smart Reading Order toggle, Recheck/Undo buttons, Comics Database download and status, and GCD attribution
+
+### Stability
+- ComicArc no longer allows duplicate running copies of itself — double-clicking the Dock icon during a slow launch, or launching it from two locations, now activates the existing instance instead of starting a second one
+
+---
+
 ## [2.1.0] — 2026-07-17
 
 ### Library

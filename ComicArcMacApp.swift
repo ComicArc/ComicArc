@@ -7,7 +7,12 @@ import Sparkle
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let servicesProvider = ComicArcServicesProvider()
-    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+
+    // Lazy, not a stored `let`: a stored property would start Sparkle's background update
+    // check during AppDelegate's own init, which runs before applicationWillFinishLaunching
+    // gets a chance to detect and kill a duplicate launch — a doomed second process would
+    // otherwise briefly fire off a real network check before being terminated.
+    lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Guards against duplicate running copies (e.g. double-clicking the Dock icon while a

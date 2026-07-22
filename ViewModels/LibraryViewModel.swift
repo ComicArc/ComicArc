@@ -822,7 +822,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     /// Pins an auto-placed special/annual back to its plain (filename/legacy) position, reusing
-    /// the same manual-override mechanism Series Manager uses — so it survives future recomputes
+    /// the same manual-override mechanism Manage Series uses — so it survives future recomputes
     /// and is undoable via "Undo My Manual Fixes" in Settings, exactly like any manual edit.
     func rejectAutoPlacement(_ comic: Comic) {
         Task.detached(priority: .userInitiated) { [db] in

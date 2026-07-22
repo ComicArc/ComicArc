@@ -77,7 +77,7 @@ struct ImportWizardView: View {
                         seriesListSection(
                             title: "Multiple volumes under one series name",
                             icon: "square.stack.fill",
-                            detail: "These series have more than one distinct volume filed together. Link them as a continuation in Series Manager if they're really one story.",
+                            detail: "These series have more than one distinct volume filed together. Link them as a continuation in Manage Series if they're really one story.",
                             items: report.multipleVolumes
                         )
                     }

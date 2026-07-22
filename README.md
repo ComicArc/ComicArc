@@ -34,7 +34,7 @@ Requires macOS 14 Sonoma or later. Apple Silicon native.
 3. **Right-click, then Open** on first launch to clear the Gatekeeper prompt
 4. Point the setup wizard at your comics folder, that's it
 
-No Homebrew, no Terminal, no configuration files. CBR support is bundled.
+No Homebrew, no Terminal, no configuration files. CBR support is bundled. ComicArc checks for updates automatically in the background (via [Sparkle](https://sparkle-project.org/)) and also offers **ComicArc → Check for Updates…** any time.
 
 #### "ComicArc is damaged and can't be opened"
 
@@ -60,9 +60,9 @@ Your comics folder is the source of truth on both platforms. ComicArc scans it a
 - Cover thumbnails with inline progress bars and star ratings
 - **Continue Reading** surfaces in-progress issues on the home screen
 - Browse by publisher or tag directly from the sidebar; search from the toolbar
-- Favorites, Reading List, and custom Shelves for tagging issues however you like
+- Favorites and Reading List for tagging issues however you like
 - Bulk select: mark read/unread, add to list, delete, or **reassign series/publisher** across multiple issues at once
-- **Issue detail page**: edit metadata, manage tags and shelves, write a review, rate inline
+- **Issue detail page**: edit metadata, manage tags, write a review, rate inline
 - **Series Manager**: reorder issues within a series, rename it, or set a custom cover
 - **Library Check**: a lightweight health scan after every library scan, flagging possible duplicates, series with more than one "#1" issue, and annuals/specials that may be sitting in the wrong spot, each with a one-tap fix or a direct link to the right screen
 - **Possible Duplicates**: automatically flags comics sharing the same publisher, series, and issue number (the usual result of a rescan or a re-rip under a different filename), so cleanup takes seconds instead of scrolling
@@ -105,9 +105,9 @@ A free, one-time download (a few hundred KB per genre you read) that lets ComicA
 - No account, no ongoing internet connection required, and no server dependency: download once, and it works forever
 - Download, update, or delete it any time from Settings, on either platform
 
-### Reading Orders (Custom Cross-Series Lists)
+### Reading Paths (Custom Cross-Series Lists)
 
-When a story spans multiple series and you want a reading path across all of them, Reading Orders let you build one, identical feature set on macOS and iPad.
+When a story spans multiple series and you want a reading path across all of them, Reading Paths let you build one, identical feature set on macOS and iPad.
 
 - Add issues from any series or publisher into an ordered list
 - Drag-and-drop to reorder; per-issue notes for context
@@ -141,7 +141,7 @@ Both apps share the same core (navigation, database, scanner, reading-order/stat
 | Bulk select, reassign, duplicates | Yes | Yes |
 | Intelligent Reading Order, offline comics database | Yes | Yes |
 | Rename Files tool | Yes | Yes |
-| Reading Orders, Stats, History | Yes | Yes |
+| Reading Paths, Stats, History | Yes | Yes |
 | Backup export/import | Yes | Yes |
 | Double-page spread, RTL, color filters, in-reader bookmarks | Yes | Not yet *(touch reader is swipe/zoom/autoplay for now)* |
 | Keyboard shortcuts | Yes (full) | Yes (Magic Keyboard: scan, navigate, back, rename) |
@@ -205,7 +205,7 @@ Press `?` inside the reader at any time to see the full list.
 | `R` | Toggle RTL direction |
 | `Esc` | Stop autoplay, or close reader |
 
-The main window also supports ⌘1 through ⌘8 to jump to any sidebar section, ⌘[ to go back, ⌘G to toggle grouped view, ⌘E to toggle bulk-select, ⇧⌘R to rescan your library, and ⇧⌘F to open the Rename Files tool.
+The main window also supports ⌘1 through ⌘7 to jump to any sidebar section, ⌘[ to go back, ⌘E to toggle bulk-select, ⇧⌘R to rescan your library, and ⇧⌘F to open the Rename Files tool.
 
 ### iPad (Magic Keyboard)
 
@@ -213,7 +213,7 @@ The main window also supports ⌘1 through ⌘8 to jump to any sidebar section, 
 |---|---|
 | ⇧⌘R | Scan library |
 | ⇧⌘F | Rename Files tool |
-| ⌘1 through ⌘8 | Jump to sidebar section |
+| ⌘1 through ⌘7 | Jump to sidebar section |
 | ⌘[ | Go back |
 
 ---
@@ -273,6 +273,7 @@ The offline comics database itself isn't part of the repository (it's a generate
 
 - [ZIPFoundation](https://github.com/weichsel/ZIPFoundation): CBZ archive extraction
 - [unar / The Unarchiver](https://theunarchiver.com/command-line): CBR extraction, bundled
+- [Sparkle](https://sparkle-project.org/): macOS auto-update framework
 - [Grand Comics Database](https://www.comics.org/) (GCD): source data for the offline comics database, licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
 ---
