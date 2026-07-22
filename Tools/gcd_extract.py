@@ -1,16 +1,3 @@
-# Builds the offline comics reference database ComicArc downloads once during setup
-# (see Services/OfflineMetadataStore.swift). Source: the Grand Comics Database public
-# data dump (CC BY-SA 4.0 — https://creativecommons.org/licenses/by-sa/4.0/), downloadable
-# with no account/registration from https://archive.org/details/gcd-YYYY-MM-DD (search for
-# the latest snapshot there, or use https://www.comics.org/download/ for a current dump,
-# which requires a free GCD account).
-#
-# Usage:
-#   python3 gcd_extract.py <path-to-dump.sql>
-# Produces gcd_lookup.sqlite in the current directory (~90s for a ~1.6GB dump). Upload the
-# result to GitHub Releases (or wherever GCDDatabaseDownloader.hostedURL points) and update
-# that constant. Ship credit for "Grand Comics Database" somewhere in the app per the license
-# (already added to Settings > About).
 import re
 import sqlite3
 import sys
@@ -26,7 +13,6 @@ _WS = re.compile(r"\s+")
 
 
 def normalize_series_name(name):
-    """Must exactly mirror OfflineMetadataStore.normalizeSeriesName in Swift."""
     s = name.strip()
     s = _YEAR_PAREN.sub("", s)
     s = _VOL_SUFFIX.sub("", s)
@@ -42,10 +28,6 @@ _WORD_SPLIT = re.compile(r"[\s\-]+")
 
 
 def compute_initials(name):
-    """Must exactly mirror OfflineMetadataStore.computeInitials in Swift. Lets a fan
-    abbreviation like "ASM" or "USM" resolve to "Amazing Spider-Man" / "Ultimate Spider-Man"
-    without a hand-curated alias table — most real-world comic abbreviations are literally
-    the initials of each word (including hyphenated ones split into separate words)."""
     s = name.strip()
     s = _YEAR_PAREN.sub("", s)
     s = _VOL_SUFFIX.sub("", s)
@@ -185,7 +167,6 @@ def main():
             lineno += 1
             if not line.startswith("INSERT INTO"):
                 continue
-            # Disambiguate gcd_series` vs gcd_series_bond`/gcd_series_bond_type` by exact match
             matched = None
             for key, (tbl, dest) in prefixes.items():
                 marker = f"INSERT INTO `{tbl}` VALUES"

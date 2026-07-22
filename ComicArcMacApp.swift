@@ -8,19 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let servicesProvider = ComicArcServicesProvider()
 
-    // Lazy, not a stored `let`: a stored property would start Sparkle's background update
-    // check during AppDelegate's own init, which runs before applicationWillFinishLaunching
-    // gets a chance to detect and kill a duplicate launch — a doomed second process would
-    // otherwise briefly fire off a real network check before being terminated.
     lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Guards against duplicate running copies (e.g. double-clicking the Dock icon while a
-        // slow launch is still in progress, or opening the app from two different locations on
-        // disk) — NSRunningApplication matches by bundle identifier regardless of path, so this
-        // catches both cases. Skipped under XCTest: the test runner legitimately launches this
-        // app as its own separate host process, sometimes alongside another already-running copy,
-        // and killing it here would break `xcodebuild test`.
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
               let bundleID = Bundle.main.bundleIdentifier else { return }
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)

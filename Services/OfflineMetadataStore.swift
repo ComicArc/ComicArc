@@ -8,9 +8,6 @@ struct GCDIssueMatch {
     let coverDate: String?
     let confidence: Int
     let reason: String
-    /// The verified official series name and issue number, straight from the catalog —
-    /// lets callers (e.g. the rename tool) suggest a correct filename even when the local
-    /// series folder is an abbreviation ("ASM") or the local issue number is padded ("001").
     let canonicalSeriesName: String
     let canonicalIssueNumber: String
 }
@@ -20,11 +17,6 @@ struct GCDSeriesBond {
     let targetName: String; let targetPublisher: String
 }
 
-/// Read-only client for the offline comics reference database (downloaded once during setup,
-/// built from the Grand Comics Database's public data dump — see the ETL pipeline notes).
-/// Every lookup here is local; nothing about this ever makes a network call at runtime. A
-/// missing or not-yet-downloaded database is a completely normal state: every method returns
-/// nil/empty and callers fall back to today's filename/date-inference behavior.
 final class OfflineMetadataStore {
     static let shared = OfflineMetadataStore()
 
@@ -47,14 +39,11 @@ final class OfflineMetadataStore {
 
     convenience init() { self.init(path: nil) }
 
-    /// `path` overrides the real Application Support location — used by tests to point at a
-    /// small fixture database instead of the real downloaded one.
     init(path: String?) {
         overridePath = path
         reopen()
     }
 
-    /// Call after a fresh download completes, so the running app picks it up without a relaunch.
     func reopen() {
         queue.sync {
             if db != nil { sqlite3_close(db); db = nil }
@@ -71,8 +60,6 @@ final class OfflineMetadataStore {
             try? FileManager.default.removeItem(atPath: path)
         }
     }
-
-    // MARK: - Normalization (must exactly mirror the Python ETL's normalize_series_name)
 
     static func normalizeSeriesName(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -91,12 +78,6 @@ final class OfflineMetadataStore {
         raw.lowercased().replacingOccurrences(of: #"[^a-z0-9]"#, with: "", options: .regularExpression)
     }
 
-    /// True if a local series name plausibly refers to the same real-world series as a GCD
-    /// catalog name — either a direct normalized-name match, or the local name is a short
-    /// abbreviation ("ASM") whose letters match the GCD name's computed initials. Shared by
-    /// lookupIssue's series-candidate search and any caller that needs to resolve a GCD name
-    /// against the local library without an issue number in hand (e.g. auto-linking series
-    /// continuations from allSeriesBonds).
     static func seriesNamesMatch(local: String, gcdName: String) -> Bool {
         let normLocal = normalizeSeriesName(local)
         let normGCD = normalizeSeriesName(gcdName)
@@ -105,10 +86,6 @@ final class OfflineMetadataStore {
         return false
     }
 
-    /// Must exactly mirror the Python ETL's compute_initials. Lets a fan abbreviation like
-    /// "ASM" or "USM" resolve to "Amazing Spider-Man" / "Ultimate Spider-Man" without a
-    /// hand-curated alias table — most real-world comic abbreviations are literally the
-    /// initials of each word (hyphenated words counted separately, "The" prefix ignored).
     static func computeInitials(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         s = s.replacingOccurrences(of: #"\s*\((?:19|20)\d{2}(?:-(?:19|20)?\d{2,4})?\)\s*$"#,
@@ -120,20 +97,6 @@ final class OfflineMetadataStore {
         return words.compactMap { $0.first?.isLetter == true ? String($0.first!).uppercased() : nil }.joined()
     }
 
-    /// A local series folder name is treated as a possible abbreviation only when, after
-    /// stripping a trailing qualifier annotation, what's left is a single short alphabetic
-    /// token — "ASM" qualifies, "Amazing Spider-Man" (with spaces) does not need this path at
-    /// all since the plain name match already handles it.
-    ///
-    /// Strips ANY trailing "(...)" here — not just a year — since local folder conventions use
-    /// this for all kinds of qualifiers ("ASM (Modern)", "ASM (1963)", "ASM (Vol 2)"). This is
-    /// deliberately broader than normalizeSeriesName/computeInitials below, which strip only a
-    /// year: those two feed matching against GCD's own catalog names (real GCD series titles
-    /// occasionally carry a genuine disambiguating year in the name itself, e.g. "Firestorm
-    /// (2004)"), and the stored `norm_name`/`initials` columns in the downloaded database were
-    /// pre-computed with that narrower rule — broadening them here without regenerating that
-    /// data would desync the two sides. This function only ever runs against the LOCAL name,
-    /// so it's free to be as permissive as real-world folder-naming conventions need.
     static func abbreviationToken(_ raw: String) -> String? {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         s = s.replacingOccurrences(of: #"\s*\([^)]*\)\s*$"#, with: "", options: .regularExpression)
@@ -143,12 +106,6 @@ final class OfflineMetadataStore {
         return s.uppercased()
     }
 
-    // MARK: - Issue lookup
-
-    /// GCD catalogs annuals/specials as their own series ("The Amazing Spider-Man Annual"),
-    /// separate from the ongoing title, even when a local library files them in the same
-    /// folder. When the comic's own type suggests this, search that companion series name
-    /// first — falling back to the plain series name only if nothing turns up there.
     private static func gcdTypeSuffix(for type: ComicType) -> String? {
         switch type {
         case .annual: return "annual"
@@ -158,9 +115,6 @@ final class OfflineMetadataStore {
         }
     }
 
-    /// Conservative by design: returns nil rather than guess when there isn't a real signal
-    /// (publisher match or year match) backing the chosen series candidate — a wrong match
-    /// silently mis-files a comic, which is worse than no match at all.
     func lookupIssue(series: String, publisher: String?, issueNumber: String?, year: Int?,
                       comicType: ComicType = .regular) -> GCDIssueMatch? {
         guard let db, let issueNumber, !issueNumber.isEmpty else { return nil }
@@ -227,16 +181,11 @@ final class OfflineMetadataStore {
                 else { score -= min(30, abs(year - yb) * 2) }
             }
             score += min(c.issueCount, 100) / 10
-            guard hasRealSignal, score >= 40 else { continue } // no real corroboration — skip
+            guard hasRealSignal, score >= 40 else { continue }
             scored.append((c, score))
         }
         guard !scored.isEmpty else { return nil }
 
-        // A single title is often split across several GCD series entries (relaunches,
-        // restart-numbered "Annual" lines with the true continuing number in parens like
-        // "1 (35)", etc.) — the highest-scoring candidate isn't necessarily the one that
-        // actually contains this specific issue, so try each in score order rather than
-        // committing to just the top one.
         for (candidate, score) in scored.sorted(by: { $0.score > $1.score }) {
             guard let issueRow = queryIssue(seriesId: candidate.id, issueNumber: issueNumber) else { continue }
             let confidence = score >= 85 ? 100 : (score >= 60 ? 90 : 75)
@@ -252,13 +201,6 @@ final class OfflineMetadataStore {
     private struct IssueRow { let id: Int; let keyDate: String?; let canonicalNumber: String }
 
     private func queryIssue(seriesId: Int, issueNumber: String) -> IssueRow? {
-        // Three tiers, tried in order: (1) exact string match — handles non-numeric labels
-        // like "Alpha" correctly; (2) a numeric comparison so "001" (a common local
-        // zero-padding convention) still finds GCD's "1"; (3) GCD's restart-numbering
-        // convention, where a relaunched "Annual" line stores e.g. "1 (35)" — the true
-        // continuing number in parentheses after a reset display number. Tiers 2 and 3 only
-        // fire when the requested number actually parses as numeric, so neither can misfire
-        // on an unrelated non-numeric label.
         let sql = """
             SELECT id, key_date, number, 0 AS rank, sort_code FROM issue
             WHERE series_id = ? AND number = ? AND variant_of_id IS NULL
@@ -308,8 +250,6 @@ final class OfflineMetadataStore {
         return result
     }
 
-    /// GCD stores restart-numbered issues as e.g. "1 (35)" — the parenthetical is the real
-    /// continuing number readers actually care about, so prefer it when present.
     private static func trueContinuingNumber(from rawNumber: String) -> String {
         if let openParen = rawNumber.firstIndex(of: "("), let closeParen = rawNumber.firstIndex(of: ")"), openParen < closeParen {
             return String(rawNumber[rawNumber.index(after: openParen)..<closeParen])
@@ -317,11 +257,6 @@ final class OfflineMetadataStore {
         return rawNumber
     }
 
-    // MARK: - Series continuation bonds (feeds automatic Series Links)
-
-    /// All known real-world series continuations from the offline database, resolved to plain
-    /// names/publishers rather than internal GCD ids — the caller matches these against the
-    /// user's own library by name, since GCD's ids mean nothing to ComicArc's own schema.
     func allSeriesBonds() -> [GCDSeriesBond] {
         guard db != nil else { return [] }
         let sql = """

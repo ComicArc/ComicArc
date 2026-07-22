@@ -561,10 +561,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// Unlike `refreshLibraryHealth()` (which only surfaces a report when there's something to
-    /// review, so the post-scan banner stays quiet on a clean scan), this always shows the sheet
-    /// — including ImportWizardView's own "Nothing to report" state — since a user who explicitly
-    /// asked for a health check deserves an explicit "all clear," not a silently blank sheet.
     func runManualHealthCheck() {
         Task.detached(priority: .utility) {
             let report = LibraryHealthAnalyzer.analyze()
@@ -821,9 +817,6 @@ final class LibraryViewModel: ObservableObject {
         if sortOrder != .manual { sortOrder = .manual }
     }
 
-    /// Pins an auto-placed special/annual back to its plain (filename/legacy) position, reusing
-    /// the same manual-override mechanism Manage Series uses — so it survives future recomputes
-    /// and is undoable via "Undo My Manual Fixes" in Settings, exactly like any manual edit.
     func rejectAutoPlacement(_ comic: Comic) {
         Task.detached(priority: .userInitiated) { [db] in
             db.setReadingOrderOverride(comicId: comic.id, position: comic.position, reason: "Manually placed")
@@ -832,10 +825,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// "Looks Right" in the Reading Order Manager: locks the comic's current, already-computed
-    /// position in place with a durable override, so it survives future recomputes and stops
-    /// reappearing as a pending suggestion — distinct from "Not Right", which reverts to the
-    /// plain filename/legacy position instead.
     func confirmAutoPlacement(_ comic: Comic) {
         Task.detached(priority: .userInitiated) { [db] in
             let pinned = comic.readingOrderPosition ?? comic.position

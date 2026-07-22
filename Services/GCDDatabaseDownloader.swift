@@ -1,10 +1,5 @@
 import Foundation
 
-/// Downloads the one-time offline comics database (see OfflineMetadataStore) from wherever it's
-/// hosted. This is the ONLY network call anywhere in this feature — everything after a
-/// successful download runs entirely offline, forever, with no server dependency and no
-/// per-request cost regardless of how many people use the app.
-///
 enum GCDDatabaseDownloader {
     static let hostedURL = URL(string: "https://github.com/ComicArc/ComicArc/releases/download/gcd-v1/gcd_lookup.sqlite")!
 
@@ -52,7 +47,5 @@ enum GCDDatabaseDownloader {
         task.resume()
     }
 
-    // Kept alive for the duration of the download; KVO observations are removed automatically
-    // when replaced, so a growing array here is fine — downloads are a rare, one-off action.
     private static var progressObservations: [NSKeyValueObservation] = []
 }
