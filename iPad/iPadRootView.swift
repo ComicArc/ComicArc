@@ -634,7 +634,7 @@ struct iPadSettingsView: View {
         case .legacyNumber:    return "Issues sort strictly by parsed issue number within each series."
         case .publicationDate: return "Issues sort by cover date within each series."
         case .comicInfoOrder:  return "Issues sort by the issue number embedded in ComicInfo.xml, where present."
-        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Series Manager always take priority."
+        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Manage Series always take priority."
         }
     }
 
@@ -792,7 +792,7 @@ struct iPadSettingsView: View {
                         .foregroundStyle(.green)
                     Text("Annuals and specials with a real match are placed using their actual publication date, entirely offline.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Update") {
+                    Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Database Update") {
                         GCDDatabaseDownloader.download { gcdDownloadState = $0 }
                     }.disabled(gcdDownloadState.isDownloading)
                     Button("Delete", role: .destructive) {
@@ -826,7 +826,7 @@ struct iPadSettingsView: View {
                     Label("Rename Files to Match Library…", systemImage: "textformat")
                 }
             } header: {
-                Text("File Organization")
+                Text("Fix Filenames")
             }
 
             Section {

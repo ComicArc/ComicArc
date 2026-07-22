@@ -37,7 +37,7 @@ struct SettingsView: View {
         case .legacyNumber:    return "Issues sort strictly by parsed issue number within each series."
         case .publicationDate: return "Issues sort by cover date within each series."
         case .comicInfoOrder:  return "Issues sort by the issue number embedded in ComicInfo.xml, where present."
-        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Series Manager always take priority."
+        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Manage Series always take priority."
         }
     }
 
@@ -165,7 +165,7 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         HStack {
-                            Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Update") {
+                            Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Database Update") {
                                 GCDDatabaseDownloader.download { gcdDownloadState = $0 }
                             }.disabled(gcdDownloadState.isDownloading)
                             Button("Delete", role: .destructive) {

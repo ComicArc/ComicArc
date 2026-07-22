@@ -56,7 +56,7 @@ single-page files.
 
 ## Don't have time to rename everything by hand?
 
-**Settings → File Organization → Rename Files to Match Library…**
+**Settings → Fix Filenames → Rename Files to Match Library…**
 
 This scans your whole library, shows you exactly what would change
 (old name → new name) for every file that doesn't already match, and
