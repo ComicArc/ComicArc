@@ -7,7 +7,7 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .runs:               return "Reading Orders"
+        case .runs:               return "Reading Paths"
         case .stats:               return "Statistics"
         case .history:             return "History"
         case .duplicates:          return "Possible Duplicates"

@@ -236,7 +236,7 @@ private struct iPadContentColumn: View {
                     .navigationTitle("Statistics")
             case .runs:
                 RunsView().environmentObject(vm)
-                    .navigationTitle("Reading Orders")
+                    .navigationTitle("Reading Paths")
             case .history:
                 ReadingHistoryView().environmentObject(vm)
                     .navigationTitle("History")

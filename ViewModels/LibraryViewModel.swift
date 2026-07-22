@@ -25,7 +25,7 @@ enum AppDestination: Hashable, Codable {
         case .readingList:          return "Reading List"
         case .publisher(let p):     return p
         case .tag(let t):           return "#\(t)"
-        case .runs:                 return "Reading Orders"
+        case .runs:                 return "Reading Paths"
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
@@ -793,8 +793,6 @@ final class LibraryViewModel: ObservableObject {
     func addTag(name: String, to comic: Comic) { db.addTag(name: name, to: comic.id) }
     func removeTag(tagId: Int64, from comic: Comic) { db.removeTag(tagId: tagId, from: comic.id) }
 
-    func addToShelf(comicId: Int64, shelfId: Int64) { db.addToShelf(comicId: comicId, shelfId: shelfId) }
-    func removeFromShelf(comicId: Int64, shelfId: Int64) { db.removeFromShelf(comicId: comicId, shelfId: shelfId) }
 
     func restoreComic(id: Int64) { db.restoreComic(id: id); reload() }
 

@@ -130,26 +130,6 @@ struct EditComicView: View {
     }
 }
 
-struct ShelfChip: View {
-    let shelf:    Shelf
-    let isOn:     Bool
-    let onToggle: () -> Void
-
-    var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 4) {
-                if isOn { Image(systemName: "checkmark").font(.system(size: 9)) }
-                Text(shelf.name).font(.caption)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(isOn ? Design.brandBlue.opacity(0.25) : Design.surfaceBg)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(isOn ? Design.brandBlue.opacity(0.5) : Design.borderColor, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct FlowLayout<T: Identifiable, Content: View>: View {
     let items:   [T]
     let spacing: CGFloat
@@ -181,7 +161,6 @@ struct FlowLayout<T: Identifiable, Content: View>: View {
         for item in items {
             let name: String
             if let t = item as? Tag { name = t.name }
-            else if let s = item as? Shelf { name = s.name }
             else { name = "" }
             let textW  = (name as NSString).size(withAttributes: [.font: font]).width
             let itemW  = textW + 36 + spacing

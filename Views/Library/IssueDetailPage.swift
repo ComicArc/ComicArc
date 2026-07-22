@@ -16,8 +16,6 @@ struct IssueDetailPage: View {
     @State private var reviewDraft:    String   = ""
     @State private var appearsInRuns:  [Run]    = []
     @State private var missingIssues:  [String] = []
-    @State private var allShelves:     [Shelf]  = []
-    @State private var comicShelfIds:  [Int64]  = []
     @State private var showPagePicker: Bool     = false
 
     init(comic: Comic, onBack: @escaping () -> Void) {
@@ -281,30 +279,6 @@ struct IssueDetailPage: View {
 
             divider
 
-            sectionBlock("Shelves") {
-                if allShelves.isEmpty {
-                    Text("Loading…").font(.caption).foregroundStyle(.tertiary)
-                } else {
-                    FlowLayout(items: allShelves, spacing: 8) { shelf in
-                        ShelfChip(
-                            shelf: shelf,
-                            isOn: comicShelfIds.contains(shelf.id),
-                            onToggle: {
-                                if comicShelfIds.contains(shelf.id) {
-                                    vm.removeFromShelf(comicId: current.id, shelfId: shelf.id)
-                                    comicShelfIds.removeAll { $0 == shelf.id }
-                                } else {
-                                    vm.addToShelf(comicId: current.id, shelfId: shelf.id)
-                                    comicShelfIds.append(shelf.id)
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            divider
-
             sectionBlock("Tags") {
                 VStack(alignment: .leading, spacing: 10) {
                     if !tags.isEmpty {
@@ -485,10 +459,8 @@ struct IssueDetailPage: View {
             let t   = DatabaseManager.shared.tags(for: comicId)
             let r   = DatabaseManager.shared.runsContaining(comicId: comicId)
             let mi  = DatabaseManager.shared.missingIssueNumbers(series: series, publisher: pub)
-            let sh  = DatabaseManager.shared.allShelves()
-            let csh = DatabaseManager.shared.shelvesForComic(comicId: comicId)
             await MainActor.run {
-                tags = t; appearsInRuns = r; missingIssues = mi; allShelves = sh; comicShelfIds = csh
+                tags = t; appearsInRuns = r; missingIssues = mi
             }
         }
     }

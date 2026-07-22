@@ -40,12 +40,12 @@ struct RunsListView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "list.bullet.rectangle")
                         .font(.system(size: 42)).foregroundStyle(.quaternary)
-                    Text("No Reading Orders Yet").font(.headline).foregroundStyle(.secondary)
+                    Text("No Reading Paths Yet").font(.headline).foregroundStyle(.secondary)
                     Text("Group comics into an ordered reading path to track multi-series arcs.")
                         .font(.caption).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 12)
-                    Button("Create Reading Order") { showingCreate = true }
+                    Button("Create Reading Path") { showingCreate = true }
                         .buttonStyle(.borderedProminent).tint(Design.brandGold)
                         .foregroundStyle(.black)
                 }
@@ -270,7 +270,7 @@ struct RunDetailView: View {
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             HStack(spacing: 8) {
-                Text("READING ORDER")
+                Text("READING PATH")
                     .font(.system(size: 13, weight: .black))
                     .foregroundStyle(.secondary)
                     .kerning(1.5)
@@ -304,7 +304,7 @@ struct RunDetailView: View {
                     Image(systemName: "books.vertical")
                         .font(.system(size: 48)).foregroundStyle(.quaternary)
                     Text("No Comics Yet").font(.headline).foregroundStyle(.secondary)
-                    Text("Add comics to build your reading order.")
+                    Text("Add comics to build your reading path.")
                         .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
                     Button("Add Comics") { showingAddComics = true }
                         .buttonStyle(.borderedProminent).tint(Design.brandGold)
@@ -570,7 +570,7 @@ struct RunItemRow: View {
                 }
             }
             Divider()
-            Button("Remove from Reading Order", role: .destructive) {
+            Button("Remove from Reading Path", role: .destructive) {
                 LibraryViewModel.shared.removeFromRunWithUndo(runId: runId, items: [item], onRestored: onChange)
                 onChange()
             }
@@ -590,7 +590,7 @@ struct RunItemRow: View {
             else { LibraryViewModel.shared.markRead(item.comic) }
             onChange()
         }
-        .accessibilityAction(named: "Remove from Reading Order") {
+        .accessibilityAction(named: "Remove from Reading Path") {
             LibraryViewModel.shared.removeFromRunWithUndo(runId: runId, items: [item], onRestored: onChange)
             onChange()
         }
@@ -755,7 +755,7 @@ struct RunsView: View {
     var body: some View {
         NavigationStack {
             RunsListView(selectedRun: $vm.selectedRun)
-                .navigationTitle("Reading Orders")
+                .navigationTitle("Reading Paths")
         }
     }
 }

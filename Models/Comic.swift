@@ -60,12 +60,6 @@ struct Run: Identifiable, Equatable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-struct Shelf: Identifiable, Hashable {
-    let id: Int64
-    var name: String
-    var isBuiltIn: Bool
-}
-
 struct RunItem: Identifiable {
     let id: Int64
     var comic: Comic

@@ -56,7 +56,7 @@ struct ComicArcIPadApp: App {
                 Button("Favorites")        { vm.select(.favorites) }       .keyboardShortcut("3", modifiers: .command)
                 Button("Reading List")     { vm.select(.readingList) }     .keyboardShortcut("4", modifiers: .command)
                 Divider()
-                Button("Reading Orders")   { vm.select(.runs) }            .keyboardShortcut("5", modifiers: .command)
+                Button("Reading Paths")   { vm.select(.runs) }            .keyboardShortcut("5", modifiers: .command)
                 Button("Statistics")       { vm.select(.stats) }           .keyboardShortcut("6", modifiers: .command)
                 Button("History")          { vm.select(.history) }         .keyboardShortcut("7", modifiers: .command)
                 Divider()

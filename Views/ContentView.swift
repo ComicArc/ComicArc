@@ -179,9 +179,9 @@ struct ContentView: View {
         VStack(spacing: 14) {
             Image(systemName: "list.bullet.rectangle")
                 .font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("Select a Reading Order")
+            Text("Select a Reading Path")
                 .font(.title3.bold()).foregroundStyle(.secondary)
-            Text("Group comics into reading orders to track multi-series arcs.")
+            Text("Group comics into reading paths to track multi-series arcs.")
                 .font(.subheadline).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
         }

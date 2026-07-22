@@ -359,11 +359,6 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
 
-        let builtins = [("Currently Reading", 0), ("Want to Read", 1), ("Finished", 2), ("DNF", 3)]
-        for (name, pos) in builtins {
-            exec("INSERT OR IGNORE INTO shelves (name, is_builtin, position) VALUES ('\(name)', 1, \(pos))")
-
-        }
 
         exec("ALTER TABLE comics ADD COLUMN file_hash TEXT")
         exec("ALTER TABLE runs   ADD COLUMN rating INTEGER")
@@ -1255,11 +1250,6 @@ final class DatabaseManager: @unchecked Sendable {
             let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
                                                          series: comic.series, format: comic.format)
             let legacyNumber = ReadingOrderEngine.parseLegacyNumber(comic.issueNumber)
-            let duplicateCount = scalarInt("""
-                SELECT COUNT(*) - 1 FROM comics
-                WHERE deleted_at IS NULL AND publisher = ? AND series = ? AND issue_number = ?
-                      AND comic_type(issue_number, title, series, format) = ?
-                """, args: [comic.publisher, comic.series, comic.issueNumber ?? "", comicType.rawValue])
 
             return MetadataInspectorInfo(
                 comic: comic, comicType: comicType, legacyNumber: legacyNumber,
@@ -1268,7 +1258,7 @@ final class DatabaseManager: @unchecked Sendable {
                 storyArcNumber: extra.storyArcNumber, seriesGroup: extra.seriesGroup,
                 gcdMatchReason: extra.gcdMatchReason,
                 hasComicInfo: extra.hasComicInfo.map { $0 != 0 },
-                duplicateMatchCount: max(0, duplicateCount)
+                duplicateMatchCount: _duplicateMatchCountUnlocked(for: comicId)
             )
         }
     }
@@ -1701,6 +1691,36 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    /// Same identity rules `duplicateGroups()` uses (comic type match, volume/year tolerance,
+    /// always-on file-hash match), scoped to a single comic — so the Metadata Inspector's
+    /// duplicate count can never drift from what the Duplicates screen would actually show.
+    func duplicateMatchCount(for comicId: Int64) -> Int {
+        queue.sync { _duplicateMatchCountUnlocked(for: comicId) }
+    }
+
+    private func _duplicateMatchCountUnlocked(for comicId: Int64) -> Int {
+        guard let comic = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [comicId], map: comicRow).first else {
+            return 0
+        }
+        let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
+                                                     series: comic.series, format: comic.format)
+        let candidates: [Comic] = rows("""
+            \(comicSelect)
+            WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ? AND c.issue_number = ?
+                  AND comic_type(c.issue_number, c.title, c.series, c.format) = ?
+            """, args: [comic.publisher, comic.series, comic.issueNumber ?? "", comicType.rawValue], map: comicRow)
+        let matchingBucket = splitByVolumeOrYear(candidates).first { $0.contains { $0.id == comicId } } ?? []
+        var matchedIds = Set(matchingBucket.map(\.id))
+
+        if let hash = comic.fileHash {
+            let hashMatches = rows("SELECT id FROM comics WHERE deleted_at IS NULL AND file_hash = ?",
+                                    args: [hash]) { colInt64($0, 0) }
+            matchedIds.formUnion(hashMatches)
+        }
+        matchedIds.remove(comicId)
+        return matchedIds.count
+    }
+
     /// Splits a duplicate-candidate group into subgroups when members have differing, explicit
     /// `volume` values, or `year` values that differ by more than 1 (allowing slop between cover
     /// date and on-sale date within a single real print run). Members with no signal on either
@@ -2019,11 +2039,6 @@ final class DatabaseManager: @unchecked Sendable {
             exec("DELETE FROM runs")
             exec("DELETE FROM tags")
             exec("DELETE FROM comics")
-
-            let builtins = [("Currently Reading", 0), ("Want to Read", 1), ("Finished", 2), ("DNF", 3)]
-            for (name, pos) in builtins {
-                exec("INSERT OR IGNORE INTO shelves (name, is_builtin, position) VALUES ('\(name)', 1, \(pos))")
-            }
         }
     }
 
@@ -2468,28 +2483,6 @@ final class DatabaseManager: @unchecked Sendable {
             }
             return missing
         }
-    }
-
-    func allShelves() -> [Shelf] {
-        queue.sync {
-            rows("SELECT id, name, is_builtin FROM shelves ORDER BY position, name", map: { s in
-                Shelf(id: colInt64(s, 0), name: colText(s, 1) ?? "", isBuiltIn: colInt(s, 2) > 0)
-            })
-        }
-    }
-
-    func shelvesForComic(comicId: Int64) -> [Int64] {
-        queue.sync {
-            rows("SELECT shelf_id FROM comic_shelves WHERE comic_id = ?", args: [comicId], map: { colInt64($0, 0) })
-        }
-    }
-
-    func addToShelf(comicId: Int64, shelfId: Int64) {
-        queue.async { _ = self.run("INSERT OR IGNORE INTO comic_shelves (comic_id, shelf_id) VALUES (?,?)", args: [comicId, shelfId]) }
-    }
-
-    func removeFromShelf(comicId: Int64, shelfId: Int64) {
-        queue.async { _ = self.run("DELETE FROM comic_shelves WHERE comic_id = ? AND shelf_id = ?", args: [comicId, shelfId]) }
     }
 
     func trashedComics() -> [Comic] {
