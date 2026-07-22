@@ -898,8 +898,9 @@ final class DatabaseManager: @unchecked Sendable {
             for cycle in _seriesLinkCyclesUnlocked() {
                 let members = Set(cycle)
                 guard let toBreak: (child: String, seq: Int) = rows(
-                    "SELECT child_publisher || ':' || child_series, sequence_order FROM series_links ORDER BY sequence_order DESC"
-                ) { s in (colText(s, 0) ?? "", colInt(s, 1)) }.first(where: { members.contains($0.child) }) else { continue }
+                    "SELECT child_publisher || ':' || child_series, sequence_order FROM series_links ORDER BY sequence_order DESC",
+                    map: { s in (colText(s, 0) ?? "", colInt(s, 1)) }
+                ).first(where: { members.contains($0.child) }) else { continue }
                 let parts = toBreak.child.split(separator: ":", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { continue }
                 _ = run("DELETE FROM series_links WHERE child_publisher = ? AND child_series = ?", args: [parts[0], parts[1]])
@@ -1152,13 +1153,13 @@ final class DatabaseManager: @unchecked Sendable {
                 SELECT cover_month, cover_day, comicinfo_issue_number, alternate_number,
                        story_arc_number, series_group, gcd_match_reason, has_comicinfo
                 FROM comics WHERE id = ?
-                """, args: [comicId]) { s in
+                """, args: [comicId], map: { s in
                 Extra(coverMonth: sqlite3_column_type(s, 0) != SQLITE_NULL ? colInt(s, 0) : nil,
                       coverDay: sqlite3_column_type(s, 1) != SQLITE_NULL ? colInt(s, 1) : nil,
                       comicInfoIssueNumber: colText(s, 2), alternateNumber: colText(s, 3),
                       storyArcNumber: colText(s, 4), seriesGroup: colText(s, 5), gcdMatchReason: colText(s, 6),
                       hasComicInfo: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil)
-            }.first else { return nil }
+            }).first else { return nil }
 
             let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
                                                          series: comic.series, format: comic.format)
