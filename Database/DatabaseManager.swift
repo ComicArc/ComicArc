@@ -1094,7 +1094,8 @@ final class DatabaseManager: @unchecked Sendable {
     func allComics(publisher: String? = nil, character: String? = nil, series: String? = nil,
                    search: String? = nil, sortOrder: SortOrder = .publisher,
                    favoritesOnly: Bool = false, readingListOnly: Bool = false,
-                   nullCharacterOnly: Bool = false, tag: String? = nil) -> [Comic] {
+                   nullCharacterOnly: Bool = false, tag: String? = nil,
+                   writer: String? = nil, penciller: String? = nil) -> [Comic] {
         queue.sync {
             var conds = ["c.deleted_at IS NULL"]
             var args: [Any?] = []
@@ -1113,6 +1114,8 @@ final class DatabaseManager: @unchecked Sendable {
                 conds.append("c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name = ?)")
                 args.append(tag)
             }
+            if let writer { conds.append("c.writer = ?"); args.append(writer) }
+            if let penciller { conds.append("c.penciller = ?"); args.append(penciller) }
             let sql = "\(comicSelect) WHERE \(conds.joined(separator: " AND ")) ORDER BY \(sortOrder.clause)"
             return rows(sql, args: args, map: comicRow)
         }
@@ -1202,6 +1205,26 @@ final class DatabaseManager: @unchecked Sendable {
                 LEFT JOIN publisher_order po ON po.publisher = c.publisher
                 WHERE c.deleted_at IS NULL AND c.publisher IS NOT NULL
                 ORDER BY COALESCE(po.position, 999999), c.publisher
+                """, map: { colText($0, 0) ?? "" })
+        }
+    }
+
+    func writers() -> [String] {
+        queue.sync {
+            rows("""
+                SELECT DISTINCT c.writer FROM comics c
+                WHERE c.deleted_at IS NULL AND c.writer IS NOT NULL AND c.writer != ''
+                ORDER BY c.writer
+                """, map: { colText($0, 0) ?? "" })
+        }
+    }
+
+    func pencillers() -> [String] {
+        queue.sync {
+            rows("""
+                SELECT DISTINCT c.penciller FROM comics c
+                WHERE c.deleted_at IS NULL AND c.penciller IS NOT NULL AND c.penciller != ''
+                ORDER BY c.penciller
                 """, map: { colText($0, 0) ?? "" })
         }
     }

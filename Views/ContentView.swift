@@ -362,6 +362,22 @@ struct SidebarView: View {
                 }
             }
 
+            if !vm.writers.isEmpty {
+                Section("Writers") {
+                    ForEach(vm.writers, id: \.self) { w in
+                        navRow(w, icon: "pencil.and.outline", item: .writer(w))
+                    }
+                }
+            }
+
+            if !vm.pencillers.isEmpty {
+                Section("Pencillers") {
+                    ForEach(vm.pencillers, id: \.self) { p in
+                        navRow(p, icon: "paintbrush.pointed.fill", item: .penciller(p))
+                    }
+                }
+            }
+
             Section {
                 ForEach(visibleDiscoverItems) { discoverItem in
                     if discoverItem == .duplicates {

@@ -10,6 +10,8 @@ enum AppDestination: Hashable, Codable {
     case readingList
     case publisher(String)
     case tag(String)
+    case writer(String)
+    case penciller(String)
     case runs
     case stats
     case history
@@ -25,6 +27,8 @@ enum AppDestination: Hashable, Codable {
         case .readingList:          return "Reading List"
         case .publisher(let p):     return p
         case .tag(let t):           return "#\(t)"
+        case .writer(let w):        return w
+        case .penciller(let p):     return p
         case .runs:                 return "Reading Paths"
         case .stats:                return "Statistics"
         case .history:              return "History"
@@ -42,6 +46,8 @@ enum AppDestination: Hashable, Codable {
         case .readingList:          return "bookmark.fill"
         case .publisher:            return "building.columns"
         case .tag:                  return "tag"
+        case .writer:                return "pencil.and.outline"
+        case .penciller:             return "paintbrush.pointed.fill"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
@@ -58,6 +64,8 @@ final class LibraryViewModel: ObservableObject {
 
     @Published var comics:            [Comic] = []
     @Published var publishers:        [String] = []
+    @Published var writers:           [String] = []
+    @Published var pencillers:        [String] = []
     @Published var allTags:           [(tag: Tag, count: Int)] = []
     @Published var inProgressComics:  [Comic] = []
     @Published var destination: AppDestination = .library
@@ -152,6 +160,16 @@ final class LibraryViewModel: ObservableObject {
 
     var activeTag: String? {
         if case .tag(let t) = destination { return t }
+        return nil
+    }
+
+    var activeWriter: String? {
+        if case .writer(let w) = destination { return w }
+        return nil
+    }
+
+    var activePenciller: String? {
+        if case .penciller(let p) = destination { return p }
         return nil
     }
 
@@ -307,6 +325,8 @@ final class LibraryViewModel: ObservableObject {
         let pub   = activePublisher
         let ser   = selectedSeries
         let tag   = activeTag
+        let wri   = activeWriter
+        let pnc   = activePenciller
         let q     = searchText.isEmpty ? nil : searchText
         let sort  = sortOrder
         let group = selectedGroup
@@ -314,12 +334,15 @@ final class LibraryViewModel: ObservableObject {
         Task.detached(priority: .userInitiated) { [db] in
             let pubs = db.publishers()
             let tags = db.allTags()
+            let wris = db.writers()
+            let pncs = db.pencillers()
 
             guard section == .library || section == .continueReading
                 || section == .favorites || section == .readingList else {
                 await MainActor.run {
                     guard gen == self.reloadGeneration else { return }
-                    self.publishers = pubs; self.allTags = tags; self.isLoading = false
+                    self.publishers = pubs; self.allTags = tags
+                    self.writers = wris; self.pencillers = pncs; self.isLoading = false
                 }
                 return
             }
@@ -337,13 +360,16 @@ final class LibraryViewModel: ObservableObject {
                 let nullCharOnly = group != nil && character == nil
                 loaded = db.allComics(publisher: pub, character: character, series: ser,
                                       search: q, sortOrder: sort,
-                                      nullCharacterOnly: nullCharOnly, tag: tag)
+                                      nullCharacterOnly: nullCharOnly, tag: tag,
+                                      writer: wri, penciller: pnc)
             }
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
                 self.comics     = loaded
                 self.publishers = pubs
                 self.allTags    = tags
+                self.writers    = wris
+                self.pencillers = pncs
                 self.isLoading  = false
             }
         }
@@ -358,12 +384,16 @@ final class LibraryViewModel: ObservableObject {
             let groups = db.characterGroups(publisher: pub, search: q)
             let pubs   = db.publishers()
             let tags   = db.allTags()
+            let wris   = db.writers()
+            let pncs   = db.pencillers()
             let shelf  = db.inProgress(limit: 8)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
                 self.characterGroups   = groups
                 self.publishers        = pubs
                 self.allTags           = tags
+                self.writers           = wris
+                self.pencillers        = pncs
                 self.inProgressComics  = shelf
                 self.comics            = []
                 self.isLoading         = false
@@ -380,7 +410,10 @@ final class LibraryViewModel: ObservableObject {
         selectedComicIds.removeAll()
 
         showSeriesManager = false
-        if case .tag = item { useGroupedView = false } else { useGroupedView = true }
+        switch item {
+        case .tag, .writer, .penciller: useGroupedView = false
+        default: useGroupedView = true
+        }
         saveNavigationState()
         reload()
     }

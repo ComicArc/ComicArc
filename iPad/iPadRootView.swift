@@ -157,6 +157,22 @@ private struct iPadSidebar: View {
                     }
                 }
             }
+            if !vm.writers.isEmpty {
+                Section("Writers") {
+                    ForEach(vm.writers, id: \.self) { w in
+                        Label(w, systemImage: "pencil.and.outline")
+                            .tag(AppDestination.writer(w))
+                    }
+                }
+            }
+            if !vm.pencillers.isEmpty {
+                Section("Pencillers") {
+                    ForEach(vm.pencillers, id: \.self) { p in
+                        Label(p, systemImage: "paintbrush.pointed.fill")
+                            .tag(AppDestination.penciller(p))
+                    }
+                }
+            }
             Section("Discover") {
                 ForEach(visibleDiscoverItems) { item in
                     if item == .duplicates {
@@ -228,7 +244,7 @@ private struct iPadContentColumn: View {
     var body: some View {
         Group {
             switch vm.destination {
-            case .library, .continueReading, .favorites, .readingList, .publisher, .tag:
+            case .library, .continueReading, .favorites, .readingList, .publisher, .tag, .writer, .penciller:
                 iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
                     .navigationTitle(vm.destination.title)
             case .stats:
