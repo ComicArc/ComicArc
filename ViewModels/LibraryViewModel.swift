@@ -13,6 +13,7 @@ enum AppDestination: Hashable, Codable {
     case writer(String)
     case penciller(String)
     case runs
+    case diary
     case stats
     case history
     case duplicates
@@ -30,6 +31,7 @@ enum AppDestination: Hashable, Codable {
         case .writer(let w):        return w
         case .penciller(let p):     return p
         case .runs:                 return "Reading Paths"
+        case .diary:                return "Diary"
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
@@ -49,6 +51,7 @@ enum AppDestination: Hashable, Codable {
         case .writer:                return "pencil.and.outline"
         case .penciller:             return "paintbrush.pointed.fill"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
+        case .diary:                return "text.book.closed.fill"
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
         case .duplicates:           return "doc.on.doc"
@@ -141,6 +144,7 @@ final class LibraryViewModel: ObservableObject {
     var selectedSection: SidebarSection {
         switch destination {
         case .runs:            return .runs
+        case .diary:           return .diary
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
@@ -173,7 +177,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, readingOrderManager, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, diary, stats, history, duplicates, readingOrderManager, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {

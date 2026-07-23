@@ -146,6 +146,8 @@ struct ContentView: View {
             }
         case .runs:
             runsContent
+        case .diary:
+            DiaryView()
         case .stats:
             StatsView()
         case .history:

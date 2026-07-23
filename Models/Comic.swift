@@ -99,6 +99,15 @@ struct HistoryEntry: Identifiable {
     var pagesRead: Int { max(0, pageEnd - pageStart) }
 }
 
+struct DiaryEntry: Identifiable {
+    let id: Int64  // diary_entries row id -- NOT comic.id, since a reread produces a second row for the same comic
+    let comic: Comic
+    let rating: Int
+    let review: String?
+    let loggedAt: String
+    let isReread: Bool
+}
+
 struct LibraryStats {
     let totalComics: Int
     let pagesRead: Int

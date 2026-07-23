@@ -268,6 +268,16 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("""
+        CREATE TABLE IF NOT EXISTS diary_entries (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            comic_id   INTEGER REFERENCES comics(id) ON DELETE CASCADE,
+            rating     INTEGER CHECK(rating BETWEEN 1 AND 5),
+            review     TEXT,
+            is_reread  INTEGER NOT NULL DEFAULT 0,
+            logged_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        exec("""
         CREATE TABLE IF NOT EXISTS reading_goals (
             year       INTEGER PRIMARY KEY,
             goal_count INTEGER NOT NULL DEFAULT 52
@@ -322,6 +332,8 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_history_read_at    ON reading_history(read_at DESC)")
+        exec("CREATE INDEX IF NOT EXISTS idx_diary_comic_id     ON diary_entries(comic_id)")
+        exec("CREATE INDEX IF NOT EXISTS idx_diary_logged_at    ON diary_entries(logged_at DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_comic    ON bookmarks(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_shelves      ON comic_shelves(comic_id)")
         exec("""
@@ -1378,6 +1390,34 @@ final class DatabaseManager: @unchecked Sendable {
                 INSERT INTO ratings (comic_id, rating) VALUES (?,?)
                 ON CONFLICT(comic_id) DO UPDATE SET rating = excluded.rating
             """, args: [comicId, rating])
+            _logDiaryEntryUnlocked(comicId: comicId)
+        }
+    }
+
+    /// Snapshots the current rating/review into `diary_entries`, called after every
+    /// `setRating`/`setComicReview` write. Same-day edits collapse into the existing
+    /// entry (rapid star-taps in one sitting shouldn't spam the diary); a genuinely new
+    /// day always starts a new entry, marked `is_reread` if any prior entry exists.
+    /// Must run already inside `queue.sync` — not itself queue-wrapped.
+    private func _logDiaryEntryUnlocked(comicId: Int64) {
+        guard let current: (rating: Int, review: String?) = rows(
+            "SELECT rating, review FROM ratings WHERE comic_id = ?", args: [comicId],
+            map: { s in (colInt(s, 0), colText(s, 1)) }
+        ).first, current.rating > 0 else { return }
+
+        let todayId: Int64? = rows(
+            "SELECT id FROM diary_entries WHERE comic_id = ? AND date(logged_at) = date('now') ORDER BY id DESC LIMIT 1",
+            args: [comicId], map: { colInt64($0, 0) }
+        ).first
+
+        if let todayId {
+            _ = run("UPDATE diary_entries SET rating = ?, review = ? WHERE id = ?",
+                    args: [current.rating, current.review, todayId])
+        } else {
+            let hasPriorEntry = scalarInt("SELECT COUNT(*) FROM diary_entries WHERE comic_id = ?", args: [comicId]) > 0
+            _ = run("""
+                INSERT INTO diary_entries (comic_id, rating, review, is_reread) VALUES (?,?,?,?)
+            """, args: [comicId, current.rating, current.review, hasPriorEntry ? 1 : 0])
         }
     }
 
@@ -1396,6 +1436,35 @@ final class DatabaseManager: @unchecked Sendable {
                 INSERT INTO ratings (comic_id, rating, review) VALUES (?,COALESCE((SELECT rating FROM ratings WHERE comic_id=?),0),?)
                 ON CONFLICT(comic_id) DO UPDATE SET review = excluded.review
             """, args: [comicId, comicId, (text?.isEmpty == false) ? text : nil])
+            _logDiaryEntryUnlocked(comicId: comicId)
+        }
+    }
+
+    func diaryEntries(limit: Int = 500) -> [DiaryEntry] {
+        queue.sync {
+            struct RawEntry { let id: Int64; let comicId: Int64; let rating: Int; let review: String?; let loggedAt: String; let isReread: Bool }
+            let raw: [RawEntry] = rows("""
+                SELECT id, comic_id, rating, review, logged_at, is_reread
+                FROM diary_entries
+                ORDER BY logged_at DESC, id DESC
+                LIMIT ?
+                """, args: [limit], map: { s in
+                    RawEntry(id: colInt64(s, 0), comicId: colInt64(s, 1), rating: colInt(s, 2), review: colText(s, 3),
+                             loggedAt: colText(s, 4) ?? "", isReread: colInt(s, 5) != 0)
+                })
+            guard !raw.isEmpty else { return [] }
+
+            let comicIds = raw.map { $0.comicId }
+            let placeholders = comicIds.map { _ in "?" }.joined(separator: ",")
+            let comicsById: [Int64: Comic] = Dictionary(uniqueKeysWithValues:
+                rows("\(comicSelect) WHERE c.id IN (\(placeholders)) AND c.deleted_at IS NULL",
+                     args: comicIds, map: comicRow).map { ($0.id, $0) }
+            )
+            return raw.compactMap { entry in
+                guard let comic = comicsById[entry.comicId] else { return nil }
+                return DiaryEntry(id: entry.id, comic: comic, rating: entry.rating, review: entry.review,
+                                   loggedAt: entry.loggedAt, isReread: entry.isReread)
+            }
         }
     }
 

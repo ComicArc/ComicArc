@@ -205,7 +205,7 @@ Press `?` inside the reader at any time to see the full list.
 | `R` | Toggle RTL direction |
 | `Esc` | Stop autoplay, or close reader |
 
-The main window also supports ⌘1 through ⌘7 to jump to any sidebar section, ⌘[ to go back, ⌘E to toggle bulk-select, ⇧⌘R to rescan your library, and ⇧⌘F to open the Rename Files tool.
+The main window also supports ⌘1 through ⌘8 to jump to any sidebar section, ⌘[ to go back, ⌘E to toggle bulk-select, ⇧⌘R to rescan your library, and ⇧⌘F to open the Rename Files tool.
 
 ### iPad (Magic Keyboard)
 
@@ -213,7 +213,7 @@ The main window also supports ⌘1 through ⌘7 to jump to any sidebar section, 
 |---|---|
 | ⇧⌘R | Scan library |
 | ⇧⌘F | Rename Files tool |
-| ⌘1 through ⌘7 | Jump to sidebar section |
+| ⌘1 through ⌘8 | Jump to sidebar section |
 | ⌘[ | Go back |
 
 ---

@@ -27,6 +27,7 @@
 		B00000000000000000000011 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		B00000000000000000000020 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		B00000000000000000000021 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
+		D10000000000000000000003 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
 		B00000000000000000000023 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		B00000000000000000000024 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		B00000000000000000000025 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
@@ -60,6 +61,7 @@
 		F10000000000000000000001 /* ComicArcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* ComicArcTests.swift */; };
 		F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* ReadingOrderEngineTests.swift */; };
 		F10000000000000000000010 /* OfflineMetadataStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000F /* OfflineMetadataStoreTests.swift */; };
+		D10000000000000000000006 /* DiaryEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000005 /* DiaryEntryTests.swift */; };
 		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
 		IP000000000000000000000C /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = IP000000000000000000000B /* ZIPFoundation */; };
 		IB0000000000000000000001 /* Comic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Comic.swift */; };
@@ -81,6 +83,7 @@
 		IB0000000000000000000010 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		IB0000000000000000000011 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
+		D10000000000000000000004 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
 		IB0000000000000000000014 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		IB0000000000000000000015 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		IB0000000000000000000016 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
@@ -141,6 +144,7 @@
 		A00000000000000000000011 /* RunsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000020 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A00000000000000000000021 /* ReadingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryView.swift; sourceTree = "<group>"; };
+		D10000000000000000000001 /* DiaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryView.swift; sourceTree = "<group>"; };
 		A00000000000000000000023 /* IssueDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailPage.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* SeriesManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesManagerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000025 /* TutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialView.swift; sourceTree = "<group>"; };
@@ -178,6 +182,7 @@
 		F10000000000000000000002 /* ComicArcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcTests.swift; sourceTree = "<group>"; };
 		F1000000000000000000000D /* ReadingOrderEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngineTests.swift; sourceTree = "<group>"; };
 		F1000000000000000000000F /* OfflineMetadataStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineMetadataStoreTests.swift; sourceTree = "<group>"; };
+		D10000000000000000000005 /* DiaryEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryEntryTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000004 /* ComicArcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComicArcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		IP0000000000000000000001 /* ComicArcIPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcIPadApp.swift; sourceTree = "<group>"; };
 		IP0000000000000000000004 /* ComicArcPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArcPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -343,6 +348,7 @@
 				C0000000000000000000000C /* Settings */,
 				C0000000000000000000000D /* Stats */,
 				C0000000000000000000000E /* Runs */,
+				D10000000000000000000002 /* Diary */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -363,6 +369,7 @@
 				F10000000000000000000002 /* ComicArcTests.swift */,
 				F1000000000000000000000D /* ReadingOrderEngineTests.swift */,
 				F1000000000000000000000F /* OfflineMetadataStoreTests.swift */,
+				D10000000000000000000005 /* DiaryEntryTests.swift */,
 			);
 			path = ComicArcTests;
 			sourceTree = "<group>";
@@ -416,6 +423,14 @@
 				A00000000000000000000011 /* RunsView.swift */,
 			);
 			path = Runs;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000002 /* Diary */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000001 /* DiaryView.swift */,
+			);
+			path = Diary;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -587,6 +602,7 @@
 				B00000000000000000000011 /* RunsView.swift in Sources */,
 				B00000000000000000000020 /* OnboardingView.swift in Sources */,
 				B00000000000000000000021 /* ReadingHistoryView.swift in Sources */,
+				D10000000000000000000003 /* DiaryView.swift in Sources */,
 				B00000000000000000000023 /* IssueDetailPage.swift in Sources */,
 				B00000000000000000000024 /* SeriesManagerView.swift in Sources */,
 				B00000000000000000000065 /* ImportWizardView.swift in Sources */,
@@ -622,6 +638,7 @@
 				F10000000000000000000001 /* ComicArcTests.swift in Sources */,
 				F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */,
 				F10000000000000000000010 /* OfflineMetadataStoreTests.swift in Sources */,
+				D10000000000000000000006 /* DiaryEntryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -650,6 +667,7 @@
 				IB0000000000000000000010 /* RunsView.swift in Sources */,
 				IB0000000000000000000011 /* OnboardingView.swift in Sources */,
 				IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */,
+				D10000000000000000000004 /* DiaryView.swift in Sources */,
 				IB0000000000000000000014 /* IssueDetailPage.swift in Sources */,
 				IB0000000000000000000015 /* SeriesManagerView.swift in Sources */,
 				IB0000000000000000000065 /* ImportWizardView.swift in Sources */,

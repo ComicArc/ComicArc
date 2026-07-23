@@ -1,13 +1,14 @@
 import Foundation
 
 enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
-    case runs, stats, history, duplicates, readingOrderManager
+    case runs, diary, stats, history, duplicates, readingOrderManager
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .runs:               return "Reading Paths"
+        case .diary:               return "Diary"
         case .stats:               return "Statistics"
         case .history:             return "History"
         case .duplicates:          return "Possible Duplicates"
@@ -18,6 +19,7 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
     var icon: String {
         switch self {
         case .runs:               return "list.bullet.rectangle.portrait.fill"
+        case .diary:               return "text.book.closed.fill"
         case .stats:               return "chart.bar.xaxis"
         case .history:             return "clock.fill"
         case .duplicates:          return "doc.on.doc"
@@ -28,6 +30,7 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
     var destination: AppDestination {
         switch self {
         case .runs:               return .runs
+        case .diary:               return .diary
         case .stats:               return .stats
         case .history:             return .history
         case .duplicates:          return .duplicates
