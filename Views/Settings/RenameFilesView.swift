@@ -155,11 +155,14 @@ struct RenameFilesView: View {
                 proposed.append((comic, newPath, comic.gcdSeriesName != nil))
             }
 
+            // Keyed case-insensitively: macOS's default filesystems (APFS, HFS+) treat "Batman #1.cbz"
+            // and "batman #1.cbz" as the same file, so a case-only difference is still a real
+            // collision even though the two path strings aren't byte-for-byte equal.
             var pathCounts: [String: Int] = [:]
-            for p in proposed { pathCounts[p.newPath, default: 0] += 1 }
+            for p in proposed { pathCounts[p.newPath.lowercased(), default: 0] += 1 }
 
             let results = proposed.map { p -> RenameCandidate in
-                let conflict = (pathCounts[p.newPath] ?? 0) > 1
+                let conflict = (pathCounts[p.newPath.lowercased()] ?? 0) > 1
                 return RenameCandidate(
                     comicId: p.comic.id,
                     oldPath: p.comic.filePath,
@@ -182,23 +185,51 @@ struct RenameFilesView: View {
         isApplying = true
         applyProgress = 0
         Task.detached(priority: .userInitiated) {
-            var succeeded = 0
+            let fm = FileManager.default
+
+            // Two-phase rename: a file's target name can currently be occupied by ANOTHER file
+            // that's also being renamed away in this same batch (e.g. two comics effectively
+            // swapping names, or a chain of them). Renaming directly in one pass makes success
+            // depend on arbitrary processing order -- whichever file happens to move out of the
+            // way first. Moving everything to a unique temp name first guarantees every source
+            // path is vacated before any final name is claimed, so ordering can't cause a failure.
+            struct Staged { let comicId: Int64; let tempURL: URL; let finalURL: URL; let oldName: String }
+            var staged: [Staged] = []
             var failed: [String] = []
+
             for candidate in toRename {
                 let oldURL = URL(fileURLWithPath: candidate.oldPath)
-                let newURL = URL(fileURLWithPath: candidate.newPath)
+                let tempURL = oldURL.deletingLastPathComponent()
+                    .appendingPathComponent(".comicarc-rename-\(UUID().uuidString)")
                 do {
-                    guard !FileManager.default.fileExists(atPath: newURL.path) else {
-                        failed.append(candidate.oldName); continue
-                    }
-                    try FileManager.default.moveItem(at: oldURL, to: newURL)
-                    DatabaseManager.shared.updateFilePath(id: candidate.comicId, newPath: newURL.path)
-                    succeeded += 1
+                    try fm.moveItem(at: oldURL, to: tempURL)
+                    staged.append(Staged(comicId: candidate.comicId, tempURL: tempURL,
+                                          finalURL: URL(fileURLWithPath: candidate.newPath),
+                                          oldName: candidate.oldName))
                 } catch {
                     failed.append(candidate.oldName)
                 }
                 await MainActor.run { applyProgress += 1 }
             }
+
+            var succeeded = 0
+            for item in staged {
+                do {
+                    guard !fm.fileExists(atPath: item.finalURL.path) else {
+                        // Genuinely occupied by something outside this batch -- move back so the
+                        // file isn't left stranded under a temp name.
+                        let revertURL = item.tempURL.deletingLastPathComponent().appendingPathComponent(item.oldName)
+                        try? fm.moveItem(at: item.tempURL, to: revertURL)
+                        failed.append(item.oldName); continue
+                    }
+                    try fm.moveItem(at: item.tempURL, to: item.finalURL)
+                    DatabaseManager.shared.updateFilePath(id: item.comicId, newPath: item.finalURL.path)
+                    succeeded += 1
+                } catch {
+                    failed.append(item.oldName)
+                }
+            }
+
             let finalSucceeded = succeeded
             let finalFailedCount = failed.count
             await MainActor.run {

@@ -86,6 +86,13 @@ final class LibraryScanner: @unchecked Sendable {
         var touchedEffectiveKeys: Set<String> = []
 
         func insertNewComic(url: URL, fp: String, hash: String?) {
+            // A soft-deleted comic at this exact path is about to be revived (see _insertRow's
+            // ON CONFLICT). Its cached cover may have been generated from a bad read while the
+            // file was flaky/inaccessible right before it got marked stale -- evict it now so the
+            // revived comic gets a genuinely fresh extraction instead of a possibly-wrong cover.
+            if let staleId = db.softDeletedComicId(atPath: fp) {
+                ThumbnailCache.shared.evict(staleId)
+            }
             let meta = parseMeta(url: url, libraryPath: libraryPath)
             pending.append(DatabaseManager.ComicInsert(
                 title: meta.title, filePath: fp, publisher: meta.publisher,
@@ -134,9 +141,20 @@ final class LibraryScanner: @unchecked Sendable {
         flushPending()
 
         if !state.cancelled && fm.fileExists(atPath: libraryPath) {
-            let stale = db.stalePaths().filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
-            if !stale.isEmpty { db.softDelete(stale); anyRemoved = true }
-            setState { $0.removed = stale.count }
+            let active = db.stalePaths()
+            let stale = active.filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
+            // A flaky/waking external drive or network share can resolve the library ROOT path
+            // fine while individual file-existence checks transiently false-negative -- if that
+            // happens, this would otherwise read as "most of the library vanished overnight" and
+            // soft-delete all of it. A single user genuinely deleting most of a small library is
+            // plausible and shouldn't be blocked, so this only guards a large ABSOLUTE count too.
+            let suspiciouslyLarge = active.count >= 20 && stale.count > active.count / 2
+            if !stale.isEmpty && !suspiciouslyLarge {
+                db.softDelete(stale); anyRemoved = true
+                setState { $0.removed = stale.count }
+            } else if suspiciouslyLarge {
+                setState { $0.error = "Skipped removing \(stale.count) of \(active.count) comics that looked missing -- this usually means the drive was slow to wake up or briefly disconnected, not that the files are actually gone. Rescan once the drive is fully available to confirm." }
+            }
         }
 
         if !state.cancelled {
@@ -179,6 +197,9 @@ final class LibraryScanner: @unchecked Sendable {
             guard !knownPaths.contains(fp) else { return }
             let hash = fileHash(fp)
             if let h = hash, db.knownHashes().contains(h) { return }
+            if let staleId = db.softDeletedComicId(atPath: fp) {
+                ThumbnailCache.shared.evict(staleId)
+            }
             let meta = parseMeta(url: url, libraryPath: libraryPath)
             db.insert(comic: (
                 title: meta.title, filePath: fp, publisher: meta.publisher,

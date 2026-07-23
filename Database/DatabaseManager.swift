@@ -1361,13 +1361,31 @@ final class DatabaseManager: @unchecked Sendable {
                              _ alternateNumber: String? = nil, _ storyArcNumber: String? = nil,
                              _ seriesGroup: String? = nil, _ comicInfoIssueNumber: String? = nil,
                              _ volume: String? = nil, _ format: String? = nil, _ hasComicInfo: Bool? = nil) {
+        // ON CONFLICT (not OR IGNORE): file_path is UNIQUE, and a soft-deleted comic keeps its row
+        // (deleted_at set, never removed) forever at that same path. If the file later reappears
+        // after being wrongly marked stale (e.g. a flaky/waking external drive during a scan),
+        // INSERT OR IGNORE would silently no-op on the UNIQUE conflict -- the comic would never
+        // come back, permanently orphaned. Reviving the SAME row on conflict instead means its
+        // reading_progress/ratings/tags/list-memberships (all keyed by this comic_id) are still
+        // correctly attached -- a plain "delete and re-insert" would have orphaned all of that.
+        // added_at and position are deliberately left untouched: a revival isn't a new addition.
         _ = run("""
-        INSERT OR IGNORE INTO comics
+        INSERT INTO comics
             (title, file_path, publisher, character, series, issue_number,
              page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
              cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number, volume,
              format, has_comicinfo)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(file_path) DO UPDATE SET
+            deleted_at = NULL, scan_retry_count = 0,
+            title = excluded.title, publisher = excluded.publisher, character = excluded.character,
+            series = excluded.series, issue_number = excluded.issue_number, page_count = excluded.page_count,
+            writer = excluded.writer, penciller = excluded.penciller, year = excluded.year,
+            story_arc = excluded.story_arc, language_iso = excluded.language_iso, file_hash = excluded.file_hash,
+            cover_month = excluded.cover_month, cover_day = excluded.cover_day,
+            alternate_number = excluded.alternate_number, story_arc_number = excluded.story_arc_number,
+            series_group = excluded.series_group, comicinfo_issue_number = excluded.comicinfo_issue_number,
+            volume = excluded.volume, format = excluded.format, has_comicinfo = excluded.has_comicinfo
         """, args: [title, filePath, publisher, character,
                     series, issueNumber, pageCount, writer,
                     penciller, year.map { Int64($0) }, storyArc,
@@ -1397,6 +1415,15 @@ final class DatabaseManager: @unchecked Sendable {
 
     func knownPaths() -> Set<String> {
         queue.sync { Set(rows("SELECT file_path FROM comics WHERE deleted_at IS NULL", map: { colText($0, 0) ?? "" })) }
+    }
+
+    /// Returns the id of a soft-deleted comic at this exact path, if one exists -- used to evict its
+    /// (possibly stale/wrong) cached cover before the row is revived by a rescan.
+    func softDeletedComicId(atPath path: String) -> Int64? {
+        queue.sync {
+            let id = scalarInt("SELECT id FROM comics WHERE file_path = ? AND deleted_at IS NOT NULL", args: [path])
+            return id > 0 ? Int64(id) : nil
+        }
     }
 
     func knownHashes() -> Set<String> {
