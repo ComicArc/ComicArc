@@ -98,7 +98,7 @@ struct OnboardingView: View {
             HStack(spacing: 40) {
                 featureBullet(icon: "books.vertical.fill",   label: "Organize",   sub: "CBZ, CBR & PDF")
                 featureBullet(icon: "chart.bar.fill",        label: "Track",      sub: "Reading stats")
-                featureBullet(icon: "list.bullet.rectangle", label: "Build Runs", sub: "Reading orders")
+                featureBullet(icon: "list.bullet.rectangle", label: "Reading Paths", sub: "Cross-series orders")
             }
 
             Button("Get Started") {

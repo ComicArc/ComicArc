@@ -389,7 +389,7 @@ struct IssueDetailPage: View {
 
     private var runsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Appears in Runs")
+            Text("Appears in Reading Paths")
                 .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
             ForEach(appearsInRuns) { run in
                 HStack(spacing: 8) {

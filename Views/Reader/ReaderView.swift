@@ -230,6 +230,12 @@ struct ReaderView: View {
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
         .sheet(isPresented: $showShortcuts) { shortcutsSheet }
         .sheet(isPresented: $showBookmarks) { bookmarksPanel }
+        // Always dark, regardless of the user's app theme: the reader chrome (topBar/bottomBar)
+        // uses hardcoded white icons/text over .ultraThinMaterial. Materials pick up a lighter
+        // tint under a .light color scheme, which ContentView applies app-wide for the Sepia
+        // theme -- that would wash the toolbar toward white-on-white right where the fixed
+        // white controls need the darkest, highest-contrast variant of the material.
+        .preferredColorScheme(.dark)
     }
 
     private func scheduleHide() {
