@@ -257,7 +257,8 @@ struct ContentView: View {
         ToolbarItem(id: "bulk", placement: .primaryAction) {
             let show = vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil
             Button { vm.toggleBulkMode() } label: {
-                Image(systemName: vm.bulkMode ? "checklist.checked" : "checklist")
+                Label(vm.bulkMode ? "Exit Selection" : "Select Multiple",
+                      systemImage: vm.bulkMode ? "checklist.checked" : "checklist")
             }
             .foregroundStyle(vm.bulkMode ? Design.brandBlue : .primary)
             .help(vm.bulkMode ? "Exit selection mode" : "Select multiple comics (⌘E)")
@@ -269,7 +270,7 @@ struct ContentView: View {
         #if os(macOS)
         ToolbarItem(id: "settings", placement: .primaryAction) {
             Button { vm.select(.settings) } label: {
-                Image(systemName: "gearshape")
+                Label("Settings", systemImage: "gearshape")
             }
             .help("Settings (⌘,)")
         }

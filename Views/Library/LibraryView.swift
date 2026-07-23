@@ -828,10 +828,11 @@ struct SortPicker: View {
                 }
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down")
+            Label("Sort", systemImage: "arrow.up.arrow.down")
                 .font(.system(size: 12))
         }
         .help("Sort: \(vm.sortOrder.rawValue)")
+        .accessibilityLabel("Sort by \(vm.sortOrder.rawValue)")
     }
 }
 
@@ -852,6 +853,8 @@ struct DensityPicker: View {
                 }
                 .buttonStyle(.plain)
                 .help(d.rawValue.capitalized + " grid")
+                .accessibilityLabel("\(d.rawValue.capitalized) grid")
+                .accessibilityAddTraits(density == d ? [.isButton, .isSelected] : .isButton)
             }
         }
         .padding(3)
