@@ -84,6 +84,26 @@ struct ListsListView: View {
                                 draggedListId = nil; dropTargetListId = nil
                                 return true
                             }
+                            // Drag-and-drop is the only way to reorder Lists, which is both a
+                            // hard accessibility gap (no keyboard/VoiceOver path at all) and slow
+                            // for a long list (dragging across many rows). These give a faster,
+                            // non-drag alternative for everyone.
+                            .contextMenu {
+                                Button("Move to Top") { moveList(list, to: 0) }
+                                    .disabled(lists.first?.id == list.id)
+                                Button("Move Up") { moveList(list, by: -1) }
+                                    .disabled(lists.first?.id == list.id)
+                                Button("Move Down") { moveList(list, by: 1) }
+                                    .disabled(lists.last?.id == list.id)
+                                Button("Move to Bottom") { moveList(list, to: lists.count - 1) }
+                                    .disabled(lists.last?.id == list.id)
+                            }
+                            .accessibilityActions {
+                                Button("Move Up") { moveList(list, by: -1) }
+                                Button("Move Down") { moveList(list, by: 1) }
+                                Button("Move to Top") { moveList(list, to: 0) }
+                                Button("Move to Bottom") { moveList(list, to: lists.count - 1) }
+                            }
                             Rectangle().fill(Design.borderColor).frame(height: 1)
                         }
                     }
@@ -136,6 +156,22 @@ struct ListsListView: View {
             DatabaseManager.shared.allLists()
         }.value
         lists = r; isLoading = false
+    }
+
+    private func moveList(_ list: ComicList, by delta: Int) {
+        guard let idx = lists.firstIndex(where: { $0.id == list.id }) else { return }
+        moveList(list, to: idx + delta)
+    }
+
+    private func moveList(_ list: ComicList, to newIndex: Int) {
+        guard let fromIdx = lists.firstIndex(where: { $0.id == list.id }) else { return }
+        let clamped = max(0, min(newIndex, lists.count - 1))
+        guard clamped != fromIdx else { return }
+        var arr = lists
+        let moved = arr.remove(at: fromIdx)
+        arr.insert(moved, at: clamped)
+        lists = arr
+        DatabaseManager.shared.reorderLists(orderedIds: arr.map(\.id))
     }
 }
 

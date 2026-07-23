@@ -1378,6 +1378,16 @@ final class DatabaseManager: @unchecked Sendable {
                     languageIso, fileHash, coverMonth.map { Int64($0) },
                     coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup, comicInfoIssueNumber,
                     volume, format, hasComicInfo.map { $0 ? Int64(1) : Int64(0) }])
+
+        // A revival (or a metadata refresh) can leave this comic's page_count smaller than
+        // whatever page reading_progress last saved -- clamp it down so Stats/Continue Reading
+        // stop treating stale out-of-range progress as "finished", and the reader doesn't need
+        // to be the only place enforcing this.
+        _ = run("""
+            UPDATE reading_progress SET current_page = MAX(0, (SELECT page_count FROM comics WHERE file_path = ?) - 1)
+            WHERE comic_id = (SELECT id FROM comics WHERE file_path = ?)
+              AND current_page > MAX(0, (SELECT page_count FROM comics WHERE file_path = ?) - 1)
+            """, args: [filePath, filePath, filePath])
     }
 
     func zeroPageCountPaths() -> [(id: Int64, path: String)] {
@@ -1388,7 +1398,15 @@ final class DatabaseManager: @unchecked Sendable {
     }
 
     func updatePageCount(comicId: Int64, count: Int) {
-        queue.sync { _ = run("UPDATE comics SET page_count = ? WHERE id = ?", args: [count, comicId]) }
+        queue.sync {
+            _ = run("UPDATE comics SET page_count = ? WHERE id = ?", args: [count, comicId])
+            // See _insertRow's matching comment -- a corrected page count can leave saved
+            // progress out of range.
+            _ = run("""
+                UPDATE reading_progress SET current_page = MAX(0, ? - 1)
+                WHERE comic_id = ? AND current_page > MAX(0, ? - 1)
+                """, args: [count, comicId, count])
+        }
     }
 
     func incrementScanRetryCount(comicId: Int64) {
@@ -2261,9 +2279,23 @@ final class DatabaseManager: @unchecked Sendable {
             exec("DELETE FROM comic_tags")
             exec("DELETE FROM series_covers")
             exec("DELETE FROM comic_shelves")
+            exec("DELETE FROM shelves")
             exec("DELETE FROM run_items")
             exec("DELETE FROM runs")
             exec("DELETE FROM tags")
+            // "Clear All" is a full factory reset, not just a comics wipe -- these have no
+            // foreign key to comics (keyed by series/publisher name, or independent user-created
+            // collections) so they'd otherwise silently survive a reset untouched.
+            exec("DELETE FROM list_items")
+            exec("DELETE FROM lists")
+            exec("DELETE FROM diary_entries")
+            exec("DELETE FROM series_links")
+            exec("DELETE FROM reading_order_overrides")
+            exec("DELETE FROM series_reader_prefs")
+            exec("DELETE FROM character_covers")
+            exec("DELETE FROM series_order")
+            exec("DELETE FROM character_order")
+            exec("DELETE FROM publisher_order")
             exec("DELETE FROM comics")
             exec("COMMIT")
         }

@@ -84,6 +84,26 @@ struct RunsListView: View {
                                 draggedRunId = nil; dropTargetRunId = nil
                                 return true
                             }
+                            // Drag-and-drop is the only way to reorder Reading Paths, which is
+                            // both a hard accessibility gap (no keyboard/VoiceOver path at all)
+                            // and slow for a long list (dragging across many rows). These give a
+                            // faster, non-drag alternative for everyone.
+                            .contextMenu {
+                                Button("Move to Top") { moveRun(run, to: 0) }
+                                    .disabled(runs.first?.id == run.id)
+                                Button("Move Up") { moveRun(run, by: -1) }
+                                    .disabled(runs.first?.id == run.id)
+                                Button("Move Down") { moveRun(run, by: 1) }
+                                    .disabled(runs.last?.id == run.id)
+                                Button("Move to Bottom") { moveRun(run, to: runs.count - 1) }
+                                    .disabled(runs.last?.id == run.id)
+                            }
+                            .accessibilityActions {
+                                Button("Move Up") { moveRun(run, by: -1) }
+                                Button("Move Down") { moveRun(run, by: 1) }
+                                Button("Move to Top") { moveRun(run, to: 0) }
+                                Button("Move to Bottom") { moveRun(run, to: runs.count - 1) }
+                            }
                             Rectangle().fill(Design.borderColor).frame(height: 1)
                         }
                     }
@@ -136,6 +156,22 @@ struct RunsListView: View {
             DatabaseManager.shared.allRuns()
         }.value
         runs = r; isLoading = false
+    }
+
+    private func moveRun(_ run: Run, by delta: Int) {
+        guard let idx = runs.firstIndex(where: { $0.id == run.id }) else { return }
+        moveRun(run, to: idx + delta)
+    }
+
+    private func moveRun(_ run: Run, to newIndex: Int) {
+        guard let fromIdx = runs.firstIndex(where: { $0.id == run.id }) else { return }
+        let clamped = max(0, min(newIndex, runs.count - 1))
+        guard clamped != fromIdx else { return }
+        var list = runs
+        let moved = list.remove(at: fromIdx)
+        list.insert(moved, at: clamped)
+        runs = list
+        DatabaseManager.shared.reorderRuns(orderedIds: list.map(\.id))
     }
 }
 
