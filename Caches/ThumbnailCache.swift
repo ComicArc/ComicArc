@@ -156,6 +156,14 @@ final class ThumbnailCache: @unchecked Sendable {
         return diskURL.path
     }
 
+    func saveCustomListCover(listId: Int64, imageURL: URL) -> String? {
+        guard let img = PlatformImage.fromURL(imageURL),
+              let resized = PlatformImage.resized(source: img, to: thumbSize) else { return nil }
+        let diskURL = coversDir.appendingPathComponent("list_\(listId).jpg")
+        save(resized, to: diskURL)
+        return diskURL.path
+    }
+
     func saveCoverFromComic(_ comic: Comic, destinationName: String) -> String? {
         _ = thumbnailSync(for: comic)
         let source = coversDir.appendingPathComponent("\(comic.id).jpg")

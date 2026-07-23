@@ -70,6 +70,26 @@ struct RunItem: Identifiable {
     var isStarted: Bool { comic.isStarted }
 }
 
+struct ComicList: Identifiable, Equatable, Hashable {  // named to avoid colliding with SwiftUI.List
+    let id: Int64
+    var title: String
+    var description: String
+    var rating: Int?
+    var review: String?
+    var createdAt: String
+    var comicCount: Int = 0
+    var coverImagePath: String? = nil
+
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+struct ListItem: Identifiable {
+    let id: Int64
+    var comic: Comic
+    var position: Int
+    var notes: String
+}
+
 struct Tag: Identifiable, Hashable {
     let id: Int64
     let name: String

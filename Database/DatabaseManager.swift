@@ -249,6 +249,28 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("""
+        CREATE TABLE IF NOT EXISTS lists (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT NOT NULL,
+            description TEXT,
+            rating      INTEGER,
+            review      TEXT,
+            position    INTEGER,
+            cover_image_path TEXT,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS list_items (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            list_id  INTEGER REFERENCES lists(id)  ON DELETE CASCADE,
+            comic_id INTEGER REFERENCES comics(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            notes    TEXT DEFAULT '',
+            UNIQUE(list_id, comic_id)
+        )
+        """)
+        exec("""
         CREATE TABLE IF NOT EXISTS bookmarks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             comic_id   INTEGER REFERENCES comics(id) ON DELETE CASCADE,
@@ -312,6 +334,8 @@ final class DatabaseManager: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_tag_id    ON comic_tags(tag_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_run_id     ON run_items(run_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_comic_id   ON run_items(comic_id)")
+        exec("CREATE INDEX IF NOT EXISTS idx_list_items_list_id   ON list_items(list_id)")
+        exec("CREATE INDEX IF NOT EXISTS idx_list_items_comic_id  ON list_items(comic_id)")
         exec("""
         CREATE TABLE IF NOT EXISTS series_covers (
             series    TEXT NOT NULL,
@@ -1495,6 +1519,33 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    func listsContaining(comicId: Int64) -> [ComicList] {
+        queue.sync {
+            rows("""
+                SELECT l.id, l.title, COALESCE(l.description,''), COALESCE(l.rating,0), l.review, l.created_at
+                FROM lists l JOIN list_items li ON li.list_id = l.id
+                WHERE li.comic_id = ? ORDER BY l.created_at
+            """, args: [comicId]) { r in
+                ComicList(id: colInt64(r, 0), title: colText(r, 1) ?? "", description: colText(r, 2) ?? "",
+                          rating: { let v = colInt(r, 3); return v > 0 ? v : nil }(),
+                          review: colText(r, 4), createdAt: colText(r, 5) ?? "")
+            }
+        }
+    }
+
+    func updateList(id: Int64, title: String, description: String) {
+        queue.sync {
+            _ = run("UPDATE lists SET title = ?, description = ? WHERE id = ?",
+                    args: [title, description, id])
+        }
+    }
+
+    func comicIdsInList(listId: Int64) -> Set<Int64> {
+        queue.sync {
+            Set(rows("SELECT comic_id FROM list_items WHERE list_id = ?", args: [listId]) { colInt64($0, 0) })
+        }
+    }
+
     func setFavorite(_ comicId: Int64, _ value: Bool) {
         queue.sync {
             if value { run("INSERT OR IGNORE INTO favorites (comic_id) VALUES (?)", args: [comicId]) }
@@ -1894,6 +1945,140 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    func allLists() -> [ComicList] {
+        queue.sync {
+            let sql = """
+                SELECT l.id, l.title, COALESCE(l.description,''), COALESCE(l.rating,0), l.review, l.created_at,
+                       COUNT(li.id) as total, l.cover_image_path
+                FROM lists l
+                LEFT JOIN list_items li ON li.list_id = l.id
+                LEFT JOIN comics c     ON c.id = li.comic_id AND c.deleted_at IS NULL
+                GROUP BY l.id
+                ORDER BY COALESCE(l.position, l.id * -1)
+            """
+            return rows(sql, map: { s in
+                ComicList(id: colInt64(s, 0), title: colText(s, 1) ?? "", description: colText(s, 2) ?? "",
+                          rating: colInt(s, 3) > 0 ? colInt(s, 3) : nil,
+                          review: colText(s, 4), createdAt: colText(s, 5) ?? "",
+                          comicCount: colInt(s, 6), coverImagePath: colText(s, 7))
+            })
+        }
+    }
+
+    @discardableResult
+    func createList(title: String, description: String) -> Int64 {
+        queue.sync { run("INSERT INTO lists (title, description) VALUES (?,?)", args: [title, description]) }
+    }
+
+    func setListCover(listId: Int64, imagePath: String) {
+        queue.sync { _ = run("UPDATE lists SET cover_image_path = ? WHERE id = ?", args: [imagePath, listId]) }
+    }
+
+    func clearListCover(listId: Int64) {
+        queue.sync { _ = run("UPDATE lists SET cover_image_path = NULL WHERE id = ?", args: [listId]) }
+    }
+
+    func reorderLists(orderedIds: [Int64]) {
+        queue.sync {
+            exec("BEGIN")
+            for (idx, id) in orderedIds.enumerated() {
+                _ = run("UPDATE lists SET position = ? WHERE id = ?", args: [idx, id])
+            }
+            exec("COMMIT")
+        }
+    }
+
+    func listId(withTitle title: String) -> Int64? {
+        queue.sync {
+            let id = scalarInt("SELECT id FROM lists WHERE title = ? LIMIT 1", args: [title])
+            return id > 0 ? Int64(id) : nil
+        }
+    }
+
+    func deleteList(_ listId: Int64) {
+        queue.sync { _ = run("DELETE FROM lists WHERE id=?", args: [listId]) }
+    }
+
+    func listItems(listId: Int64) -> [ListItem] {
+        queue.sync {
+            let sql = """
+            SELECT li.id, li.position, COALESCE(li.notes,''),
+                   c.id, c.title, c.file_path, c.publisher, c.character, c.series,
+                   c.issue_number, c.page_count, c.writer, c.penciller, c.year,
+                   c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
+                   COALESCE(c.position, c.id), c.file_hash,
+                   COALESCE(rp.current_page, 0), rp.last_read,
+                   COALESCE(r.rating, 0), (f.comic_id IS NOT NULL), (rl.comic_id IS NOT NULL)
+            FROM list_items li
+            JOIN comics c ON li.comic_id = c.id AND c.deleted_at IS NULL
+            LEFT JOIN reading_progress rp ON c.id = rp.comic_id
+            LEFT JOIN ratings r           ON c.id = r.comic_id
+            LEFT JOIN favorites f         ON c.id = f.comic_id
+            LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+            WHERE li.list_id = ? ORDER BY li.position
+            """
+            return rows(sql, args: [listId]) { s -> ListItem in
+                let comic = Comic(
+                    id: colInt64(s, 3), title: colText(s, 4) ?? "", filePath: colText(s, 5) ?? "",
+                    publisher: colText(s, 6) ?? "Unknown", character: colText(s, 7), series: colText(s, 8) ?? "General",
+                    issueNumber: colText(s, 9), pageCount: colInt(s, 10), writer: colText(s, 11),
+                    penciller: colText(s, 12), year: sqlite3_column_type(s, 13) != SQLITE_NULL ? colInt(s, 13) : nil,
+                    storyArc: colText(s, 14), languageIso: colText(s, 15), notes: colText(s, 16),
+                    addedAt: colText(s, 17) ?? "", deletedAt: colText(s, 18),
+                    position: colInt(s, 19), fileHash: colText(s, 20),
+                    progress: colInt(s, 21), lastRead: colText(s, 22),
+                    rating: colInt(s, 23), isFavorite: colBool(s, 24), inReadingList: colBool(s, 25)
+                )
+                return ListItem(id: colInt64(s, 0), comic: comic,
+                                 position: colInt(s, 1), notes: colText(s, 2) ?? "")
+            }
+        }
+    }
+
+    func addToList(listId: Int64, comicIds: [Int64]) {
+        guard !comicIds.isEmpty else { return }
+        queue.sync {
+            var pos = scalarInt("SELECT COALESCE(MAX(position), -1) + 1 FROM list_items WHERE list_id = ?",
+                                args: [listId])
+            exec("BEGIN")
+            for comicId in comicIds {
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO list_items (list_id, comic_id, position) VALUES (?,?,?)", -1, &stmt, nil) == SQLITE_OK else { continue }
+                sqlite3_bind_int64(stmt, 1, listId); sqlite3_bind_int64(stmt, 2, comicId); sqlite3_bind_int(stmt, 3, Int32(pos))
+                sqlite3_step(stmt); sqlite3_finalize(stmt)
+                pos += 1
+            }
+            exec("COMMIT")
+        }
+    }
+
+    func removeFromList(listId: Int64, comicIds: [Int64]) {
+        guard !comicIds.isEmpty else { return }
+        queue.sync {
+            exec("BEGIN")
+            for comicId in comicIds {
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "DELETE FROM list_items WHERE list_id = ? AND comic_id = ?", -1, &stmt, nil) == SQLITE_OK else { continue }
+                sqlite3_bind_int64(stmt, 1, listId); sqlite3_bind_int64(stmt, 2, comicId)
+                sqlite3_step(stmt); sqlite3_finalize(stmt)
+            }
+            exec("COMMIT")
+        }
+    }
+
+    func reorderList(listId: Int64, orderedIds: [Int64]) {
+        queue.sync {
+            exec("BEGIN")
+            for (pos, id) in orderedIds.enumerated() {
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "UPDATE list_items SET position = ? WHERE id = ? AND list_id = ?", -1, &stmt, nil) == SQLITE_OK else { continue }
+                sqlite3_bind_int(stmt, 1, Int32(pos)); sqlite3_bind_int64(stmt, 2, id); sqlite3_bind_int64(stmt, 3, listId)
+                sqlite3_step(stmt); sqlite3_finalize(stmt)
+            }
+            exec("COMMIT")
+        }
+    }
+
     func loadStats() -> LibraryStats {
         queue.sync {
             let total     = scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL")
@@ -2112,6 +2297,20 @@ final class DatabaseManager: @unchecked Sendable {
     func setRunItemNotes(_ itemId: Int64, notes: String) {
         queue.sync {
             _ = run("UPDATE run_items SET notes = ? WHERE id = ?",
+                    args: [notes.isEmpty ? nil : notes, itemId])
+        }
+    }
+
+    func setListRating(_ listId: Int64, rating: Int, review: String?) {
+        queue.sync {
+            _ = run("UPDATE lists SET rating = ?, review = ? WHERE id = ?",
+                    args: [rating > 0 ? rating : nil, review, listId])
+        }
+    }
+
+    func setListItemNotes(_ itemId: Int64, notes: String) {
+        queue.sync {
+            _ = run("UPDATE list_items SET notes = ? WHERE id = ?",
                     args: [notes.isEmpty ? nil : notes, itemId])
         }
     }

@@ -148,6 +148,8 @@ struct ContentView: View {
             runsContent
         case .diary:
             DiaryView()
+        case .lists:
+            listsContent
         case .stats:
             StatsView()
         case .history:
@@ -184,6 +186,36 @@ struct ContentView: View {
             Text("Select a Reading Path")
                 .font(.title3.bold()).foregroundStyle(.secondary)
             Text("Group comics into reading paths to track multi-series arcs.")
+                .font(.subheadline).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Design.appBackground)
+    }
+
+    private var listsContent: some View {
+        HStack(spacing: 0) {
+            ListsListView(selectedList: $vm.selectedList)
+                .frame(width: 320)
+                .background(Design.navBackground)
+            Rectangle().fill(Design.borderColor).frame(width: 1)
+            if let list = vm.selectedList {
+                ListDetailView(list: list, onDelete: { vm.selectedList = nil })
+                    .frame(maxWidth: .infinity)
+                    .background(Design.appBackground)
+            } else {
+                listsPlaceholder
+            }
+        }
+    }
+
+    private var listsPlaceholder: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "trophy")
+                .font(.system(size: 52)).foregroundStyle(.quaternary)
+            Text("Select a List")
+                .font(.title3.bold()).foregroundStyle(.secondary)
+            Text("Build curated collections and rankings, no reading order required.")
                 .font(.subheadline).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
         }

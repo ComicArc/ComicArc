@@ -58,8 +58,9 @@ struct ComicArcIPadApp: App {
                 Divider()
                 Button("Reading Paths")   { vm.select(.runs) }            .keyboardShortcut("5", modifiers: .command)
                 Button("Diary")            { vm.select(.diary) }           .keyboardShortcut("6", modifiers: .command)
-                Button("Statistics")       { vm.select(.stats) }           .keyboardShortcut("7", modifiers: .command)
-                Button("History")          { vm.select(.history) }         .keyboardShortcut("8", modifiers: .command)
+                Button("Lists")            { vm.select(.lists) }           .keyboardShortcut("7", modifiers: .command)
+                Button("Statistics")       { vm.select(.stats) }           .keyboardShortcut("8", modifiers: .command)
+                Button("History")          { vm.select(.history) }         .keyboardShortcut("9", modifiers: .command)
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }

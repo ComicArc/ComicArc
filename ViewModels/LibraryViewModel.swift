@@ -14,6 +14,7 @@ enum AppDestination: Hashable, Codable {
     case penciller(String)
     case runs
     case diary
+    case lists
     case stats
     case history
     case duplicates
@@ -32,6 +33,7 @@ enum AppDestination: Hashable, Codable {
         case .penciller(let p):     return p
         case .runs:                 return "Reading Paths"
         case .diary:                return "Diary"
+        case .lists:                return "Lists"
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
@@ -52,6 +54,7 @@ enum AppDestination: Hashable, Codable {
         case .penciller:             return "paintbrush.pointed.fill"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
         case .diary:                return "text.book.closed.fill"
+        case .lists:                return "trophy.fill"
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
         case .duplicates:           return "doc.on.doc"
@@ -126,6 +129,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var isLibraryAvailable:  Bool = true
     @Published var selectedComic:     Comic? = nil
     @Published var selectedRun:       Run? = nil
+    @Published var selectedList:      ComicList? = nil
     @Published var readerComic:       Comic? = nil
 
     @Published var characterGroups:   [DatabaseManager.CharacterGroup] = []
@@ -145,6 +149,7 @@ final class LibraryViewModel: ObservableObject {
         switch destination {
         case .runs:            return .runs
         case .diary:           return .diary
+        case .lists:           return .lists
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
@@ -177,7 +182,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, diary, stats, history, duplicates, readingOrderManager, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, diary, lists, stats, history, duplicates, readingOrderManager, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -957,6 +962,76 @@ final class LibraryViewModel: ObservableObject {
     func updateRun(id: Int64, title: String, description: String, buyLink: String?) { db.updateRun(id: id, title: title, description: description, buyLink: buyLink) }
     func setRunRating(_ runId: Int64, rating: Int, review: String?) { db.setRunRating(runId, rating: rating, review: review) }
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }
+
+    @discardableResult
+    func createList(title: String, description: String) -> Int64 { db.createList(title: title, description: description) }
+    func deleteList(_ listId: Int64) { db.deleteList(listId) }
+
+    func deleteListWithUndo(_ list: ComicList) {
+        let items = db.listItems(listId: list.id)
+        db.deleteList(list.id)
+        NotificationCenter.default.post(name: .listDeleted, object: nil)
+        offerUndo("List \"\(list.title)\" deleted") { [weak self] in
+            guard let self else { return }
+            let newId = self.db.createList(title: list.title, description: list.description)
+            if let rating = list.rating {
+                self.db.setListRating(newId, rating: rating, review: list.review)
+            }
+            if let cover = list.coverImagePath {
+                self.db.setListCover(listId: newId, imagePath: cover)
+            }
+            self.db.addToList(listId: newId, comicIds: items.map(\.comic.id))
+
+            let newItems = self.db.listItems(listId: newId)
+            for item in items where !item.notes.isEmpty {
+                if let match = newItems.first(where: { $0.comic.id == item.comic.id }) {
+                    self.db.setListItemNotes(match.id, notes: item.notes)
+                }
+            }
+            NotificationCenter.default.post(name: .listDeleted, object: nil)
+        }
+    }
+
+    func addToList(listId: Int64, comicIds: [Int64]) { db.addToList(listId: listId, comicIds: comicIds) }
+    func removeFromList(listId: Int64, comicIds: [Int64]) { db.removeFromList(listId: listId, comicIds: comicIds) }
+
+    func removeFromListWithUndo(listId: Int64, items: [ListItem], onRestored: @escaping () -> Void = {}) {
+        let ids = items.map(\.comic.id)
+        db.removeFromList(listId: listId, comicIds: ids)
+        let label = items.count == 1 ? "\"\(items[0].comic.title)\" removed" : "\(items.count) comics removed"
+        offerUndo(label) { [weak self] in
+            guard let self else { return }
+            self.db.addToList(listId: listId, comicIds: ids)
+            let newItems = self.db.listItems(listId: listId)
+            for item in items where !item.notes.isEmpty {
+                if let match = newItems.first(where: { $0.comic.id == item.comic.id }) {
+                    self.db.setListItemNotes(match.id, notes: item.notes)
+                }
+            }
+            onRestored()
+        }
+    }
+    func reorderList(listId: Int64, orderedIds: [Int64]) { db.reorderList(listId: listId, orderedIds: orderedIds) }
+
+    @discardableResult
+    func setListCover(listId: Int64, imageURL: URL) -> String? {
+        guard let path = ThumbnailCache.shared.saveCustomListCover(listId: listId, imageURL: imageURL) else { return nil }
+        db.setListCover(listId: listId, imagePath: path)
+        return path
+    }
+    func clearListCover(listId: Int64) { db.clearListCover(listId: listId) }
+
+    func setListCover(listId: Int64, usingCoverOf comic: Comic, onDone: @escaping () -> Void = {}) {
+        Task.detached(priority: .userInitiated) { [db] in
+            guard let path = ThumbnailCache.shared.saveCoverFromComic(comic, destinationName: "list_\(listId)") else { return }
+            db.setListCover(listId: listId, imagePath: path)
+            await MainActor.run { onDone() }
+        }
+    }
+
+    func updateList(id: Int64, title: String, description: String) { db.updateList(id: id, title: title, description: description) }
+    func setListRating(_ listId: Int64, rating: Int, review: String?) { db.setListRating(listId, rating: rating, review: review) }
+    func setListItemNotes(_ itemId: Int64, notes: String) { db.setListItemNotes(itemId, notes: notes) }
 
     func delete(_ toDelete: [Comic]) {
         let ids = toDelete.map(\.id)
