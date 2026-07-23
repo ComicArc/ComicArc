@@ -112,6 +112,8 @@ private struct iPadSidebar: View {
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @State private var draggedPublisher: String?
+    @State private var showAllTags = false
+    @State private var showFilterBuilder = false
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -155,6 +157,7 @@ private struct iPadSidebar: View {
                             .tag(AppDestination.tag(t.tag.name))
                             .badge(t.count)
                     }
+                    Button("See All Tags…") { showAllTags = true }
                 }
             }
             if !vm.writers.isEmpty {
@@ -172,6 +175,16 @@ private struct iPadSidebar: View {
                             .tag(AppDestination.penciller(p))
                     }
                 }
+            }
+            Section("Smart Filters") {
+                ForEach(vm.savedFilters) { f in
+                    Label(f.name, systemImage: "line.3.horizontal.decrease.circle")
+                        .tag(AppDestination.savedFilter(id: f.id, name: f.name))
+                        .swipeActions {
+                            Button("Delete", role: .destructive) { vm.deleteSavedFilter(f.id) }
+                        }
+                }
+                Button("New Smart Filter…") { showFilterBuilder = true }
             }
             Section("Discover") {
                 ForEach(visibleDiscoverItems) { item in
@@ -204,6 +217,12 @@ private struct iPadSidebar: View {
             } else if let err = vm.scanState.error, !vm.isScanning {
                 scanErrorBanner(err)
             }
+        }
+        .sheet(isPresented: $showAllTags) {
+            AllTagsView().environmentObject(vm)
+        }
+        .sheet(isPresented: $showFilterBuilder) {
+            FilterBuilderView().environmentObject(vm)
         }
     }
 
@@ -244,7 +263,7 @@ private struct iPadContentColumn: View {
     var body: some View {
         Group {
             switch vm.destination {
-            case .library, .continueReading, .favorites, .readingList, .publisher, .tag, .writer, .penciller:
+            case .library, .continueReading, .favorites, .readingList, .publisher, .tag, .writer, .penciller, .savedFilter:
                 iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
                     .navigationTitle(vm.destination.title)
             case .stats:
@@ -550,7 +569,7 @@ private struct iPadComicMeta: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(tags) { tag in
-                                TagChip(name: tag.name) { removeTag(tag) }
+                                TagChip(name: tag.name, category: tag.category) { removeTag(tag) }
                             }
                         }
                         .padding(.horizontal)

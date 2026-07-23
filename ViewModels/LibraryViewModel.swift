@@ -12,6 +12,7 @@ enum AppDestination: Hashable, Codable {
     case tag(String)
     case writer(String)
     case penciller(String)
+    case savedFilter(id: Int64, name: String)
     case runs
     case diary
     case lists
@@ -31,6 +32,7 @@ enum AppDestination: Hashable, Codable {
         case .tag(let t):           return "#\(t)"
         case .writer(let w):        return w
         case .penciller(let p):     return p
+        case .savedFilter(_, let name): return name
         case .runs:                 return "Reading Paths"
         case .diary:                return "Diary"
         case .lists:                return "Lists"
@@ -52,6 +54,7 @@ enum AppDestination: Hashable, Codable {
         case .tag:                  return "tag"
         case .writer:                return "pencil.and.outline"
         case .penciller:             return "paintbrush.pointed.fill"
+        case .savedFilter:          return "line.3.horizontal.decrease.circle"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
         case .diary:                return "text.book.closed.fill"
         case .lists:                return "trophy.fill"
@@ -72,6 +75,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var publishers:        [String] = []
     @Published var writers:           [String] = []
     @Published var pencillers:        [String] = []
+    @Published var savedFilters:      [SavedFilter] = []
     @Published var allTags:           [(tag: Tag, count: Int)] = []
     @Published var inProgressComics:  [Comic] = []
     @Published var destination: AppDestination = .library
@@ -180,6 +184,11 @@ final class LibraryViewModel: ObservableObject {
     var activePenciller: String? {
         if case .penciller(let p) = destination { return p }
         return nil
+    }
+
+    var activeSavedFilter: SavedFilter? {
+        guard case .savedFilter(let id, _) = destination else { return nil }
+        return savedFilters.first { $0.id == id }
     }
 
     enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, diary, lists, stats, history, duplicates, readingOrderManager, settings }
@@ -331,27 +340,33 @@ final class LibraryViewModel: ObservableObject {
             return
         }
 
-        let pub   = activePublisher
+        let filter = activeSavedFilter
+        let pub   = filter?.publisher ?? activePublisher
         let ser   = selectedSeries
-        let tag   = activeTag
-        let wri   = activeWriter
+        let tag   = filter?.tag ?? activeTag
+        let wri   = filter?.writer ?? activeWriter
         let pnc   = activePenciller
         let q     = searchText.isEmpty ? nil : searchText
-        let sort  = sortOrder
+        let sort  = filter?.sortOrder.flatMap(DatabaseManager.SortOrder.init(rawValue:)) ?? sortOrder
         let group = selectedGroup
+        let readStatus = filter?.readStatus
+        let yearMin    = filter?.yearMin
+        let yearMax    = filter?.yearMax
 
         Task.detached(priority: .userInitiated) { [db] in
             let pubs = db.publishers()
             let tags = db.allTags()
             let wris = db.writers()
             let pncs = db.pencillers()
+            let filters = db.savedFilters()
 
             guard section == .library || section == .continueReading
                 || section == .favorites || section == .readingList else {
                 await MainActor.run {
                     guard gen == self.reloadGeneration else { return }
                     self.publishers = pubs; self.allTags = tags
-                    self.writers = wris; self.pencillers = pncs; self.isLoading = false
+                    self.writers = wris; self.pencillers = pncs
+                    self.savedFilters = filters; self.isLoading = false
                 }
                 return
             }
@@ -370,7 +385,8 @@ final class LibraryViewModel: ObservableObject {
                 loaded = db.allComics(publisher: pub, character: character, series: ser,
                                       search: q, sortOrder: sort,
                                       nullCharacterOnly: nullCharOnly, tag: tag,
-                                      writer: wri, penciller: pnc)
+                                      writer: wri, penciller: pnc,
+                                      readStatus: readStatus, yearMin: yearMin, yearMax: yearMax)
             }
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
@@ -379,6 +395,7 @@ final class LibraryViewModel: ObservableObject {
                 self.allTags    = tags
                 self.writers    = wris
                 self.pencillers = pncs
+                self.savedFilters = filters
                 self.isLoading  = false
             }
         }
@@ -395,6 +412,7 @@ final class LibraryViewModel: ObservableObject {
             let tags   = db.allTags()
             let wris   = db.writers()
             let pncs   = db.pencillers()
+            let filters = db.savedFilters()
             let shelf  = db.inProgress(limit: 8)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
@@ -403,6 +421,7 @@ final class LibraryViewModel: ObservableObject {
                 self.allTags           = tags
                 self.writers           = wris
                 self.pencillers        = pncs
+                self.savedFilters      = filters
                 self.inProgressComics  = shelf
                 self.comics            = []
                 self.isLoading         = false
@@ -420,7 +439,7 @@ final class LibraryViewModel: ObservableObject {
 
         showSeriesManager = false
         switch item {
-        case .tag, .writer, .penciller: useGroupedView = false
+        case .tag, .writer, .penciller, .savedFilter: useGroupedView = false
         default: useGroupedView = true
         }
         saveNavigationState()
@@ -828,7 +847,7 @@ final class LibraryViewModel: ObservableObject {
     func setReview(_ comic: Comic, review: String?) { db.setComicReview(comic.id, review: review?.isEmpty == false ? review : nil) }
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) { db.updateMeta(comicId: comicId, fields: fields) }
 
-    func addTag(name: String, to comic: Comic) { db.addTag(name: name, to: comic.id) }
+    func addTag(name: String, to comic: Comic, category: TagCategory = .custom) { db.addTag(name: name, to: comic.id, category: category) }
     func removeTag(tagId: Int64, from comic: Comic) { db.removeTag(tagId: tagId, from: comic.id) }
 
 
@@ -1032,6 +1051,26 @@ final class LibraryViewModel: ObservableObject {
     func updateList(id: Int64, title: String, description: String) { db.updateList(id: id, title: title, description: description) }
     func setListRating(_ listId: Int64, rating: Int, review: String?) { db.setListRating(listId, rating: rating, review: review) }
     func setListItemNotes(_ itemId: Int64, notes: String) { db.setListItemNotes(itemId, notes: notes) }
+
+    @discardableResult
+    func createSavedFilter(name: String, publisher: String?, tag: String?, writer: String?,
+                            readStatus: String?, yearMin: Int?, yearMax: Int?, sortOrder: String?) -> Int64 {
+        let id = db.createSavedFilter(name: name, publisher: publisher, tag: tag, writer: writer,
+                                       readStatus: readStatus, yearMin: yearMin, yearMax: yearMax, sortOrder: sortOrder)
+        reload()
+        return id
+    }
+
+    func deleteSavedFilter(_ id: Int64) {
+        if case .savedFilter(let activeId, _) = destination, activeId == id { select(.library) }
+        db.deleteSavedFilter(id)
+        reload()
+    }
+
+    func reorderSavedFilters(orderedIds: [Int64]) {
+        db.reorderSavedFilters(orderedIds: orderedIds)
+        reload()
+    }
 
     func delete(_ toDelete: [Comic]) {
         let ids = toDelete.map(\.id)

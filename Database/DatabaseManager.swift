@@ -300,6 +300,21 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("""
+        CREATE TABLE IF NOT EXISTS saved_filters (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            publisher   TEXT,
+            tag         TEXT,
+            writer      TEXT,
+            read_status TEXT,
+            year_min    INTEGER,
+            year_max    INTEGER,
+            sort_order  TEXT,
+            position    INTEGER NOT NULL DEFAULT 0,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        exec("""
         CREATE TABLE IF NOT EXISTS reading_goals (
             year       INTEGER PRIMARY KEY,
             goal_count INTEGER NOT NULL DEFAULT 52
@@ -459,6 +474,7 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN has_comicinfo INTEGER")
 
         exec("ALTER TABLE comics ADD COLUMN scan_retry_count INTEGER NOT NULL DEFAULT 0")
+        exec("ALTER TABLE tags ADD COLUMN category TEXT")
 
         exec("CREATE INDEX IF NOT EXISTS idx_comics_pub_series_issue ON comics(publisher, series, issue_number) WHERE deleted_at IS NULL")
 
@@ -1112,7 +1128,9 @@ final class DatabaseManager: @unchecked Sendable {
 
     enum SortOrder: String, CaseIterable, Identifiable {
         case publisher = "Publisher", title = "Title", dateAdded = "Recently Added",
-             rating = "Top Rated", progress = "Most Read", manual = "Custom"
+             rating = "Top Rated", progress = "Most Read", manual = "Custom",
+             year = "Year", storyArc = "Story Arc", pageCount = "Page Count",
+             dateRead = "Recently Read", writer = "Writer"
         var id: String { rawValue }
         var clause: String {
             switch self {
@@ -1123,6 +1141,11 @@ final class DatabaseManager: @unchecked Sendable {
             case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
             case .progress:  return "COALESCE(rp.current_page, 0) DESC, c.title"
             case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id)"
+            case .year:      return "COALESCE(c.year, 0) DESC, c.title"
+            case .storyArc:  return "COALESCE(c.story_arc, ''), c.title"
+            case .pageCount: return "c.page_count DESC, c.title"
+            case .dateRead:  return "COALESCE(rp.last_read, '') DESC, c.title"
+            case .writer:    return "COALESCE(c.writer, ''), c.title"
             }
         }
     }
@@ -1131,7 +1154,8 @@ final class DatabaseManager: @unchecked Sendable {
                    search: String? = nil, sortOrder: SortOrder = .publisher,
                    favoritesOnly: Bool = false, readingListOnly: Bool = false,
                    nullCharacterOnly: Bool = false, tag: String? = nil,
-                   writer: String? = nil, penciller: String? = nil) -> [Comic] {
+                   writer: String? = nil, penciller: String? = nil,
+                   readStatus: String? = nil, yearMin: Int? = nil, yearMax: Int? = nil) -> [Comic] {
         queue.sync {
             var conds = ["c.deleted_at IS NULL"]
             var args: [Any?] = []
@@ -1152,6 +1176,17 @@ final class DatabaseManager: @unchecked Sendable {
             }
             if let writer { conds.append("c.writer = ?"); args.append(writer) }
             if let penciller { conds.append("c.penciller = ?"); args.append(penciller) }
+            switch readStatus {
+            case "unread":
+                conds.append("COALESCE(rp.current_page, 0) = 0")
+            case "in_progress":
+                conds.append("COALESCE(rp.current_page, 0) > 0 AND NOT (c.page_count > 1 AND COALESCE(rp.current_page, 0) >= c.page_count - 1)")
+            case "finished":
+                conds.append("c.page_count > 1 AND COALESCE(rp.current_page, 0) >= c.page_count - 1")
+            default: break
+            }
+            if let yearMin { conds.append("c.year >= ?"); args.append(yearMin) }
+            if let yearMax { conds.append("c.year <= ?"); args.append(yearMax) }
             let sql = "\(comicSelect) WHERE \(conds.joined(separator: " AND ")) ORDER BY \(sortOrder.clause)"
             return rows(sql, args: args, map: comicRow)
         }
@@ -1591,15 +1626,15 @@ final class DatabaseManager: @unchecked Sendable {
 
     func tags(for comicId: Int64) -> [Tag] {
         queue.sync {
-            rows("SELECT t.id, t.name FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id WHERE ct.comic_id = ? ORDER BY t.name",
-                 args: [comicId]) { Tag(id: colInt64($0, 0), name: colText($0, 1) ?? "") }
+            rows("SELECT t.id, t.name, t.category FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id WHERE ct.comic_id = ? ORDER BY t.name",
+                 args: [comicId]) { Tag(id: colInt64($0, 0), name: colText($0, 1) ?? "", category: colText($0, 2)) }
         }
     }
 
-    func addTag(name: String, to comicId: Int64) {
+    func addTag(name: String, to comicId: Int64, category: TagCategory = .custom) {
         queue.sync {
 
-            _ = run("INSERT OR IGNORE INTO tags (name) VALUES (?)", args: [name])
+            _ = run("INSERT OR IGNORE INTO tags (name, category) VALUES (?,?)", args: [name, category.rawValue])
             let resolvedId = scalarInt("SELECT id FROM tags WHERE name = ?", args: [name])
             guard resolvedId > 0 else { return }
             _ = run("INSERT OR IGNORE INTO comic_tags (comic_id, tag_id) VALUES (?,?)",
@@ -2278,12 +2313,12 @@ final class DatabaseManager: @unchecked Sendable {
     func allTags() -> [(tag: Tag, count: Int)] {
         queue.sync {
             rows("""
-                SELECT t.id, t.name, COUNT(ct.comic_id) as cnt
+                SELECT t.id, t.name, t.category, COUNT(ct.comic_id) as cnt
                 FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id
                 JOIN comics c ON ct.comic_id = c.id
                 WHERE c.deleted_at IS NULL
                 GROUP BY t.id ORDER BY cnt DESC, t.name
-            """) { (Tag(id: colInt64($0, 0), name: colText($0, 1) ?? ""), colInt($0, 2)) }
+            """) { (Tag(id: colInt64($0, 0), name: colText($0, 1) ?? "", category: colText($0, 2)), colInt($0, 3)) }
         }
     }
 
@@ -2635,6 +2670,49 @@ final class DatabaseManager: @unchecked Sendable {
     func setReadingGoal(year: Int, count: Int) {
         queue.async {
             _ = self.run("INSERT OR REPLACE INTO reading_goals (year, goal_count) VALUES (?,?)", args: [year, count])
+        }
+    }
+
+    func savedFilters() -> [SavedFilter] {
+        queue.sync {
+            rows("""
+                SELECT id, name, publisher, tag, writer, read_status, year_min, year_max, sort_order
+                FROM saved_filters ORDER BY position, id
+                """) { s in
+                SavedFilter(
+                    id: colInt64(s, 0), name: colText(s, 1) ?? "",
+                    publisher: colText(s, 2), tag: colText(s, 3), writer: colText(s, 4),
+                    readStatus: colText(s, 5),
+                    yearMin: sqlite3_column_type(s, 6) != SQLITE_NULL ? colInt(s, 6) : nil,
+                    yearMax: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil,
+                    sortOrder: colText(s, 8)
+                )
+            }
+        }
+    }
+
+    @discardableResult
+    func createSavedFilter(name: String, publisher: String?, tag: String?, writer: String?,
+                            readStatus: String?, yearMin: Int?, yearMax: Int?, sortOrder: String?) -> Int64 {
+        queue.sync {
+            run("""
+                INSERT INTO saved_filters (name, publisher, tag, writer, read_status, year_min, year_max, sort_order)
+                VALUES (?,?,?,?,?,?,?,?)
+                """, args: [name, publisher, tag, writer, readStatus, yearMin, yearMax, sortOrder])
+        }
+    }
+
+    func deleteSavedFilter(_ id: Int64) {
+        queue.sync { _ = run("DELETE FROM saved_filters WHERE id = ?", args: [id]) }
+    }
+
+    func reorderSavedFilters(orderedIds: [Int64]) {
+        queue.sync {
+            exec("BEGIN")
+            for (idx, id) in orderedIds.enumerated() {
+                _ = run("UPDATE saved_filters SET position = ? WHERE id = ?", args: [idx, id])
+            }
+            exec("COMMIT")
         }
     }
 

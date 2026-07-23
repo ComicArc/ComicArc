@@ -810,6 +810,31 @@ struct LibraryGridView: View {
     }
 }
 
+struct SortPicker: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        Menu {
+            ForEach(DatabaseManager.SortOrder.allCases) { order in
+                Button {
+                    vm.sortOrder = order
+                    vm.reload()
+                } label: {
+                    if vm.sortOrder == order {
+                        Label(order.rawValue, systemImage: "checkmark")
+                    } else {
+                        Text(order.rawValue)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 12))
+        }
+        .help("Sort: \(vm.sortOrder.rawValue)")
+    }
+}
+
 struct DensityPicker: View {
     @AppStorage("gridDensity") private var densityRaw = GridDensity.regular.rawValue
     private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }

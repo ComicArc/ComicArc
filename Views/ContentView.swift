@@ -247,6 +247,13 @@ struct ContentView: View {
                 .allowsHitTesting(isLibrarySection)
         }
 
+        ToolbarItem(id: "sort", placement: .primaryAction) {
+            SortPicker()
+                .opacity(isLibrarySection ? 1 : 0)
+                .disabled(!isLibrarySection)
+                .allowsHitTesting(isLibrarySection)
+        }
+
         ToolbarItem(id: "bulk", placement: .primaryAction) {
             let show = vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil
             Button { vm.toggleBulkMode() } label: {
@@ -344,6 +351,8 @@ struct SidebarView: View {
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @State private var draggedPublisher: String?
     @State private var dropTargetPublisher: String?
+    @State private var showAllTags = false
+    @State private var showFilterBuilder = false
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -393,6 +402,10 @@ struct SidebarView: View {
                     ForEach(vm.allTags.prefix(15), id: \.tag.id) { t in
                         navRow("#\(t.tag.name)", icon: "tag", item: .tag(t.tag.name), trailingText: "\(t.count)")
                     }
+                    Button("See All Tags…") { showAllTags = true }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Design.brandGold)
+                        .font(.caption)
                 }
             }
 
@@ -410,6 +423,19 @@ struct SidebarView: View {
                         navRow(p, icon: "paintbrush.pointed.fill", item: .penciller(p))
                     }
                 }
+            }
+
+            Section("Smart Filters") {
+                ForEach(vm.savedFilters) { f in
+                    navRow(f.name, icon: "line.3.horizontal.decrease.circle", item: .savedFilter(id: f.id, name: f.name))
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { vm.deleteSavedFilter(f.id) }
+                        }
+                }
+                Button("New Smart Filter…") { showFilterBuilder = true }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Design.brandGold)
+                    .font(.caption)
             }
 
             Section {
@@ -450,6 +476,12 @@ struct SidebarView: View {
                     scanReportBanner
                 }
             }
+        }
+        .sheet(isPresented: $showAllTags) {
+            AllTagsView().environmentObject(vm)
+        }
+        .sheet(isPresented: $showFilterBuilder) {
+            FilterBuilderView().environmentObject(vm)
         }
     }
 

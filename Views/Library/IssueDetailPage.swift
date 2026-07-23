@@ -10,6 +10,7 @@ struct IssueDetailPage: View {
     @State private var current:        Comic
     @State private var tags:           [Tag]    = []
     @State private var newTagText:     String   = ""
+    @State private var newTagCategory: TagCategory = .custom
     @State private var thumbnail:      PlatformImage? = nil
     @State private var showingEdit:    Bool     = false
     @State private var showMetadataInspector: Bool = false
@@ -291,6 +292,13 @@ struct IssueDetailPage: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 220)
                             .onSubmit { addTag() }
+                        Picker("", selection: $newTagCategory) {
+                            ForEach(TagCategory.allCases, id: \.self) { cat in
+                                Text(cat.rawValue).tag(cat)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 110)
                         Button("Add") { addTag() }
                             .disabled(newTagText.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
@@ -436,7 +444,7 @@ struct IssueDetailPage: View {
     }
 
     private func tagChip(_ tag: Tag) -> some View {
-        TagChip(name: tag.name) { removeTag(tag) }
+        TagChip(name: tag.name, category: tag.category) { removeTag(tag) }
     }
 
     private var progressLabel: String {
@@ -468,7 +476,7 @@ struct IssueDetailPage: View {
     private func addTag() {
         let name = newTagText.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        vm.addTag(name: name, to: current)
+        vm.addTag(name: name, to: current, category: newTagCategory)
         newTagText = ""
         let comicId = current.id
         Task.detached(priority: .userInitiated) {
