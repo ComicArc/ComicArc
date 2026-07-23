@@ -1067,11 +1067,6 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
-    func reorderSavedFilters(orderedIds: [Int64]) {
-        db.reorderSavedFilters(orderedIds: orderedIds)
-        reload()
-    }
-
     func delete(_ toDelete: [Comic]) {
         let ids = toDelete.map(\.id)
         db.softDelete(ids)

@@ -16,6 +16,7 @@ struct IssueDetailPage: View {
     @State private var showMetadataInspector: Bool = false
     @State private var reviewDraft:    String   = ""
     @State private var appearsInRuns:  [Run]    = []
+    @State private var appearsInLists: [ComicList] = []
     @State private var missingIssues:  [String] = []
     @State private var showPagePicker: Bool     = false
 
@@ -334,7 +335,7 @@ struct IssueDetailPage: View {
 
     @ViewBuilder
     private var supplementarySection: some View {
-        if !missingIssues.isEmpty || !appearsInRuns.isEmpty || current.notes != nil {
+        if !missingIssues.isEmpty || !appearsInRuns.isEmpty || !appearsInLists.isEmpty || current.notes != nil {
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             HStack(alignment: .top, spacing: 0) {
@@ -347,6 +348,13 @@ struct IssueDetailPage: View {
                 if !appearsInRuns.isEmpty {
                     Rectangle().fill(Design.borderColor).frame(width: 1)
                     runsSection
+                        .frame(maxWidth: .infinity)
+                        .padding(32)
+                }
+
+                if !appearsInLists.isEmpty {
+                    Rectangle().fill(Design.borderColor).frame(width: 1)
+                    listsSection
                         .frame(maxWidth: .infinity)
                         .padding(32)
                 }
@@ -391,6 +399,27 @@ struct IssueDetailPage: View {
                         Text(run.title).font(.subheadline)
                         if !run.description.isEmpty {
                             Text(run.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var listsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Appears in Lists")
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
+            ForEach(appearsInLists) { list in
+                HStack(spacing: 8) {
+                    Image(systemName: "trophy")
+                        .foregroundStyle(Design.brandGold).font(.subheadline)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(list.title).font(.subheadline)
+                        if !list.description.isEmpty {
+                            Text(list.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                     Spacer()
@@ -466,9 +495,10 @@ struct IssueDetailPage: View {
         Task.detached(priority: .userInitiated) {
             let t   = DatabaseManager.shared.tags(for: comicId)
             let r   = DatabaseManager.shared.runsContaining(comicId: comicId)
+            let l   = DatabaseManager.shared.listsContaining(comicId: comicId)
             let mi  = DatabaseManager.shared.missingIssueNumbers(series: series, publisher: pub)
             await MainActor.run {
-                tags = t; appearsInRuns = r; missingIssues = mi
+                tags = t; appearsInRuns = r; appearsInLists = l; missingIssues = mi
             }
         }
     }

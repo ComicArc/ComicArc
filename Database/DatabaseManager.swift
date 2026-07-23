@@ -345,6 +345,9 @@ final class DatabaseManager: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_rp_last_read         ON reading_progress(last_read DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_rp_comic_id          ON reading_progress(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comics_character     ON comics(character) WHERE deleted_at IS NULL")
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_writer        ON comics(writer) WHERE deleted_at IS NULL")
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_penciller     ON comics(penciller) WHERE deleted_at IS NULL")
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_year          ON comics(year) WHERE deleted_at IS NULL")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_comic_id  ON comic_tags(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_tag_id    ON comic_tags(tag_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_run_id     ON run_items(run_id)")
@@ -2706,15 +2709,6 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync { _ = run("DELETE FROM saved_filters WHERE id = ?", args: [id]) }
     }
 
-    func reorderSavedFilters(orderedIds: [Int64]) {
-        queue.sync {
-            exec("BEGIN")
-            for (idx, id) in orderedIds.enumerated() {
-                _ = run("UPDATE saved_filters SET position = ? WHERE id = ?", args: [idx, id])
-            }
-            exec("COMMIT")
-        }
-    }
 
     func missingIssueNumbers(series: String, publisher: String) -> [String] {
         queue.sync {
