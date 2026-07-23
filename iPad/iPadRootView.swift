@@ -113,7 +113,6 @@ private struct iPadSidebar: View {
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @State private var draggedPublisher: String?
     @State private var showAllTags = false
-    @State private var showFilterBuilder = false
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -160,32 +159,6 @@ private struct iPadSidebar: View {
                     Button("See All Tags…") { showAllTags = true }
                 }
             }
-            if !vm.writers.isEmpty {
-                Section("Writers") {
-                    ForEach(vm.writers, id: \.self) { w in
-                        Label(w, systemImage: "pencil.and.outline")
-                            .tag(AppDestination.writer(w))
-                    }
-                }
-            }
-            if !vm.pencillers.isEmpty {
-                Section("Pencillers") {
-                    ForEach(vm.pencillers, id: \.self) { p in
-                        Label(p, systemImage: "paintbrush.pointed.fill")
-                            .tag(AppDestination.penciller(p))
-                    }
-                }
-            }
-            Section("Smart Filters") {
-                ForEach(vm.savedFilters) { f in
-                    Label(f.name, systemImage: "line.3.horizontal.decrease.circle")
-                        .tag(AppDestination.savedFilter(id: f.id, name: f.name))
-                        .swipeActions {
-                            Button("Delete", role: .destructive) { vm.deleteSavedFilter(f.id) }
-                        }
-                }
-                Button("New Smart Filter…") { showFilterBuilder = true }
-            }
             Section("Discover") {
                 ForEach(visibleDiscoverItems) { item in
                     if item == .duplicates {
@@ -220,9 +193,6 @@ private struct iPadSidebar: View {
         }
         .sheet(isPresented: $showAllTags) {
             AllTagsView().environmentObject(vm)
-        }
-        .sheet(isPresented: $showFilterBuilder) {
-            FilterBuilderView().environmentObject(vm)
         }
     }
 
@@ -263,7 +233,7 @@ private struct iPadContentColumn: View {
     var body: some View {
         Group {
             switch vm.destination {
-            case .library, .continueReading, .favorites, .readingList, .publisher, .tag, .writer, .penciller, .savedFilter:
+            case .library, .continueReading, .favorites, .readingList, .publisher, .tag:
                 iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
                     .navigationTitle(vm.destination.title)
             case .stats:

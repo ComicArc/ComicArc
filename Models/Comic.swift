@@ -90,20 +90,6 @@ struct ListItem: Identifiable {
     var notes: String
 }
 
-struct SavedFilter: Identifiable, Equatable, Hashable {
-    let id: Int64
-    var name: String
-    var publisher: String?
-    var tag: String?
-    var writer: String?
-    var readStatus: String?
-    var yearMin: Int?
-    var yearMax: Int?
-    var sortOrder: String?
-
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
-}
-
 enum TagCategory: String, CaseIterable {
     case genre = "Genre", format = "Format", mood = "Mood", custom = "Custom"
 }

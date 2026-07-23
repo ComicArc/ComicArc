@@ -30,7 +30,6 @@
 		B00000000000000000000021 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
 		D10000000000000000000003 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
 		D10000000000000000000011 /* AllTagsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000F /* AllTagsView.swift */; };
-		D10000000000000000000017 /* FilterBuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000015 /* FilterBuilderView.swift */; };
 		B00000000000000000000023 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		B00000000000000000000024 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		B00000000000000000000025 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
@@ -68,7 +67,6 @@
 		D1000000000000000000000C /* ComicListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000B /* ComicListTests.swift */; };
 		D1000000000000000000000E /* SortOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000D /* SortOrderTests.swift */; };
 		D10000000000000000000014 /* TagCategoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000013 /* TagCategoryTests.swift */; };
-		D1000000000000000000001A /* SavedFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000019 /* SavedFilterTests.swift */; };
 		D1000000000000000000001C /* ComicRevivalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000001B /* ComicRevivalTests.swift */; };
 		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
 		IP000000000000000000000C /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = IP000000000000000000000B /* ZIPFoundation */; };
@@ -94,7 +92,6 @@
 		IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
 		D10000000000000000000004 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
 		D10000000000000000000012 /* AllTagsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000F /* AllTagsView.swift */; };
-		D10000000000000000000018 /* FilterBuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000015 /* FilterBuilderView.swift */; };
 		IB0000000000000000000014 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		IB0000000000000000000015 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		IB0000000000000000000016 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
@@ -158,7 +155,6 @@
 		A00000000000000000000021 /* ReadingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryView.swift; sourceTree = "<group>"; };
 		D10000000000000000000001 /* DiaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryView.swift; sourceTree = "<group>"; };
 		D1000000000000000000000F /* AllTagsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllTagsView.swift; sourceTree = "<group>"; };
-		D10000000000000000000015 /* FilterBuilderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterBuilderView.swift; sourceTree = "<group>"; };
 		A00000000000000000000023 /* IssueDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailPage.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* SeriesManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesManagerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000025 /* TutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialView.swift; sourceTree = "<group>"; };
@@ -200,7 +196,6 @@
 		D1000000000000000000000B /* ComicListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicListTests.swift; sourceTree = "<group>"; };
 		D1000000000000000000000D /* SortOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortOrderTests.swift; sourceTree = "<group>"; };
 		D10000000000000000000013 /* TagCategoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagCategoryTests.swift; sourceTree = "<group>"; };
-		D10000000000000000000019 /* SavedFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedFilterTests.swift; sourceTree = "<group>"; };
 		D1000000000000000000001B /* ComicRevivalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicRevivalTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000004 /* ComicArcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComicArcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		IP0000000000000000000001 /* ComicArcIPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcIPadApp.swift; sourceTree = "<group>"; };
@@ -370,7 +365,6 @@
 				D10000000000000000000002 /* Diary */,
 				D10000000000000000000008 /* Lists */,
 				D10000000000000000000010 /* Tags */,
-				D10000000000000000000016 /* Filters */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -395,7 +389,6 @@
 				D1000000000000000000000B /* ComicListTests.swift */,
 				D1000000000000000000000D /* SortOrderTests.swift */,
 				D10000000000000000000013 /* TagCategoryTests.swift */,
-				D10000000000000000000019 /* SavedFilterTests.swift */,
 				D1000000000000000000001B /* ComicRevivalTests.swift */,
 			);
 			path = ComicArcTests;
@@ -474,14 +467,6 @@
 				D1000000000000000000000F /* AllTagsView.swift */,
 			);
 			path = Tags;
-			sourceTree = "<group>";
-		};
-		D10000000000000000000016 /* Filters */ = {
-			isa = PBXGroup;
-			children = (
-				D10000000000000000000015 /* FilterBuilderView.swift */,
-			);
-			path = Filters;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -656,7 +641,6 @@
 				B00000000000000000000021 /* ReadingHistoryView.swift in Sources */,
 				D10000000000000000000003 /* DiaryView.swift in Sources */,
 				D10000000000000000000011 /* AllTagsView.swift in Sources */,
-				D10000000000000000000017 /* FilterBuilderView.swift in Sources */,
 				B00000000000000000000023 /* IssueDetailPage.swift in Sources */,
 				B00000000000000000000024 /* SeriesManagerView.swift in Sources */,
 				B00000000000000000000065 /* ImportWizardView.swift in Sources */,
@@ -696,7 +680,6 @@
 				D1000000000000000000000C /* ComicListTests.swift in Sources */,
 				D1000000000000000000000E /* SortOrderTests.swift in Sources */,
 				D10000000000000000000014 /* TagCategoryTests.swift in Sources */,
-				D1000000000000000000001A /* SavedFilterTests.swift in Sources */,
 				D1000000000000000000001C /* ComicRevivalTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -729,7 +712,6 @@
 				IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */,
 				D10000000000000000000004 /* DiaryView.swift in Sources */,
 				D10000000000000000000012 /* AllTagsView.swift in Sources */,
-				D10000000000000000000018 /* FilterBuilderView.swift in Sources */,
 				IB0000000000000000000014 /* IssueDetailPage.swift in Sources */,
 				IB0000000000000000000015 /* SeriesManagerView.swift in Sources */,
 				IB0000000000000000000065 /* ImportWizardView.swift in Sources */,

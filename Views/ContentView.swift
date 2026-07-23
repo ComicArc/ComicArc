@@ -352,7 +352,6 @@ struct SidebarView: View {
     @State private var draggedPublisher: String?
     @State private var dropTargetPublisher: String?
     @State private var showAllTags = false
-    @State private var showFilterBuilder = false
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -409,34 +408,6 @@ struct SidebarView: View {
                 }
             }
 
-            if !vm.writers.isEmpty {
-                Section("Writers") {
-                    ForEach(vm.writers, id: \.self) { w in
-                        navRow(w, icon: "pencil.and.outline", item: .writer(w))
-                    }
-                }
-            }
-
-            if !vm.pencillers.isEmpty {
-                Section("Pencillers") {
-                    ForEach(vm.pencillers, id: \.self) { p in
-                        navRow(p, icon: "paintbrush.pointed.fill", item: .penciller(p))
-                    }
-                }
-            }
-
-            Section("Smart Filters") {
-                ForEach(vm.savedFilters) { f in
-                    navRow(f.name, icon: "line.3.horizontal.decrease.circle", item: .savedFilter(id: f.id, name: f.name))
-                        .contextMenu {
-                            Button("Delete", role: .destructive) { vm.deleteSavedFilter(f.id) }
-                        }
-                }
-                Button("New Smart Filter…") { showFilterBuilder = true }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Design.brandGold)
-                    .font(.caption)
-            }
 
             Section {
                 ForEach(visibleDiscoverItems) { discoverItem in
@@ -479,9 +450,6 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showAllTags) {
             AllTagsView().environmentObject(vm)
-        }
-        .sheet(isPresented: $showFilterBuilder) {
-            FilterBuilderView().environmentObject(vm)
         }
     }
 

@@ -300,21 +300,6 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("""
-        CREATE TABLE IF NOT EXISTS saved_filters (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL,
-            publisher   TEXT,
-            tag         TEXT,
-            writer      TEXT,
-            read_status TEXT,
-            year_min    INTEGER,
-            year_max    INTEGER,
-            sort_order  TEXT,
-            position    INTEGER NOT NULL DEFAULT 0,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        exec("""
         CREATE TABLE IF NOT EXISTS reading_goals (
             year       INTEGER PRIMARY KEY,
             goal_count INTEGER NOT NULL DEFAULT 52
@@ -346,7 +331,6 @@ final class DatabaseManager: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_rp_comic_id          ON reading_progress(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comics_character     ON comics(character) WHERE deleted_at IS NULL")
         exec("CREATE INDEX IF NOT EXISTS idx_comics_writer        ON comics(writer) WHERE deleted_at IS NULL")
-        exec("CREATE INDEX IF NOT EXISTS idx_comics_penciller     ON comics(penciller) WHERE deleted_at IS NULL")
         exec("CREATE INDEX IF NOT EXISTS idx_comics_year          ON comics(year) WHERE deleted_at IS NULL")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_comic_id  ON comic_tags(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_tag_id    ON comic_tags(tag_id)")
@@ -1156,9 +1140,7 @@ final class DatabaseManager: @unchecked Sendable {
     func allComics(publisher: String? = nil, character: String? = nil, series: String? = nil,
                    search: String? = nil, sortOrder: SortOrder = .publisher,
                    favoritesOnly: Bool = false, readingListOnly: Bool = false,
-                   nullCharacterOnly: Bool = false, tag: String? = nil,
-                   writer: String? = nil, penciller: String? = nil,
-                   readStatus: String? = nil, yearMin: Int? = nil, yearMax: Int? = nil) -> [Comic] {
+                   nullCharacterOnly: Bool = false, tag: String? = nil) -> [Comic] {
         queue.sync {
             var conds = ["c.deleted_at IS NULL"]
             var args: [Any?] = []
@@ -1177,19 +1159,6 @@ final class DatabaseManager: @unchecked Sendable {
                 conds.append("c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name = ?)")
                 args.append(tag)
             }
-            if let writer { conds.append("c.writer = ?"); args.append(writer) }
-            if let penciller { conds.append("c.penciller = ?"); args.append(penciller) }
-            switch readStatus {
-            case "unread":
-                conds.append("COALESCE(rp.current_page, 0) = 0")
-            case "in_progress":
-                conds.append("COALESCE(rp.current_page, 0) > 0 AND NOT (c.page_count > 1 AND COALESCE(rp.current_page, 0) >= c.page_count - 1)")
-            case "finished":
-                conds.append("c.page_count > 1 AND COALESCE(rp.current_page, 0) >= c.page_count - 1")
-            default: break
-            }
-            if let yearMin { conds.append("c.year >= ?"); args.append(yearMin) }
-            if let yearMax { conds.append("c.year <= ?"); args.append(yearMax) }
             let sql = "\(comicSelect) WHERE \(conds.joined(separator: " AND ")) ORDER BY \(sortOrder.clause)"
             return rows(sql, args: args, map: comicRow)
         }
@@ -1279,26 +1248,6 @@ final class DatabaseManager: @unchecked Sendable {
                 LEFT JOIN publisher_order po ON po.publisher = c.publisher
                 WHERE c.deleted_at IS NULL AND c.publisher IS NOT NULL
                 ORDER BY COALESCE(po.position, 999999), c.publisher
-                """, map: { colText($0, 0) ?? "" })
-        }
-    }
-
-    func writers() -> [String] {
-        queue.sync {
-            rows("""
-                SELECT DISTINCT c.writer FROM comics c
-                WHERE c.deleted_at IS NULL AND c.writer IS NOT NULL AND c.writer != ''
-                ORDER BY c.writer
-                """, map: { colText($0, 0) ?? "" })
-        }
-    }
-
-    func pencillers() -> [String] {
-        queue.sync {
-            rows("""
-                SELECT DISTINCT c.penciller FROM comics c
-                WHERE c.deleted_at IS NULL AND c.penciller IS NOT NULL AND c.penciller != ''
-                ORDER BY c.penciller
                 """, map: { colText($0, 0) ?? "" })
         }
     }
@@ -2702,40 +2651,6 @@ final class DatabaseManager: @unchecked Sendable {
             _ = self.run("INSERT OR REPLACE INTO reading_goals (year, goal_count) VALUES (?,?)", args: [year, count])
         }
     }
-
-    func savedFilters() -> [SavedFilter] {
-        queue.sync {
-            rows("""
-                SELECT id, name, publisher, tag, writer, read_status, year_min, year_max, sort_order
-                FROM saved_filters ORDER BY position, id
-                """) { s in
-                SavedFilter(
-                    id: colInt64(s, 0), name: colText(s, 1) ?? "",
-                    publisher: colText(s, 2), tag: colText(s, 3), writer: colText(s, 4),
-                    readStatus: colText(s, 5),
-                    yearMin: sqlite3_column_type(s, 6) != SQLITE_NULL ? colInt(s, 6) : nil,
-                    yearMax: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil,
-                    sortOrder: colText(s, 8)
-                )
-            }
-        }
-    }
-
-    @discardableResult
-    func createSavedFilter(name: String, publisher: String?, tag: String?, writer: String?,
-                            readStatus: String?, yearMin: Int?, yearMax: Int?, sortOrder: String?) -> Int64 {
-        queue.sync {
-            run("""
-                INSERT INTO saved_filters (name, publisher, tag, writer, read_status, year_min, year_max, sort_order)
-                VALUES (?,?,?,?,?,?,?,?)
-                """, args: [name, publisher, tag, writer, readStatus, yearMin, yearMax, sortOrder])
-        }
-    }
-
-    func deleteSavedFilter(_ id: Int64) {
-        queue.sync { _ = run("DELETE FROM saved_filters WHERE id = ?", args: [id]) }
-    }
-
 
     func missingIssueNumbers(series: String, publisher: String) -> [String] {
         queue.sync {
