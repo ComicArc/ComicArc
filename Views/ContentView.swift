@@ -5,6 +5,7 @@ extension Notification.Name {
     static let showReaderShortcuts = Notification.Name("showReaderShortcuts")
     static let triggerImport       = Notification.Name("triggerImport")
     static let triggerRenameFiles  = Notification.Name("triggerRenameFiles")
+    static let readerDidClose      = Notification.Name("readerDidClose")
 }
 
 struct ContentView: View {

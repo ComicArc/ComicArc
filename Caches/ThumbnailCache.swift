@@ -113,7 +113,12 @@ final class ThumbnailCache: @unchecked Sendable {
             let group = DispatchGroup()
             for comic in uncached {
                 sema.wait(); group.enter()
-                queue.async { [self] in _ = thumbnailSync(for: comic); sema.signal(); group.leave() }
+                // Dispatch onto a separate global queue, not `queue` itself: thumbnailSync
+                // blocks its thread on a semaphore waiting for thumbnail(...)'s own queue.async
+                // to finish -- submitting that blocking wait back onto the very queue it's
+                // waiting on is a GCD anti-pattern that can starve the pool during a large
+                // library's prewarm instead of a clean, bounded fan-out.
+                DispatchQueue.global(qos: .utility).async { [self] in _ = thumbnailSync(for: comic); sema.signal(); group.leave() }
             }
             group.wait()
         }

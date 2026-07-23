@@ -149,6 +149,7 @@ struct ComicArcApp: App {
                     NotificationCenter.default.post(name: .triggerImport, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
+                .disabled(vm.libraryPath.isEmpty)
                 Divider()
                 Button("Rename Files to Match Library…") {
                     NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)

@@ -1,5 +1,6 @@
 extension Notification.Name {
     static let listDeleted = Notification.Name("listDeleted")
+    static let listUpdated = Notification.Name("listUpdated")
 }
 
 import SwiftUI
@@ -28,6 +29,7 @@ struct ListsListView: View {
                         .foregroundStyle(Design.brandGold)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Create List")
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
             .background(Design.navBackground)
@@ -93,6 +95,12 @@ struct ListsListView: View {
             Task { await loadLists()
                 if let sel = selectedList, !lists.contains(sel) { selectedList = nil }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .listUpdated)) { _ in
+            // Renaming/re-rating a List in its detail view only updates that view's own local
+            // @State copy and the DB -- without this, this sidebar list's row keeps showing the
+            // pre-edit title/rating until an unrelated reload happens.
+            Task { await loadLists() }
         }
         .sheet(isPresented: $showingCreate) { createSheet }
     }
@@ -331,6 +339,12 @@ struct ListDetailView: View {
             currentList = l
             listRating  = l.rating ?? 0
             reviewText  = l.review ?? ""
+            loadItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
+            // The reader is a ZStack overlay, not a navigation push, so this view is never
+            // told a comic in it was just read -- refresh progress so rows don't show stale
+            // read/unread state after the user finishes a comic and closes the reader.
             loadItems()
         }
         .sheet(isPresented: $showingAddComics) {
@@ -659,7 +673,11 @@ struct AddComicsToListView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Add \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                    LibraryViewModel.shared.addToList(listId: list.id, comicIds: Array(selected))
+                    // Order by the picker's own list order, not Set iteration order (which is
+                    // unspecified) -- otherwise multi-selecting several comics lands them in the
+                    // list in an arbitrary order unrelated to anything the user saw or chose.
+                    let orderedIds = allComics.map(\.comic.id).filter { selected.contains($0) }
+                    LibraryViewModel.shared.addToList(listId: list.id, comicIds: orderedIds)
                     onAdd(); dismiss()
                 }
                 .buttonStyle(.borderedProminent)

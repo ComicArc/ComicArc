@@ -122,7 +122,17 @@ final class LibraryViewModel: ObservableObject {
     @Published var selectedComic:     Comic? = nil
     @Published var selectedRun:       Run? = nil
     @Published var selectedList:      ComicList? = nil
-    @Published var readerComic:       Comic? = nil
+    @Published var readerComic:       Comic? = nil {
+        didSet {
+            // The reader is presented as a ZStack overlay in ContentView, not a navigation push,
+            // so RunDetailView/ListDetailView never disappear/reappear around a read and are
+            // never otherwise told their `items` snapshot (progress, "first unfinished"/Resume
+            // target) is now stale. Broadcast on close so they can refresh.
+            if oldValue != nil, readerComic == nil {
+                NotificationCenter.default.post(name: .readerDidClose, object: nil)
+            }
+        }
+    }
 
     @Published var characterGroups:   [DatabaseManager.CharacterGroup] = []
     @Published var seriesGroups:      [DatabaseManager.SeriesGroup] = []
@@ -509,6 +519,7 @@ final class LibraryViewModel: ObservableObject {
         let ids = Array(selectedComicIds)
         db.softDelete(ids)
         ids.forEach { ThumbnailCache.shared.evict($0) }
+        removeFromSpotlight(ids)
         selectedComicIds.removeAll()
         bulkMode = false
         reload()
@@ -517,6 +528,7 @@ final class LibraryViewModel: ObservableObject {
         offerUndo("\(ids.count) comic\(ids.count == 1 ? "" : "s") deleted") { [weak self] in
             self?.db.restore(ids)
             self?.reload()
+            self?.indexSpotlight()
         }
     }
 
@@ -943,8 +955,14 @@ final class LibraryViewModel: ObservableObject {
         db.clearSeriesCover(series: series, publisher: publisher)
         reload()
     }
-    func updateRun(id: Int64, title: String, description: String, buyLink: String?) { db.updateRun(id: id, title: title, description: description, buyLink: buyLink) }
-    func setRunRating(_ runId: Int64, rating: Int, review: String?) { db.setRunRating(runId, rating: rating, review: review) }
+    func updateRun(id: Int64, title: String, description: String, buyLink: String?) {
+        db.updateRun(id: id, title: title, description: description, buyLink: buyLink)
+        NotificationCenter.default.post(name: .runUpdated, object: nil)
+    }
+    func setRunRating(_ runId: Int64, rating: Int, review: String?) {
+        db.setRunRating(runId, rating: rating, review: review)
+        NotificationCenter.default.post(name: .runUpdated, object: nil)
+    }
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }
 
     @discardableResult
@@ -1013,19 +1031,38 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func updateList(id: Int64, title: String, description: String) { db.updateList(id: id, title: title, description: description) }
-    func setListRating(_ listId: Int64, rating: Int, review: String?) { db.setListRating(listId, rating: rating, review: review) }
+    func updateList(id: Int64, title: String, description: String) {
+        db.updateList(id: id, title: title, description: description)
+        NotificationCenter.default.post(name: .listUpdated, object: nil)
+    }
+    func setListRating(_ listId: Int64, rating: Int, review: String?) {
+        db.setListRating(listId, rating: rating, review: review)
+        NotificationCenter.default.post(name: .listUpdated, object: nil)
+    }
     func setListItemNotes(_ itemId: Int64, notes: String) { db.setListItemNotes(itemId, notes: notes) }
 
     func delete(_ toDelete: [Comic]) {
         let ids = toDelete.map(\.id)
         db.softDelete(ids)
         for c in toDelete { ThumbnailCache.shared.evict(c.id) }
+        removeFromSpotlight(ids)
         reload()
         refreshDuplicates()
         offerUndo(toDelete.count == 1 ? "\"\(toDelete[0].title)\" deleted" : "\(toDelete.count) comics deleted") { [weak self] in
             self?.db.restore(ids)
             self?.reload()
+            self?.indexSpotlight()
+        }
+    }
+
+    // indexSpotlight()'s indexSearchableItems is additive/overwriting only -- it never removes
+    // identifiers absent from a later batch. Without this, a deleted comic's title/series/
+    // publisher stays permanently discoverable system-wide via Spotlight until the entire
+    // library is cleared (the only other place that calls deleteAllSearchableItems).
+    private func removeFromSpotlight(_ ids: [Int64]) {
+        let identifiers = ids.map { "comicarc-\($0)" }
+        Task.detached(priority: .background) {
+            try? await CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: identifiers)
         }
     }
 

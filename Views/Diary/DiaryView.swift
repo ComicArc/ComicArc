@@ -123,7 +123,11 @@ struct DiaryView: View {
         isLoading = true
         let (e, g) = await Task.detached(priority: .userInitiated) {
             let rows = DatabaseManager.shared.diaryEntries(limit: 500)
-            let grp  = Dictionary(grouping: rows) { String($0.loggedAt.prefix(10)) }
+            // loggedAt is stored as CURRENT_TIMESTAMP (UTC) -- grouping by its raw date substring
+            // splits/merges entries on a UTC midnight boundary that has nothing to do with the
+            // user's actual calendar day (e.g. a US-timezone reading session in the evening can
+            // straddle UTC midnight and get split across two day headers).
+            let grp  = Dictionary(grouping: rows) { Self.localDayKey(from: $0.loggedAt) }
                 .sorted { $0.key > $1.key }
                 .map { (date: $0.key, entries: $0.value) }
             return (rows, grp)
@@ -131,18 +135,41 @@ struct DiaryView: View {
         entries = e; grouped = g; isLoading = false
     }
 
+    private static let utcParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    private static let localDayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static let localTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private static func localDayKey(from iso: String) -> String {
+        guard let d = utcParser.date(from: iso) else { return String(iso.prefix(10)) }
+        return localDayKeyFormatter.string(from: d)
+    }
+
     private func formattedGroupDate(_ iso: String) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        guard let d = fmt.date(from: iso) else { return iso }
+        guard let d = Self.localDayKeyFormatter.date(from: iso) else { return iso }
         let out = DateFormatter()
         out.dateStyle = .full
         return out.string(from: d).uppercased()
     }
 
     private func shortTime(_ iso: String) -> String {
-        guard iso.count >= 16 else { return "" }
-        return String(iso.dropFirst(11).prefix(5))
+        guard let d = Self.utcParser.date(from: iso) else { return "" }
+        return Self.localTimeFormatter.string(from: d)
     }
 }

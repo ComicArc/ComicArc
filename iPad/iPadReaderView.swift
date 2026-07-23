@@ -28,7 +28,10 @@ struct iPadReaderView: View {
     init(comic: Comic, onClose: @escaping () -> Void) {
         self.comic = comic
         self.onClose = onClose
-        _currentPage = State(initialValue: max(0, comic.progress))
+        // Clamp both bounds: page_count can change after progress was saved (metadata refresh,
+        // or a revival at the same path with a different file), and a stale out-of-range
+        // progress would otherwise land the reader on a blank page with no way to reach it.
+        _currentPage = State(initialValue: min(max(0, comic.progress), max(0, comic.pageCount - 1)))
         let prefs = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
         _scrollMode = State(initialValue: prefs?.scrollMode ?? UserDefaults.standard.bool(forKey: "scrollMode"))
     }

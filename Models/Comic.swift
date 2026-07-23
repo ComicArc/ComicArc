@@ -57,6 +57,12 @@ struct Run: Identifiable, Equatable, Hashable {
     var readCount:  Int = 0
     var coverImagePath: String? = nil
 
+    // Explicit id-only equality (matching Comic's override above): editing a Run's title/rating
+    // elsewhere and then reloading the sidebar's `runs` array must still recognize the edited
+    // row as "the same Run" for staleness checks like `if !runs.contains(selectedRun)` --
+    // synthesized field-wise Equatable would call the freshly-edited row "different" from the
+    // stale selection and silently clear the selection even though the Run still exists.
+    static func == (lhs: Run, rhs: Run) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
@@ -80,6 +86,8 @@ struct ComicList: Identifiable, Equatable, Hashable {  // named to avoid collidi
     var comicCount: Int = 0
     var coverImagePath: String? = nil
 
+    // Explicit id-only equality, matching Run's override above and Comic's -- see Run for why.
+    static func == (lhs: ComicList, rhs: ComicList) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 

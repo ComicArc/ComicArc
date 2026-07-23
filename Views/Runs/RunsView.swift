@@ -1,5 +1,6 @@
 extension Notification.Name {
     static let runDeleted = Notification.Name("runDeleted")
+    static let runUpdated = Notification.Name("runUpdated")
 }
 
 import SwiftUI
@@ -17,7 +18,7 @@ struct RunsListView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("RUNS")
+                Text("READING PATHS")
                     .font(.system(size: 20, weight: .black))
                     .foregroundStyle(Design.textPrimary)
                     .kerning(1)
@@ -28,6 +29,7 @@ struct RunsListView: View {
                         .foregroundStyle(Design.brandGold)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Create Reading Path")
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
             .background(Design.navBackground)
@@ -93,6 +95,12 @@ struct RunsListView: View {
             Task { await loadRuns()
                 if let sel = selectedRun, !runs.contains(sel) { selectedRun = nil }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in
+            // Renaming/re-rating a Run in its detail view only updates that view's own local
+            // @State copy and the DB -- without this, this sidebar list's row keeps showing the
+            // pre-edit title/rating until an unrelated reload happens.
+            Task { await loadRuns() }
         }
         .sheet(isPresented: $showingCreate) { createSheet }
     }
@@ -335,6 +343,12 @@ struct RunDetailView: View {
             currentRun = r
             runRating  = r.rating ?? 0
             reviewText = r.review ?? ""
+            loadItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
+            // The reader is a ZStack overlay, not a navigation push, so this view is never
+            // told a comic in it was just read -- refresh progress/"first unfinished" (Resume
+            // target) so they don't point at the issue the user just finished.
             loadItems()
         }
         .sheet(isPresented: $showingAddComics) {
@@ -711,7 +725,11 @@ struct AddComicsToRunView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Add \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: Array(selected))
+                    // Order by the picker's own list order, not Set iteration order (which is
+                    // unspecified) -- otherwise multi-selecting several comics lands them in the
+                    // run in an arbitrary order unrelated to anything the user saw or chose.
+                    let orderedIds = allComics.map(\.comic.id).filter { selected.contains($0) }
+                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: orderedIds)
                     onAdd(); dismiss()
                 }
                 .buttonStyle(.borderedProminent)

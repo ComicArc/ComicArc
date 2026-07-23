@@ -175,6 +175,18 @@ final class DatabaseManager: @unchecked Sendable {
         let dbPath = Self.dataDir.appendingPathComponent("comics.db")
         let bakPath = Self.dataDir.appendingPathComponent("comics.db.bak")
         if FileManager.default.fileExists(atPath: dbPath.path) {
+            // Checkpoint first so the backup reflects all committed data, not just whatever has
+            // landed in the main file so far -- WAL-mode commits can live only in the -wal file
+            // for a while, and a prior session that ended without a full checkpoint (killed, not
+            // quit normally) would otherwise be missing its most recent writes from this backup.
+            exec("PRAGMA wal_checkpoint(TRUNCATE)")
+            // copyItem throws if the destination already exists, and the throw was silently
+            // swallowed by `try?` below -- meaning this backup was actually only ever written
+            // once, on the very first launch ever (likely a near-empty library), and silently
+            // never updated on any later launch. A corruption recovery months later would have
+            // rolled the whole library back to day one. Remove the stale backup first so this
+            // snapshot is refreshed on every launch instead.
+            try? FileManager.default.removeItem(at: bakPath)
             try? FileManager.default.copyItem(at: dbPath, to: bakPath)
         }
         exec("""
@@ -629,8 +641,23 @@ final class DatabaseManager: @unchecked Sendable {
 
             var effectiveKeys = affectedGroupKeys
             if effectiveKeys != nil, !links.isEmpty {
-                effectiveKeys!.formUnion(links.map(\.parentKey))
-                effectiveKeys!.formUnion(links.map(\.childKey))
+                // series_links stores raw "publisher:series" keys, but the WHERE filter below
+                // scopes rows by the composite groupKey (series_group/volume aware) that
+                // LibraryScanner actually uses for affectedGroupKeys. A linked child whose
+                // series_group or volume differs from a plain "publisher:series" (a normal
+                // pattern for crossover tie-ins) would never match that raw key in the composite
+                // filter, silently dropping its rows from allRows -- walk()'s parent offset would
+                // then never reach it. Resolve each raw link key to every real composite groupKey
+                // currently in use for it instead of unioning the raw key in directly.
+                let linkedRawKeys = Set(links.map(\.parentKey) + links.map(\.childKey))
+                if !linkedRawKeys.isEmpty {
+                    let placeholders = linkedRawKeys.map { _ in "?" }.joined(separator: ",")
+                    let resolvedKeys: [String] = rows("""
+                        SELECT DISTINCT publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))
+                        FROM comics WHERE deleted_at IS NULL AND (publisher || ':' || series) IN (\(placeholders))
+                        """, args: linkedRawKeys.map { $0 as Any? }) { s in colText(s, 0) ?? "" }
+                    effectiveKeys!.formUnion(resolvedKeys)
+                }
             }
 
             var sql = """
@@ -1137,7 +1164,7 @@ final class DatabaseManager: @unchecked Sendable {
             case .dateAdded: return "c.added_at DESC"
             case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
             case .progress:  return "COALESCE(rp.current_page, 0) DESC, c.title"
-            case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id)"
+            case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id), c.title"
             case .year:      return "COALESCE(c.year, 0) DESC, c.title"
             case .storyArc:  return "COALESCE(c.story_arc, ''), c.title"
             case .pageCount: return "c.page_count DESC, c.title"
@@ -1453,8 +1480,15 @@ final class DatabaseManager: @unchecked Sendable {
             map: { s in (colInt(s, 0), colText(s, 1)) }
         ).first, current.rating > 0 else { return }
 
+        // logged_at is stored as CURRENT_TIMESTAMP (UTC). Comparing raw date(...) without a
+        // 'localtime' conversion collapses/splits entries on a UTC midnight boundary that has
+        // nothing to do with the user's actual calendar day -- e.g. for US timezones, UTC
+        // midnight falls in the late afternoon/evening local time, a common reading window,
+        // so two ratings minutes apart could get split into two entries; conversely, in
+        // timezones ahead of UTC, two ratings on different local days could collapse into one,
+        // silently overwriting the earlier day's rating/review.
         let todayId: Int64? = rows(
-            "SELECT id FROM diary_entries WHERE comic_id = ? AND date(logged_at) = date('now') ORDER BY id DESC LIMIT 1",
+            "SELECT id FROM diary_entries WHERE comic_id = ? AND date(logged_at, 'localtime') = date('now', 'localtime') ORDER BY id DESC LIMIT 1",
             args: [comicId], map: { colInt64($0, 0) }
         ).first
 
@@ -1808,7 +1842,7 @@ final class DatabaseManager: @unchecked Sendable {
                 WHERE c.deleted_at IS NULL
                       AND c.reading_order_confidence IS NOT NULL
                       AND c.reading_order_confidence BETWEEN 1 AND 99
-                ORDER BY c.publisher, c.series, c.reading_order_position
+                ORDER BY c.publisher, c.series, c.reading_order_position, c.title
             """, map: comicRow)
         }
     }
@@ -2212,6 +2246,11 @@ final class DatabaseManager: @unchecked Sendable {
 
     func clearAll() {
         queue.sync {
+            // Unlike every other multi-statement mutator in this file, these deletes ran as
+            // separate auto-commit transactions -- a force-quit/crash mid-sequence (this is a
+            // user-triggered destructive "reset library" action) could leave some tables wiped
+            // and others not, an inconsistent state with no recovery path.
+            exec("BEGIN")
             exec("DELETE FROM reading_history")
             exec("DELETE FROM reading_progress")
             exec("DELETE FROM reading_goals")
@@ -2226,6 +2265,7 @@ final class DatabaseManager: @unchecked Sendable {
             exec("DELETE FROM runs")
             exec("DELETE FROM tags")
             exec("DELETE FROM comics")
+            exec("COMMIT")
         }
     }
 

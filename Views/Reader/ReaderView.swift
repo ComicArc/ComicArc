@@ -99,8 +99,13 @@ struct ReaderView: View {
     init(comic: Comic, onClose: @escaping () -> Void) {
         self.comic        = comic
         self.onClose      = onClose
-        _currentPage      = State(initialValue: max(0, comic.progress))
-        _sessionStartPage = State(initialValue: max(0, comic.progress))
+        // Clamp both bounds: page_count can change after progress was saved (a metadata refresh
+        // correcting a bad initial page count, or a revival at the same path with a different
+        // file) and a stale out-of-range progress would otherwise land the reader on a blank
+        // page with "Next" already disabled and the page slider out of its own bounds.
+        let clampedPage = min(max(0, comic.progress), max(0, comic.pageCount - 1))
+        _currentPage      = State(initialValue: clampedPage)
+        _sessionStartPage = State(initialValue: clampedPage)
         _comicRating      = State(initialValue: comic.rating)
 
         let defaults = UserDefaults.standard
