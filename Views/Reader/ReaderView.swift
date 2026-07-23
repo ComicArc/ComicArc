@@ -203,7 +203,12 @@ struct ReaderView: View {
         .onChange(of: fitModeRaw)      { _, _ in saveSeriesPrefs() }
         .onChange(of: rtl)             { _, _ in saveSeriesPrefs() }
         .onChange(of: doublePage)      { _, _ in saveSeriesPrefs() }
-        .onChange(of: scrollMode)      { _, _ in saveSeriesPrefs() }
+        .onChange(of: scrollMode)      { _, newValue in
+            saveSeriesPrefs()
+            // Autoplay's page-by-page advance is meaningless once scrolling continuously;
+            // stop it rather than leaving a stuck "playing" icon with a frozen countdown.
+            if newValue, autoplay { autoplay = false; countdownProgress = 0 }
+        }
         .onKeyPress(KeyEquivalent("w"), action: { onClose(); return .handled })
         .onKeyPress(KeyEquivalent("f")) {
             windowService.toggleFullScreen()
@@ -429,6 +434,12 @@ struct ReaderView: View {
                         .font(.title2).foregroundStyle(autoplay ? Design.brandGold : .white.opacity(0.85))
                 }
                 .buttonStyle(.plain)
+                // runAutoplay() no-ops entirely in scroll mode (page-by-page advancing doesn't
+                // apply to a continuous scroll), so without this the button/key shortcut can
+                // flip autoplay to visually "on" (gold icon, static countdown bar) with nothing
+                // actually advancing -- disable it here to match iPadReaderView's guard.
+                .disabled(scrollMode)
+                .opacity(scrollMode ? 0.35 : 1)
                 .accessibilityLabel(autoplay ? "Stop slideshow" : "Start slideshow")
                 .help(autoplay ? "Stop Autoplay (A)" : "Start Autoplay (A)")
 
@@ -682,6 +693,7 @@ struct ReaderView: View {
     }
 
     private func toggleAutoplay() {
+        guard !scrollMode else { return }
         autoplay.toggle()
         if !autoplay { countdownProgress = 0 }
     }

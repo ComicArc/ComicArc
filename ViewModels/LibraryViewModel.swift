@@ -619,12 +619,20 @@ final class LibraryViewModel: ObservableObject {
         let w = FileWatcher(
             onAdded: { [weak self] url in
                 self?.isLibraryAvailable = true
-                LibraryScanner.shared.addSingle(url: url, libraryPath: path)
-                self?.reload()
+                // addSingle does file hashing, ComicInfo.xml parsing, and a synchronous DB
+                // write on the scanner's serial queue -- run it off the main thread like
+                // importFiles does, or a Finder drop into the watched folder freezes the UI
+                // for the duration of that work, one file at a time.
+                Task.detached(priority: .utility) {
+                    LibraryScanner.shared.addSingle(url: url, libraryPath: path)
+                    await self?.reload()
+                }
             },
             onRemoved: { [weak self] p in
-                LibraryScanner.shared.removeSingle(path: p)
-                self?.reload()
+                Task.detached(priority: .utility) {
+                    LibraryScanner.shared.removeSingle(path: p)
+                    await self?.reload()
+                }
             },
             onVolumeUnavailable: { [weak self] in
                 self?.isLibraryAvailable = false
@@ -1023,8 +1031,7 @@ final class LibraryViewModel: ObservableObject {
 
     func updateProgress(comic: Comic, page: Int) {
         db.updateProgress(comicId: comic.id, page: page)
-        if let idx = comics.firstIndex(where: { $0.id == comic.id }) { comics[idx].progress = page }
-        if selectedComic?.id == comic.id { selectedComic?.progress = page }
+        patchComicLocally(comic.id) { $0.progress = page }
     }
 
     func indexSpotlight() {

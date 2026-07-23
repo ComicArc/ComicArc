@@ -75,6 +75,16 @@ final class DatabaseManager: @unchecked Sendable {
         try? FileManager.default.removeItem(at: dbURL)
         try? FileManager.default.copyItem(at: bakURL, to: dbURL)
         _ = sqlite3_open(dbURL.path, &db)
+        // PRAGMAs are per-connection, not persisted in the file -- this is a brand new
+        // connection, so foreign_keys/journal_mode/etc. default back off/unset unless
+        // reapplied here. Without this, every ON DELETE CASCADE in the schema silently
+        // stops firing for the rest of the app session after a corruption recovery.
+        exec("PRAGMA foreign_keys = ON")
+        exec("PRAGMA journal_mode = WAL")
+        exec("PRAGMA synchronous = NORMAL")
+        exec("PRAGMA cache_size = -8000")
+        exec("PRAGMA journal_size_limit = 67108864")
+        exec("PRAGMA mmap_size = 268435456")
         registerCustomFunctions()
     }
 

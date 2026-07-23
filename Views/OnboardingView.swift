@@ -436,7 +436,7 @@ struct OnboardingView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 8) {
-            ForEach(0..<5, id: \.self) { i in
+            ForEach(0..<6, id: \.self) { i in
                 let isCurrent = stepIndex == i
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isCurrent ? Design.brandGold : Design.borderColor)
