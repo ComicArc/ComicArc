@@ -15,6 +15,12 @@ final class ThumbnailCache: @unchecked Sendable {
 
     private let inflightLock = NSLock()
     private var inFlight: [Int64: [(PlatformImage?) -> Void]] = [:]
+    // Guards against a race where a slow extraction (e.g. reading from a flaky/waking external
+    // drive right before the file gets soft-deleted) is still in flight when evict() runs to
+    // force a fresh read for a just-revived comic. Without this, the stale extraction finishes
+    // AFTER the evict and writes its bad result right back to cache/disk, silently undoing the
+    // eviction and re-corrupting the cover with no further trigger to fix it.
+    private var generations: [Int64: Int] = [:]
 
     private let coversDir: URL = {
         let dir = DatabaseManager.dataDir.appendingPathComponent("covers")
@@ -39,6 +45,7 @@ final class ThumbnailCache: @unchecked Sendable {
             return
         }
         inFlight[comicId] = [completion]
+        let gen = generations[comicId, default: 0]
         inflightLock.unlock()
 
         queue.async { [self] in
@@ -52,7 +59,18 @@ final class ThumbnailCache: @unchecked Sendable {
                 try? FileManager.default.removeItem(at: diskURL)
                 let img = extract(from: filePath)
                 let thumb = img.flatMap { PlatformImage.resized(source: $0, to: thumbSize) }
-                if let thumb { cache.setObject(thumb, forKey: key, cost: thumb.byteSize); save(thumb, to: diskURL) }
+                if let thumb {
+                    inflightLock.lock()
+                    let stillCurrent = generations[comicId, default: 0] == gen
+                    inflightLock.unlock()
+                    // Only persist if nothing evicted this comic's thumbnail while this
+                    // extraction was running -- an eviction mid-flight means the caller wanted
+                    // a fresh read, and this result was computed from data that predates it.
+                    if stillCurrent {
+                        cache.setObject(thumb, forKey: key, cost: thumb.byteSize)
+                        save(thumb, to: diskURL)
+                    }
+                }
                 result = thumb
             }
             inflightLock.lock()
@@ -102,6 +120,9 @@ final class ThumbnailCache: @unchecked Sendable {
     }
 
     func evict(_ comicId: Int64) {
+        inflightLock.lock()
+        generations[comicId, default: 0] += 1
+        inflightLock.unlock()
         cache.removeObject(forKey: NSNumber(value: comicId))
         let url = coversDir.appendingPathComponent("\(comicId).jpg")
         try? FileManager.default.removeItem(at: url)

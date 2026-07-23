@@ -63,7 +63,7 @@ struct StatsView: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
                 metricTile("PAGES READ", value: "\(s.pagesRead)", icon: "book.pages", tint: Design.brandBlue)
                 metricTile("FAVORITES", value: "\(s.favorites)", icon: "heart.fill", tint: .red)
-                metricTile("READING ORDERS", value: "\(s.runsCount)", icon: "list.bullet.rectangle.portrait.fill", tint: Design.brandGold)
+                metricTile("READING PATHS", value: "\(s.runsCount)", icon: "list.bullet.rectangle.portrait.fill", tint: Design.brandGold)
                 metricTile("DAY STREAK", value: "\(s.readingStreak)", icon: "flame.fill", tint: .orange)
             }
             .frame(maxWidth: .infinity)

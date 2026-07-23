@@ -753,6 +753,12 @@ final class LibraryViewModel: ObservableObject {
         mutate(&comics[idx])
         if selectedComic?.id == comicId { mutate(&selectedComic!) }
         if removeIfNoLongerVisible { comics.remove(at: idx) }
+        // Invalidate any reload that's still in flight: _reload() only applies its result if
+        // its captured generation still matches when it lands (see _reload()'s `guard gen ==
+        // self.reloadGeneration`). Without bumping it here too, a reload started just before
+        // this optimistic patch but landing just after it would silently overwrite this fresher
+        // state with the stale pre-patch snapshot it queried.
+        reloadGeneration += 1
     }
 
     func toggleFavorite(_ comic: Comic) {

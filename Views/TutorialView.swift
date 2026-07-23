@@ -124,7 +124,11 @@ struct TutorialView: View {
                 }
             }
         }
-        .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
+        // Always dark, regardless of the user's app theme: every color in this overlay (the
+        // black scrim, white text, gold accents) is fixed, not theme-derived. Following the
+        // user's Sepia (light) theme here would put hardcoded white text on a light-tinted
+        // .ultraThinMaterial card -- a real contrast/readability bug, not a nice-to-have.
+        .preferredColorScheme(.dark)
         .onKeyPress(.escape) { onDismiss(); return .handled }
     }
 

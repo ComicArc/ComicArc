@@ -191,30 +191,54 @@ final class LibraryScanner: @unchecked Sendable {
 
     func addSingle(url: URL, libraryPath: String) {
         queue.sync {
+            let fm = FileManager.default
             let fp = url.path
-            guard FileManager.default.fileExists(atPath: fp), supported.contains(url.pathExtension.lowercased()) else { return }
+            guard fm.fileExists(atPath: fp), supported.contains(url.pathExtension.lowercased()) else { return }
             let knownPaths = db.knownPaths()
             guard !knownPaths.contains(fp) else { return }
             let hash = fileHash(fp)
-            if let h = hash, db.knownHashes().contains(h) { return }
+            // A hash match against a known comic could mean two things: a genuine duplicate file
+            // (the original is still where it was), or this IS the original, just renamed/moved
+            // by Finder -- the file watcher reports that as a new path with no matching "removed"
+            // linkage. Mirror _scan()'s disambiguation instead of always bailing out, or every
+            // Finder rename silently orphans the comic (old path soft-deleted, new path ignored).
+            if let h = hash, db.knownHashes().contains(h) {
+                if let existingPath = db.path(forHash: h), fm.fileExists(atPath: existingPath) {
+                    return
+                } else {
+                    db.updateFilePath(forHash: h, newPath: fp)
+                    return
+                }
+            }
             if let staleId = db.softDeletedComicId(atPath: fp) {
                 ThumbnailCache.shared.evict(staleId)
             }
             let meta = parseMeta(url: url, libraryPath: libraryPath)
-            db.insert(comic: (
+            // Use batchInsert (ComicInsert), not the narrow 13-field insert(comic:) tuple overload
+            // -- that overload silently drops coverMonth/coverDay/alternateNumber/storyArcNumber/
+            // seriesGroup/comicInfoIssueNumber/volume/format/hasComicInfo even though parseMeta
+            // computes all of them, permanently losing ComicInfo.xml metadata for every
+            // drag-and-drop import and every file-watcher-detected new file.
+            db.batchInsert([DatabaseManager.ComicInsert(
                 title: meta.title, filePath: fp, publisher: meta.publisher,
                 character: meta.character, series: meta.series,
                 issueNumber: meta.issueNumber, pageCount: pageCount(fp),
                 writer: meta.writer, penciller: meta.penciller,
                 year: meta.year, storyArc: meta.storyArc,
-                languageIso: meta.languageIso, fileHash: hash
-            ))
+                languageIso: meta.languageIso, fileHash: hash,
+                coverMonth: meta.coverMonth, coverDay: meta.coverDay,
+                alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
+                seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
+                volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo
+            )])
         }
     }
 
     func removeSingle(path: String) {
-        let stale = db.stalePaths().filter { $0.path == path }.map(\.id)
-        if !stale.isEmpty { db.softDelete(stale) }
+        queue.sync {
+            let stale = db.stalePaths().filter { $0.path == path }.map(\.id)
+            if !stale.isEmpty { db.softDelete(stale) }
+        }
     }
 
     private func fileHash(_ path: String) -> String? {
