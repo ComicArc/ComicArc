@@ -14,13 +14,20 @@ final class ThumbnailCache: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.comicarc.thumbs", qos: .utility, attributes: .concurrent)
 
     private let inflightLock = NSLock()
-    private var inFlight: [Int64: [(PlatformImage?) -> Void]] = [:]
+    // Each pending callback remembers the generation pair current when IT was registered, not
+    // just when the in-flight extraction it coalesced onto started. Without this, a caller that
+    // arrives after evict()/setCustomCover()/clearAll() invalidates an already-running extraction
+    // would still be handed that extraction's stale result once it finishes -- the generation
+    // check below only stops the stale result from being persisted, not from being delivered.
+    private var inFlight: [Int64: [(gen: Int, globalGen: Int, callback: (PlatformImage?) -> Void)]] = [:]
     // Guards against a race where a slow extraction (e.g. reading from a flaky/waking external
-    // drive right before the file gets soft-deleted) is still in flight when evict() runs to
-    // force a fresh read for a just-revived comic. Without this, the stale extraction finishes
-    // AFTER the evict and writes its bad result right back to cache/disk, silently undoing the
-    // eviction and re-corrupting the cover with no further trigger to fix it.
+    // drive right before the file gets soft-deleted) is still in flight when evict()/
+    // setCustomCover() runs to force a fresh read for a just-revived comic or a user-picked
+    // cover. Without this, the stale extraction finishes AFTER and writes its bad result right
+    // back to cache/disk, silently undoing the eviction/override with no further trigger to fix
+    // it. `globalGeneration` covers clearAll(), which invalidates every comic at once.
     private var generations: [Int64: Int] = [:]
+    private var globalGeneration = 0
 
     private let coversDir: URL = {
         let dir = DatabaseManager.dataDir.appendingPathComponent("covers")
@@ -39,13 +46,14 @@ final class ThumbnailCache: @unchecked Sendable {
         if let cached = cache.object(forKey: key) { completion(cached); return }
 
         inflightLock.lock()
+        let gen = generations[comicId, default: 0]
+        let startGlobalGen = globalGeneration
         if inFlight[comicId] != nil {
-            inFlight[comicId]?.append(completion)
+            inFlight[comicId]?.append((gen, startGlobalGen, completion))
             inflightLock.unlock()
             return
         }
-        inFlight[comicId] = [completion]
-        let gen = generations[comicId, default: 0]
+        inFlight[comicId] = [(gen, startGlobalGen, completion)]
         inflightLock.unlock()
 
         queue.async { [self] in
@@ -61,11 +69,12 @@ final class ThumbnailCache: @unchecked Sendable {
                 let thumb = img.flatMap { PlatformImage.resized(source: $0, to: thumbSize) }
                 if let thumb {
                     inflightLock.lock()
-                    let stillCurrent = generations[comicId, default: 0] == gen
+                    let stillCurrent = generations[comicId, default: 0] == gen && globalGeneration == startGlobalGen
                     inflightLock.unlock()
-                    // Only persist if nothing evicted this comic's thumbnail while this
-                    // extraction was running -- an eviction mid-flight means the caller wanted
-                    // a fresh read, and this result was computed from data that predates it.
+                    // Only persist if nothing evicted/overrode this comic's thumbnail (or cleared
+                    // the whole cache) while this extraction was running -- such a change mid-
+                    // flight means the caller wanted a fresh read or a specific override, and
+                    // this result was computed from data that predates it.
                     if stillCurrent {
                         cache.setObject(thumb, forKey: key, cost: thumb.byteSize)
                         save(thumb, to: diskURL)
@@ -76,7 +85,20 @@ final class ThumbnailCache: @unchecked Sendable {
             inflightLock.lock()
             let callbacks = inFlight.removeValue(forKey: comicId) ?? []
             inflightLock.unlock()
-            DispatchQueue.main.async { for cb in callbacks { cb(result) } }
+            DispatchQueue.main.async { [self] in
+                for entry in callbacks {
+                    if entry.gen == gen && entry.globalGen == startGlobalGen {
+                        entry.callback(result)
+                    } else {
+                        // This caller registered after something invalidated the extraction that
+                        // just ran -- handing back `result` would silently deliver stale data.
+                        // Re-request instead: an immediate cache/disk hit if the invalidator
+                        // already wrote a fresh value (e.g. setCustomCover), otherwise a fresh
+                        // extraction.
+                        thumbnail(id: comicId, filePath: filePath, completion: entry.callback)
+                    }
+                }
+            }
         }
     }
 
@@ -134,6 +156,9 @@ final class ThumbnailCache: @unchecked Sendable {
     }
 
     func clearAll() {
+        inflightLock.lock()
+        globalGeneration += 1
+        inflightLock.unlock()
         cache.removeAllObjects()
         if let files = try? FileManager.default.contentsOfDirectory(at: coversDir, includingPropertiesForKeys: nil) {
             for file in files where file.pathExtension == "jpg" { try? FileManager.default.removeItem(at: file) }
@@ -147,6 +172,9 @@ final class ThumbnailCache: @unchecked Sendable {
 
     func setCustomCover(comicId: Int64, image: PlatformImage) {
         guard let resized = PlatformImage.resized(source: image, to: thumbSize) else { return }
+        inflightLock.lock()
+        generations[comicId, default: 0] += 1
+        inflightLock.unlock()
         let diskURL = coversDir.appendingPathComponent("\(comicId).jpg")
         save(resized, to: diskURL)
         cache.removeObject(forKey: NSNumber(value: comicId))

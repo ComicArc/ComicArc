@@ -28,6 +28,10 @@ final class LibraryScanner: @unchecked Sendable {
         var running = false; var total = 0; var done = 0; var added = 0
         var removed = 0; var recovered = 0; var stillCorrupted = 0
         var cancelled = false; var error: String?
+        /// Ids soft-deleted by this scan, so a caller can remove their stale Spotlight entries --
+        /// indexSearchableItems is additive-only and would otherwise leave them permanently
+        /// discoverable, the same gap already fixed for interactive delete in LibraryViewModel.
+        var removedIds: [Int64] = []
     }
 
     private let stateLock = NSLock()
@@ -41,30 +45,44 @@ final class LibraryScanner: @unchecked Sendable {
         queue.async(execute: block)
     }
 
-    func scan(libraryPath: String, onProgress: @escaping (ScanState) -> Void) {
-        guard !state.running else { return }
-        queue.async { [self] in self._scan(libraryPath: libraryPath, onProgress: onProgress) }
+    /// Longest-prefix match among the configured library roots for a real file path -- roots
+    /// aren't expected to nest, but matching the longest one first is a cheap safety net if they
+    /// somehow do. Returns `nil` if the path doesn't fall under any currently configured root
+    /// (e.g. a folder was removed from the library after comics were already imported from it).
+    func matchingRoot(for path: String, in roots: [String]) -> String? {
+        roots.filter { root in
+            let prefix = root.hasSuffix("/") ? root : root + "/"
+            return path == root || path.hasPrefix(prefix)
+        }.max { $0.count < $1.count }
     }
 
-    private func _scan(libraryPath: String, onProgress: @escaping (ScanState) -> Void) {
+    func scan(libraryPaths: [String], onProgress: @escaping (ScanState) -> Void) {
+        guard !state.running else { return }
+        queue.async { [self] in self._scan(libraryPaths: libraryPaths, onProgress: onProgress) }
+    }
+
+    private func _scan(libraryPaths: [String], onProgress: @escaping (ScanState) -> Void) {
+        runImportPriorityAudit()
         setState { $0 = ScanState(running: true) }
 
         let fm = FileManager.default
-
-        guard fm.fileExists(atPath: libraryPath),
-              let enumerator = fm.enumerator(
-                at: URL(fileURLWithPath: libraryPath),
-                includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-              ) else {
-            setState { $0.running = false; $0.error = "Library path is not accessible" }
+        let reachableRoots = libraryPaths.filter { fm.fileExists(atPath: $0) }
+        guard !reachableRoots.isEmpty else {
+            setState { $0.running = false; $0.error = "None of your configured library folders are accessible" }
             DispatchQueue.main.async { onProgress(self.state) }
             return
         }
 
         var allFiles: [URL] = []
-        while let url = enumerator.nextObject() as? URL {
-            if supported.contains(url.pathExtension.lowercased()) { allFiles.append(url) }
+        for root in reachableRoots {
+            guard let enumerator = fm.enumerator(
+                at: URL(fileURLWithPath: root),
+                includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            while let url = enumerator.nextObject() as? URL {
+                if supported.contains(url.pathExtension.lowercased()) { allFiles.append(url) }
+            }
         }
         allFiles.sort { $0.path < $1.path }
         setState { $0.total = allFiles.count }
@@ -93,7 +111,8 @@ final class LibraryScanner: @unchecked Sendable {
             if let staleId = db.softDeletedComicId(atPath: fp) {
                 ThumbnailCache.shared.evict(staleId)
             }
-            let meta = parseMeta(url: url, libraryPath: libraryPath)
+            let root = matchingRoot(for: fp, in: reachableRoots) ?? reachableRoots.first ?? ""
+            let meta = parseMeta(url: url, libraryPath: root)
             pending.append(DatabaseManager.ComicInsert(
                 title: meta.title, filePath: fp, publisher: meta.publisher,
                 character: meta.character, series: meta.series,
@@ -104,7 +123,11 @@ final class LibraryScanner: @unchecked Sendable {
                 coverMonth: meta.coverMonth, coverDay: meta.coverDay,
                 alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
                 seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
-                volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo
+                volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo,
+                comicInfoSeries: meta.comicInfoSeries, comicInfoPublisher: meta.comicInfoPublisher,
+                folderSeries: meta.folderSeries, folderPublisher: meta.folderPublisher,
+                seriesSource: meta.seriesSource, publisherSource: meta.publisherSource,
+                issueNumberSource: meta.issueNumberSource
             ))
             added += 1; knownPaths.insert(fp)
             if let hash { knownHashes.insert(hash) }
@@ -117,6 +140,7 @@ final class LibraryScanner: @unchecked Sendable {
         }
 
         var anyRemoved = false
+        var movedComics: [(id: Int64, url: URL)] = []
 
         for (i, url) in allFiles.enumerated() {
             if state.cancelled { break }
@@ -129,6 +153,7 @@ final class LibraryScanner: @unchecked Sendable {
                     } else {
                         db.updateFilePath(forHash: h, newPath: fp)
                         knownPaths.insert(fp)
+                        if let id = db.idForHash(h) { movedComics.append((id, url)) }
                     }
                 } else {
                     insertNewComic(url: url, fp: fp, hash: hash)
@@ -140,20 +165,55 @@ final class LibraryScanner: @unchecked Sendable {
         }
         flushPending()
 
-        if !state.cancelled && fm.fileExists(atPath: libraryPath) {
+        if !movedComics.isEmpty {
+            // A file's identity survives a move/rename via its hash, but the folder-derived
+            // publisher/character/series/title/issue-number it was tagged with at its OLD path
+            // don't automatically follow -- a renamed folder (every file inside inherits a new
+            // path) would otherwise leave every comic in it permanently tagged with whatever
+            // series name the old folder happened to have, disconnected from GCD matching,
+            // reading order, and series links for the real (new) series going forward. Reuses
+            // the same folder-metadata derivation `reparseAllMeta` uses for a full manual
+            // resync, respecting meta_edited the same way, just scoped to only the files that
+            // actually moved this scan instead of the whole library.
+            var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?)] = []
+            for (id, url) in movedComics {
+                let root = matchingRoot(for: url.path, in: libraryPaths) ?? ""
+                let (pub, char, ser) = folderComponents(url: url, libraryPath: root)
+                let filename = url.deletingPathExtension().lastPathComponent
+                updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename)))
+                if let ser {
+                    let key = "\(pub ?? "Unknown"):\(ser)"
+                    touchedRawKeys.insert(key)
+                    touchedEffectiveKeys.insert(key)
+                }
+            }
+            db.batchUpdateFolderMeta(updates)
+        }
+
+        if !state.cancelled && !reachableRoots.isEmpty {
             let active = db.stalePaths()
-            let stale = active.filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
+            // Only comics whose matching root is CURRENTLY reachable are even considered for
+            // staleness -- a root that's temporarily unreachable (asleep NAS, ejected drive) must
+            // not have its comics judged missing just because we can't check them right now, and
+            // a comic whose root was removed from the configured folder list entirely is left
+            // alone rather than silently deleted just because the folder itself was unconfigured.
+            let checkable = active.filter { comic in
+                guard let root = matchingRoot(for: comic.path, in: libraryPaths) else { return false }
+                return reachableRoots.contains(root)
+            }
+            let stale = checkable.filter { !fm.fileExists(atPath: $0.path) }.map(\.id)
             // A flaky/waking external drive or network share can resolve the library ROOT path
             // fine while individual file-existence checks transiently false-negative -- if that
             // happens, this would otherwise read as "most of the library vanished overnight" and
             // soft-delete all of it. A single user genuinely deleting most of a small library is
             // plausible and shouldn't be blocked, so this only guards a large ABSOLUTE count too.
-            let suspiciouslyLarge = active.count >= 20 && stale.count > active.count / 2
+            let suspiciouslyLarge = checkable.count >= 20 && stale.count > checkable.count / 2
             if !stale.isEmpty && !suspiciouslyLarge {
                 db.softDelete(stale); anyRemoved = true
-                setState { $0.removed = stale.count }
+                stale.forEach { ThumbnailCache.shared.evict($0) }
+                setState { $0.removed = stale.count; $0.removedIds = stale }
             } else if suspiciouslyLarge {
-                setState { $0.error = "Skipped removing \(stale.count) of \(active.count) comics that looked missing -- this usually means the drive was slow to wake up or briefly disconnected, not that the files are actually gone. Rescan once the drive is fully available to confirm." }
+                setState { $0.error = "Skipped removing \(stale.count) of \(checkable.count) comics that looked missing -- this usually means the drive was slow to wake up or briefly disconnected, not that the files are actually gone. Rescan once the drive is fully available to confirm." }
             }
         }
 
@@ -169,7 +229,7 @@ final class LibraryScanner: @unchecked Sendable {
             setState { $0.recovered = recovered; $0.stillCorrupted = stillCorrupted }
         }
 
-        let somethingChanged = added > 0 || anyRemoved
+        let somethingChanged = added > 0 || anyRemoved || !movedComics.isEmpty
         if !state.cancelled && somethingChanged {
             db.seedMissingPositions()
             if anyRemoved {
@@ -189,7 +249,7 @@ final class LibraryScanner: @unchecked Sendable {
         onProgress(state)
     }
 
-    func addSingle(url: URL, libraryPath: String) {
+    func addSingle(url: URL, libraryRoots: [String]) {
         queue.sync {
             let fm = FileManager.default
             let fp = url.path
@@ -213,7 +273,8 @@ final class LibraryScanner: @unchecked Sendable {
             if let staleId = db.softDeletedComicId(atPath: fp) {
                 ThumbnailCache.shared.evict(staleId)
             }
-            let meta = parseMeta(url: url, libraryPath: libraryPath)
+            let root = matchingRoot(for: fp, in: libraryRoots) ?? libraryRoots.first ?? ""
+            let meta = parseMeta(url: url, libraryPath: root)
             // Use batchInsert (ComicInsert), not the narrow 13-field insert(comic:) tuple overload
             // -- that overload silently drops coverMonth/coverDay/alternateNumber/storyArcNumber/
             // seriesGroup/comicInfoIssueNumber/volume/format/hasComicInfo even though parseMeta
@@ -229,15 +290,26 @@ final class LibraryScanner: @unchecked Sendable {
                 coverMonth: meta.coverMonth, coverDay: meta.coverDay,
                 alternateNumber: meta.alternateNumber, storyArcNumber: meta.storyArcNumber,
                 seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
-                volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo
+                volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo,
+                comicInfoSeries: meta.comicInfoSeries, comicInfoPublisher: meta.comicInfoPublisher,
+                folderSeries: meta.folderSeries, folderPublisher: meta.folderPublisher,
+                seriesSource: meta.seriesSource, publisherSource: meta.publisherSource,
+                issueNumberSource: meta.issueNumberSource
             )])
         }
     }
 
-    func removeSingle(path: String) {
+    /// Returns the ids soft-deleted, if any, so the caller can remove their Spotlight entries --
+    /// see `ScanState.removedIds`.
+    @discardableResult
+    func removeSingle(path: String) -> [Int64] {
         queue.sync {
             let stale = db.stalePaths().filter { $0.path == path }.map(\.id)
-            if !stale.isEmpty { db.softDelete(stale) }
+            if !stale.isEmpty {
+                db.softDelete(stale)
+                stale.forEach { ThumbnailCache.shared.evict($0) }
+            }
+            return stale
         }
     }
 
@@ -322,27 +394,90 @@ final class LibraryScanner: @unchecked Sendable {
         var volume: String?
         var format: String?
         var hasComicInfo: Bool
+        var comicInfoSeries: String?
+        var comicInfoPublisher: String?
+        var folderSeries: String?
+        var folderPublisher: String?
+        var seriesSource: String
+        var publisherSource: String
+        var issueNumberSource: String
+    }
+
+    /// One-time, post-upgrade pass over comics that predate the raw-fact mirror columns: reopens
+    /// each one's archive to see what its ComicInfo.xml actually says, records it as a raw fact
+    /// (comicinfo_series/comicinfo_publisher) regardless of the outcome, and flags a review
+    /// conflict if it genuinely disagrees with what the file's series/publisher already are (the
+    /// same disagreement rule `batchInsert` uses going forward, via
+    /// `DatabaseManager.detectMetadataConflict`). Scoped to `has_comicinfo = 1` rows only -- well
+    /// under 1% of a real library per the same rarity this scanner already assumes elsewhere --
+    /// so reopening archives here is bounded, not a full-library rescan. Self-gated so it only
+    /// ever does real work once per install; piggybacks on the next scan instead of adding a
+    /// separate blocking step to app launch.
+    func runImportPriorityAudit() {
+        guard !db.hasCompletedImportPriorityAudit() else { return }
+        let pending = db.pendingImportPriorityAuditPaths()
+        guard !pending.isEmpty else {
+            db.markImportPriorityAuditComplete()
+            return
+        }
+
+        let currentValues = db.identitySnapshots(for: pending.map(\.id))
+        var mirrorUpdates: [(id: Int64, comicInfoSeries: String?, comicInfoPublisher: String?)] = []
+        var conflicts: [DatabaseManager.MetadataConflictInput] = []
+
+        for (id, path) in pending {
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            let ci = comicInfoXML(url: URL(fileURLWithPath: path))
+            let comicInfoSeries = ci["Series"].map(normalizeSeriesName)
+            let comicInfoPublisher = ci["Publisher"].map(normalizePublisher)
+            mirrorUpdates.append((id, comicInfoSeries, comicInfoPublisher))
+
+            guard let current = currentValues[id], !current.metaEdited else { continue }
+            if let conflict = DatabaseManager.detectMetadataConflict(
+                field: "series", current: current.series, proposed: comicInfoSeries,
+                source: "ComicInfo.xml", comicId: id
+            ) {
+                conflicts.append(conflict)
+            }
+            if let conflict = DatabaseManager.detectMetadataConflict(
+                field: "publisher", current: current.publisher, proposed: comicInfoPublisher,
+                source: "ComicInfo.xml", comicId: id
+            ) {
+                conflicts.append(conflict)
+            }
+        }
+
+        db.updateComicInfoMirrors(mirrorUpdates)
+        if !conflicts.isEmpty { db.upsertMetadataConflicts(conflicts) }
+        db.markImportPriorityAuditComplete()
     }
 
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
         let ci = comicInfoXML(url: url)
         let filename = url.deletingPathExtension().lastPathComponent
         let (folderPublisher, folderCharacter, folderSeries) = folderComponents(url: url, libraryPath: libraryPath)
-        let series = folderSeries ?? ci["Series"].map(normalizeSeriesName) ?? "General"
-        let publisher = folderPublisher ?? ci["Publisher"].map(normalizePublisher) ?? "Unknown"
+        let comicInfoSeries = ci["Series"].map(normalizeSeriesName)
+        let comicInfoPublisher = ci["Publisher"].map(normalizePublisher)
+
+        let resolved = ComicIdentityResolver.resolve(.init(
+            comicInfoSeries: comicInfoSeries, comicInfoPublisher: comicInfoPublisher,
+            comicInfoIssueNumber: ci["IssueNumber"],
+            folderSeries: folderSeries, folderPublisher: folderPublisher,
+            filenameIssueNumber: extractIssueNumber(from: filename)
+        ))
+
         let character: String?
         if let fc = folderCharacter { character = fc }
         else if let c = ci["Characters"], isCleanCharacterName(c) { character = c }
         else { character = nil }
 
-        let issueNum = extractIssueNumber(from: filename) ?? ci["IssueNumber"]
         let title = filename
 
-        let year = ci["Year"].flatMap(Int.init)
+        let year = ci["Year"].flatMap(Int.init) ?? extractYear(from: filename)
         let month = year != nil ? ci["Month"].flatMap(Int.init).flatMap { (1...12).contains($0) ? $0 : nil } : nil
         let day = month != nil ? ci["Day"].flatMap(Int.init).flatMap { (1...31).contains($0) ? $0 : nil } : nil
-        return ComicMeta(title: title, publisher: publisher, character: character,
-                         series: series, issueNumber: issueNum,
+        return ComicMeta(title: title, publisher: resolved.publisher, character: character,
+                         series: resolved.series, issueNumber: resolved.issueNumber,
                          writer: ci["Writer"], penciller: ci["Penciller"],
                          year: year, coverMonth: month, coverDay: day,
                          storyArc: ci["StoryArc"], languageIso: ci["LanguageISO"],
@@ -350,7 +485,11 @@ final class LibraryScanner: @unchecked Sendable {
                          seriesGroup: ci["SeriesGroup"].map(normalizeSeriesName),
                          comicInfoIssueNumber: ci["IssueNumber"],
                          volume: ci["Volume"], format: ci["Format"],
-                         hasComicInfo: !ci.isEmpty)
+                         hasComicInfo: !ci.isEmpty,
+                         comicInfoSeries: comicInfoSeries, comicInfoPublisher: comicInfoPublisher,
+                         folderSeries: folderSeries, folderPublisher: folderPublisher,
+                         seriesSource: resolved.seriesSource, publisherSource: resolved.publisherSource,
+                         issueNumberSource: resolved.issueNumberSource)
     }
 
     func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
@@ -385,14 +524,15 @@ final class LibraryScanner: @unchecked Sendable {
         }
     }
 
-    func reparseAllMeta(libraryPath: String) {
+    func reparseAllMeta(libraryRoots: [String]) {
         let comics = DatabaseManager.shared.allComicPaths()
-        var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?)] = []
+        var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?)] = []
         for (id, path) in comics {
             let url = URL(fileURLWithPath: path)
-            let (pub, char, ser) = folderComponents(url: url, libraryPath: libraryPath)
+            let root = matchingRoot(for: path, in: libraryRoots) ?? ""
+            let (pub, char, ser) = folderComponents(url: url, libraryPath: root)
             let filename = url.deletingPathExtension().lastPathComponent
-            updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename)))
+            updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename)))
         }
         DatabaseManager.shared.batchUpdateFolderMeta(updates)
         DatabaseManager.shared.resetScanRetryCounts()
@@ -435,6 +575,25 @@ final class LibraryScanner: @unchecked Sendable {
                let range = Range(match.range(at: 1), in: filename) { return String(filename[range]) }
         }
         return nil
+    }
+
+    // Matches a "(YYYY)" or "(YYYY-)" (ongoing series) year annotation anywhere in the filename,
+    // e.g. "The_Amazing_Spider-Man_(2014)_Issue_#10" or "The_Amazing_Spider-Man_(2015-)_#1-4".
+    private static let yearPattern = try? NSRegularExpression(pattern: #"\((19|20)(\d{2})-?\)"#)
+
+    /// Fallback for the overwhelming majority of real libraries that have no ComicInfo.xml at all
+    /// (confirmed: <1% of comics in a real 1900+ issue library had it) -- without this, `year` is
+    /// simply never populated for those files even though the year is often sitting right in the
+    /// filename already, which starves GCD matching of its single strongest disambiguating signal
+    /// (used to break ties between same-named volumes/restarts, e.g. two different real runs both
+    /// dumped in one loosely-organized folder with low, overlapping issue numbers).
+    func extractYear(from filename: String) -> Int? {
+        guard let regex = Self.yearPattern,
+              let match = regex.firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)),
+              let centuryRange = Range(match.range(at: 1), in: filename),
+              let yearRange = Range(match.range(at: 2), in: filename)
+        else { return nil }
+        return Int(filename[centuryRange] + filename[yearRange])
     }
 
     private func normalizePublisher(_ raw: String) -> String {

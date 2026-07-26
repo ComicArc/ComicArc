@@ -25,4 +25,8 @@ final class ReadingSessionService {
     func toggleBookmark(comicId: Int64, page: Int) -> Bool {
         DatabaseManager.shared.toggleBookmark(comicId: comicId, page: page)
     }
+
+    func setBookmarkFavorite(comicId: Int64, page: Int, isFavorite: Bool) {
+        DatabaseManager.shared.setBookmarkFavorite(comicId: comicId, page: page, isFavorite: isFavorite)
+    }
 }

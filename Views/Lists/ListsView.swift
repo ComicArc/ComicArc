@@ -4,8 +4,10 @@ extension Notification.Name {
 }
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ListsListView: View {
+    @EnvironmentObject var vm: LibraryViewModel
     @Binding var selectedList: ComicList?
     @State private var lists:          [ComicList] = []
     @State private var isLoading       = true
@@ -14,6 +16,15 @@ struct ListsListView: View {
     @State private var newListDesc     = ""
     @State private var draggedListId:  Int64?
     @State private var dropTargetListId: Int64?
+
+    // Filters the rendered list only -- reordering (drag-and-drop) still looks rows up by id
+    // in the full `lists` array below, so a search doesn't corrupt the real underlying order,
+    // it just narrows what's currently visible.
+    private var filteredLists: [ComicList] {
+        guard !vm.searchText.isEmpty else { return lists }
+        let q = vm.searchText.lowercased()
+        return lists.filter { $0.title.lowercased().contains(q) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,10 +64,17 @@ struct ListsListView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(20)
+            } else if filteredLists.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 42)).foregroundStyle(.quaternary)
+                    Text("No matching lists.").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(lists) { list in
+                        ForEach(filteredLists) { list in
                             let isTarget = dropTargetListId == list.id && draggedListId != list.id
                             ListCard(
                                 list: list,
@@ -274,7 +292,8 @@ struct ListCard: View {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(list.title)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             if let url = urls.first {
                 LibraryViewModel.shared.setListCover(listId: list.id, imageURL: url)
@@ -435,7 +454,7 @@ struct ListDetailView: View {
                     .help("Rate & Review")
 
                     Button(role: .destructive) {
-                        LibraryViewModel.shared.deleteListWithUndo(list)
+                        LibraryViewModel.shared.deleteListWithUndo(currentList)
                         onDelete()
                     } label: {
                         Text("Delete List")
@@ -451,7 +470,11 @@ struct ListDetailView: View {
 
     private var reviewSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Rate & Review: \(list.title)")
+            // Reads `currentList` (the synced @State copy), not the immutable `list` init
+            // parameter -- otherwise this sheet keeps showing the pre-edit title after
+            // EditListView updates currentList, since `list` itself never changes for this
+            // view's lifetime.
+            Text("Rate & Review: \(currentList.title)")
                 .font(.title2.bold())
 
             Text("Rating").font(.headline)

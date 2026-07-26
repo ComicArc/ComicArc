@@ -12,62 +12,82 @@ private struct TStepInfo {
     let above:    Bool
 }
 
-private let steps: [TStepInfo] = [
-    TStepInfo(icon: "diamond.fill",
-              title: "Welcome to ComicArc",
-              body: "Let's take a quick tour of the major features. You can skip this at any time and return to it from Settings → Show Tutorial.",
-              spot: nil, above: true),
+private extension TStep {
+    // An exhaustive switch instead of a positional array indexed by `rawValue` -- a plain
+    // `[TStepInfo]` literal has no compiler-enforced link to TStep's cases, so adding or
+    // removing a case without updating the array in lockstep would silently show mismatched
+    // content for a step (or index out of range). A `switch` with no `default` forces every
+    // case to be handled here whenever TStep itself changes.
+    var info: TStepInfo {
+        switch self {
+        case .welcome:
+            return TStepInfo(icon: "diamond.fill",
+                title: "Welcome to ComicArc",
+                body: "Let's take a quick tour of the major features. You can skip this at any time and return to it from Settings → Show Tutorial.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "sidebar.left",
-              title: "The Sidebar",
-              body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Diary, Lists, Statistics, and History under Discover.",
-              spot: .sidebar, above: false),
+        case .sidebar:
+            return TStepInfo(icon: "sidebar.left",
+                title: "The Sidebar",
+                body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Diary, Lists, Statistics, and History under Discover.",
+                spot: .sidebar, above: false)
 
-    TStepInfo(icon: "books.vertical.fill",
-              title: "Your Library",
-              body: "Comics are organized by Publisher → Character → Series. Click any group card to drill in. Double-click an issue to open it in the reader.",
-              spot: .content, above: false),
+        case .library:
+            return TStepInfo(icon: "books.vertical.fill",
+                title: "Your Library",
+                body: "Comics are organized by Publisher → Character → Series. Click any group card to drill in. Double-click an issue to open it in the reader.",
+                spot: .content, above: false)
 
-    TStepInfo(icon: "rectangle.stack.fill",
-              title: "Issue Detail",
-              body: "Click any comic to open its detail panel. Edit metadata, add tags, write a review, rate it, or tap Open in Reader to start reading.",
-              spot: .content, above: false),
+        case .openComic:
+            return TStepInfo(icon: "rectangle.stack.fill",
+                title: "Issue Detail",
+                body: "Click any comic to open its detail panel. Edit metadata, add tags, write a review, rate it, or tap Open in Reader to start reading.",
+                spot: .content, above: false)
 
-    TStepInfo(icon: "book.fill",
-              title: "The Reader",
-              body: "The reader lives inside the app — no separate window. Move your mouse to the top or bottom edge to reveal controls. Use ← → or swipe to turn pages.",
-              spot: .content, above: false),
+        case .reader:
+            return TStepInfo(icon: "book.fill",
+                title: "The Reader",
+                body: "The reader lives inside the app — no separate window. Move your mouse to the top or bottom edge to reveal controls. Use ← → or swipe to turn pages.",
+                spot: .content, above: false)
 
-    TStepInfo(icon: "list.bullet.rectangle.portrait.fill",
-              title: "Reading Paths",
-              body: "A Reading Path is an ordered list that can span multiple series — like a crossover event or a character's entire history. Build one from Reading Paths in the sidebar.",
-              spot: .sidebar, above: false),
+        case .readingPaths:
+            return TStepInfo(icon: "list.bullet.rectangle.portrait.fill",
+                title: "Reading Paths",
+                body: "A Reading Path is an ordered list that can span multiple series — like a crossover event or a character's entire history. Build one from Reading Paths in the sidebar.",
+                spot: .sidebar, above: false)
 
-    TStepInfo(icon: "text.book.closed.fill",
-              title: "Diary & Lists",
-              body: "Rate or review any comic and it's automatically logged in your Diary, rereads included. Lists are curated collections or rankings — think \"Best Vertigo Runs\" — that don't need to be read in any particular order.",
-              spot: .sidebar, above: false),
+        case .diaryAndLists:
+            return TStepInfo(icon: "text.book.closed.fill",
+                title: "Diary & Lists",
+                body: "Rate or review any comic and it's automatically logged in your Diary, rereads included. Lists are curated collections or rankings — think \"Best Vertigo Runs\" — that don't need to be read in any particular order.",
+                spot: .sidebar, above: false)
 
-    TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
-              title: "Fixing Reading Order",
-              body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place — no editing files required.",
-              spot: nil, above: true),
+        case .readingOrder:
+            return TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
+                title: "Fixing Reading Order",
+                body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place — no editing files required.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "photo.on.rectangle.angled",
-              title: "Renaming Files & Covers",
-              body: "Settings → Fix Filenames can tidy up messy filenames automatically. And you're never stuck with the wrong cover — pick any page from the issue itself, or a custom image, right from its detail view.",
-              spot: nil, above: true),
+        case .renameAndCovers:
+            return TStepInfo(icon: "photo.on.rectangle.angled",
+                title: "Renaming Files & Covers",
+                body: "Settings → Fix Filenames can tidy up messy filenames automatically. And you're never stuck with the wrong cover — pick any page from the issue itself, or a custom image, right from its detail view.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "wrench.and.screwdriver.fill",
-              title: "The Toolbar",
-              body: "At the top of the window: Scan checks your library folder for new comics, Resync re-scans everything, Import adds files directly, the grid icon changes card size, the arrows sort your library, and the gear opens Settings.",
-              spot: nil, above: true),
+        case .toolbar:
+            return TStepInfo(icon: "wrench.and.screwdriver.fill",
+                title: "The Toolbar",
+                body: "At the top of the window: Scan checks your library folders for new comics, Resync re-scans everything, Import adds files directly, the grid icon changes card size, the arrows sort your library, and the gear opens Settings.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "checkmark.circle.fill",
-              title: "You're All Set",
-              body: "Press ? anytime in the reader to see all keyboard shortcuts. Enjoy your library!",
-              spot: nil, above: true),
-]
+        case .done:
+            return TStepInfo(icon: "checkmark.circle.fill",
+                title: "You're All Set",
+                body: "Press ? anytime in the reader to see all keyboard shortcuts. Enjoy your library!",
+                spot: nil, above: true)
+        }
+    }
+}
 
 private enum SpotRegion {
     case content
@@ -94,7 +114,7 @@ struct TutorialView: View {
     @State private var currentStep: TStep = .welcome
     @State private var transitioning = false
 
-    private var info: TStepInfo { steps[currentStep.rawValue] }
+    private var info: TStepInfo { currentStep.info }
     private var isFirst: Bool { currentStep == .welcome }
     private var isLast:  Bool { currentStep == .done }
 

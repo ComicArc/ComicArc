@@ -1,8 +1,20 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LibraryBrowserView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @FocusState private var focused: Bool
+    @AppStorage("gridDensity") private var densityRaw = GridDensity.regular.rawValue
+    @State private var gridWidth: CGFloat = 0
+
+    private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }
+    // Approximates LibraryGridView's `.adaptive(minimum: density.cardWidth, ...)` column count so
+    // Up/Down can jump by a row's worth of columns instead of behaving identically to Left/Right.
+    private var columnsPerRow: Int {
+        guard gridWidth > 0 else { return 1 }
+        let itemStride = density.cardWidth + density.spacing
+        return max(1, Int((gridWidth + density.spacing) / itemStride))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,6 +27,13 @@ struct LibraryBrowserView: View {
             case .issues:       LibraryGridView()
             }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { gridWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in gridWidth = w }
+            }
+        )
         .background(Design.appBackground)
         .focusable()
         .focused($focused)
@@ -29,19 +48,19 @@ struct LibraryBrowserView: View {
             }
             return .ignored
         }
-        .onKeyPress(.leftArrow)  { navigateGrid(forward: false) }
-        .onKeyPress(.upArrow)    { navigateGrid(forward: false) }
-        .onKeyPress(.rightArrow) { navigateGrid(forward: true) }
-        .onKeyPress(.downArrow)  { navigateGrid(forward: true) }
+        .onKeyPress(.leftArrow)  { navigateGrid(by: -1) }
+        .onKeyPress(.upArrow)    { navigateGrid(by: -columnsPerRow) }
+        .onKeyPress(.rightArrow) { navigateGrid(by: 1) }
+        .onKeyPress(.downArrow)  { navigateGrid(by: columnsPerRow) }
         .onAppear { focused = true }
     }
 
     @discardableResult
-    private func navigateGrid(forward: Bool) -> KeyPress.Result {
+    private func navigateGrid(by delta: Int) -> KeyPress.Result {
         guard vm.browseLevel == .issues, !vm.bulkMode, !vm.comics.isEmpty else { return .ignored }
         let comics = vm.comics
-        let idx = vm.selectedComic.flatMap { c in comics.firstIndex(where: { $0.id == c.id }) } ?? (forward ? -1 : 0)
-        let next = forward ? min(comics.count - 1, idx + 1) : max(0, idx - 1)
+        let idx = vm.selectedComic.flatMap { c in comics.firstIndex(where: { $0.id == c.id }) } ?? (delta > 0 ? -1 : 0)
+        let next = max(0, min(comics.count - 1, idx + delta))
         vm.selectedComic = comics[next]
         return .handled
     }
@@ -357,11 +376,11 @@ struct CharacterGroupGridView: View {
             Image(systemName: "books.vertical.fill")
                 .font(.system(size: 64)).foregroundStyle(.secondary)
             Text("No Comics").font(.title2.bold())
-            Text(vm.libraryPath.isEmpty
-                 ? "Set your library path in Settings"
+            Text(vm.libraryPaths.isEmpty
+                 ? "Set your library folder(s) in Settings"
                  : "Scan your library to get started")
                 .foregroundStyle(.secondary)
-            if !vm.libraryPath.isEmpty {
+            if !vm.libraryPaths.isEmpty {
                 Button("Scan Library") { vm.scan() }.buttonStyle(.borderedProminent)
             }
         }
@@ -464,7 +483,8 @@ struct CharacterGroupCard: View {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(group.groupName)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             if let url = urls.first { vm.setCharacterGroupCover(group: group, imageURL: url) }
         }
@@ -527,7 +547,8 @@ struct SeriesGroupCard: View {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(group.series)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             if let url = urls.first {
                 vm.setSeriesCoverImage(series: group.series, publisher: group.publisher, imageURL: url)
@@ -658,13 +679,13 @@ struct LibraryGridView: View {
                             comic: comic,
                             isSelected: vm.selectedComic?.id == comic.id,
                             onOpen: { vm.openReader(comic) },
+                            onSelect: {
+                                if vm.bulkMode { vm.toggleSelection(comic.id) }
+                                else           { vm.selectedComic = comic }
+                            },
                             cardWidth: density.cardWidth,
                             cardHeight: density.cardHeight
                         )
-                        .onTapGesture {
-                            if vm.bulkMode { vm.toggleSelection(comic.id) }
-                            else           { vm.selectedComic = comic }
-                        }
                         .onDrag {
 
                             draggedId = comic.id
@@ -753,7 +774,7 @@ struct LibraryGridView: View {
             if let tag = vm.activeTag        { return "No \"\(tag)\" Comics" }
             if let pub = vm.activePublisher  { return "No \(pub) Comics" }
             if !vm.searchText.isEmpty        { return "No Results" }
-            if vm.libraryPath.isEmpty        { return "Library Not Set Up" }
+            if vm.libraryPaths.isEmpty        { return "Library Not Set Up" }
             return "No Comics"
         }
     }
@@ -770,8 +791,8 @@ struct LibraryGridView: View {
             if let tag = vm.activeTag        { return "No comics are tagged \"\(tag)\"." }
             if let pub = vm.activePublisher  { return "No \(pub) comics found in your library." }
             if !vm.searchText.isEmpty        { return "Try a different search term or clear the search field." }
-            if vm.libraryPath.isEmpty        { return "Go to Settings to choose your comics folder." }
-            return "Drop CBZ, CBR, or PDF files here, or scan your library folder."
+            if vm.libraryPaths.isEmpty        { return "Go to Settings to choose your comics folder(s)." }
+            return "Drop CBZ, CBR, or PDF files here, or scan your library folders."
         }
     }
 
@@ -785,7 +806,7 @@ struct LibraryGridView: View {
             if vm.activeTag != nil || vm.activePublisher != nil || !vm.searchText.isEmpty {
                 Button("Clear Filter") { vm.clearAllFilters() }
                     .buttonStyle(.bordered)
-            } else if !vm.libraryPath.isEmpty {
+            } else if !vm.libraryPaths.isEmpty {
                 Button("Scan Library") { vm.scan() }
                     .buttonStyle(.borderedProminent)
             }

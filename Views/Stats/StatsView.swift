@@ -8,6 +8,8 @@ struct StatsView: View {
     @State private var issuesReadThisYear: Int = 0
     @State private var editingGoal = false
     @State private var goalDraft   = ""
+    @State private var showGoalInputError = false
+    @State private var showYearInReview = false
 
     private let gridColumns = [GridItem(.adaptive(minimum: 320, maximum: 480), spacing: 20, alignment: .top)]
 
@@ -40,17 +42,23 @@ struct StatsView: View {
         }
         .background(Design.appBackground)
         .task { await loadStats() }
+        .sheet(isPresented: $showYearInReview) { YearInReviewView() }
     }
 
     private var heading: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("YOUR STATS")
-                .font(.system(size: 30, weight: .black))
-                .foregroundStyle(Design.brandGold)
-                .kerning(2)
-            Text("Everything you've read, rated, and collected.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("YOUR STATS")
+                    .font(.system(size: 30, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                    .kerning(2)
+                Text("Everything you've read, rated, and collected.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Year in Review") { showYearInReview = true }
+                .buttonStyle(.bordered)
         }
         .padding(.horizontal, 24)
     }
@@ -187,9 +195,16 @@ struct StatsView: View {
                 if let n = Int(goalDraft), n > 0 {
                     goalCount = n
                     LibraryViewModel.shared.setReadingGoal(year: goalYear, count: n)
+                } else {
+                    showGoalInputError = true
                 }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .alert("Invalid Goal", isPresented: $showGoalInputError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Enter a whole number greater than 0.")
         }
     }
 
@@ -365,29 +380,45 @@ struct HeatmapView: View {
     let activityMap: [String: Int]
     let days: Int
 
+    // Computed once and cached in @State instead of being rebuilt (including a fresh
+    // Calendar/DateFormatter) on every single body evaluation -- SwiftUI re-evaluates body far
+    // more often than activityMap actually changes.
+    @State private var cells: [(date: String, count: Int)] = []
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     var body: some View {
         let cellSize: CGFloat = 12
         let gap:      CGFloat = 2
         let weeks     = 53
-        let allCells  = paddedCells(weeks: weeks)
         return LazyVGrid(
             columns: Array(repeating: GridItem(.fixed(cellSize), spacing: gap), count: weeks),
             spacing: gap
         ) {
-            ForEach(Array(allCells.enumerated()), id: \.offset) { _, cell in
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
                 RoundedRectangle(cornerRadius: 2)
                     .fill(cell.date.isEmpty ? Color.clear : cellColor(cell.count))
                     .frame(width: cellSize, height: cellSize)
                     .help(cell.count > 0 ? "\(cell.date): \(cell.count) sessions" : "")
+                    .accessibilityLabel(cell.date.isEmpty ? "" :
+                        "\(cell.date): \(cell.count) session\(cell.count == 1 ? "" : "s")")
             }
         }
+        .onAppear { recomputeCells() }
+        .onChange(of: activityMap) { _, _ in recomputeCells() }
     }
 
-    private func paddedCells(weeks: Int) -> [(date: String, count: Int)] {
+    private func recomputeCells() {
+        cells = Self.paddedCells(weeks: 53, activityMap: activityMap)
+    }
+
+    private static func paddedCells(weeks: Int, activityMap: [String: Int]) -> [(date: String, count: Int)] {
         let cal = Calendar(identifier: .gregorian)
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
 
         let today   = cal.startOfDay(for: Date())
         let weekday = cal.component(.weekday, from: today)
@@ -399,7 +430,7 @@ struct HeatmapView: View {
             for col in 0..<weeks {
                 let offset = startOffset + col * 7 + row
                 if let d = cal.date(byAdding: .day, value: offset, to: today), d <= today {
-                    let key = fmt.string(from: d)
+                    let key = dayKeyFormatter.string(from: d)
                     grid.append((key, activityMap[key] ?? 0))
                 } else {
                     grid.append(("", 0))

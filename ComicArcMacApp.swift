@@ -96,9 +96,7 @@ struct ComicArcApp: App {
     private var currentBuild: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
     }
-    private var needsOnboarding: Bool {
-        completedBuild.isEmpty && UserDefaults.standard.string(forKey: "libraryPath").flatMap { $0.isEmpty ? nil : $0 } == nil
-    }
+    private var needsOnboarding: Bool { OnboardingGate.isNeeded(completedBuild: completedBuild) }
 
     var body: some Scene {
         WindowGroup {
@@ -140,16 +138,16 @@ struct ComicArcApp: App {
             CommandMenu("Library") {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(vm.libraryPath.isEmpty || vm.isScanning || vm.isResyncing)
+                    .disabled(vm.libraryPaths.isEmpty || vm.isScanning || vm.isResyncing)
                 Button("Resync Library") { vm.resyncLibrary() }
                     .keyboardShortcut("r", modifiers: [.command, .shift, .option])
-                    .disabled(vm.libraryPath.isEmpty || vm.isResyncing || vm.isScanning)
+                    .disabled(vm.libraryPaths.isEmpty || vm.isResyncing || vm.isScanning)
                     .help("Rescans and re-derives metadata for every comic — use if reading order or metadata looks wrong")
                 Button("Import Files…") {
                     NotificationCenter.default.post(name: .triggerImport, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
-                .disabled(vm.libraryPath.isEmpty)
+                .disabled(vm.libraryPaths.isEmpty)
                 Divider()
                 Button("Rename Files to Match Library…") {
                     NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)
@@ -171,6 +169,8 @@ struct ComicArcApp: App {
                 Button("Lists")          { vm.select(.lists) }   .keyboardShortcut("7", modifiers: .command)
                 Button("Statistics")     { vm.select(.stats) }   .keyboardShortcut("8", modifiers: .command)
                 Button("History")        { vm.select(.history) } .keyboardShortcut("9", modifiers: .command)
+                Button("Tier Lists")      { vm.select(.tierLists) }      .keyboardShortcut("0", modifiers: .command)
+                Button("Favorite Moments") { vm.select(.favoriteMoments) }.keyboardShortcut("0", modifiers: [.command, .shift])
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }

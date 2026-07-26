@@ -98,6 +98,33 @@ struct ListItem: Identifiable {
     var notes: String
 }
 
+/// The fixed set of tier buckets a Tier List sorts comics into, in display order (best first).
+/// Fixed rather than user-customizable to keep the feature to the classic tier-list shape --
+/// still a real ranking tool without needing a whole tier-management UI.
+enum ComicTier: String, CaseIterable, Identifiable {
+    case s = "S", a = "A", b = "B", c = "C", d = "D", f = "F"
+    var id: String { rawValue }
+}
+
+struct TierList: Identifiable, Equatable, Hashable {
+    let id: Int64
+    var title: String
+    var description: String
+    var createdAt: String
+    var comicCount: Int = 0
+
+    // Explicit id-only equality, matching ComicList's override above -- see Run for why.
+    static func == (lhs: TierList, rhs: TierList) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+struct TierListItem: Identifiable {
+    let id: Int64
+    var comic: Comic
+    var tier: String
+    var position: Int
+}
+
 enum TagCategory: String, CaseIterable {
     case genre = "Genre", format = "Format", mood = "Mood", custom = "Custom"
 }
@@ -118,6 +145,15 @@ struct Bookmark: Identifiable {
     let page: Int
     let label: String
     let createdAt: String
+    var isFavorite: Bool = false
+}
+
+/// A bookmark flagged as a "favorite moment" -- worth revisiting on its own, browsable across the
+/// whole library rather than only from within that one comic's own bookmark list.
+struct FavoriteMoment: Identifiable {
+    let bookmark: Bookmark
+    let comic: Comic
+    var id: Int64 { bookmark.id }
 }
 
 struct HistoryEntry: Identifiable {

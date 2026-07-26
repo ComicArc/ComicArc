@@ -1,7 +1,7 @@
 import Foundation
 
 enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
-    case runs, diary, lists, stats, history, duplicates, readingOrderManager
+    case runs, diary, lists, tierLists, favoriteMoments, stats, history, duplicates, readingOrderManager, metadataConflicts
 
     var id: String { rawValue }
 
@@ -10,10 +10,13 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
         case .runs:               return "Reading Paths"
         case .diary:               return "Diary"
         case .lists:               return "Lists"
+        case .tierLists:           return "Tier Lists"
+        case .favoriteMoments:     return "Favorite Moments"
         case .stats:               return "Statistics"
         case .history:             return "History"
         case .duplicates:          return "Possible Duplicates"
         case .readingOrderManager: return "Reading Order Suggestions"
+        case .metadataConflicts:   return "Needs Review"
         }
     }
 
@@ -22,10 +25,13 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
         case .runs:               return "list.bullet.rectangle.portrait.fill"
         case .diary:               return "text.book.closed.fill"
         case .lists:               return "trophy.fill"
+        case .tierLists:           return "square.stack.3d.up.fill"
+        case .favoriteMoments:     return "star.circle.fill"
         case .stats:               return "chart.bar.xaxis"
         case .history:             return "clock.fill"
         case .duplicates:          return "doc.on.doc"
         case .readingOrderManager: return "checkmark.seal"
+        case .metadataConflicts:   return "exclamationmark.triangle"
         }
     }
 
@@ -34,10 +40,13 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
         case .runs:               return .runs
         case .diary:               return .diary
         case .lists:               return .lists
+        case .tierLists:           return .tierLists
+        case .favoriteMoments:     return .favoriteMoments
         case .stats:               return .stats
         case .history:             return .history
         case .duplicates:          return .duplicates
         case .readingOrderManager: return .readingOrderManager
+        case .metadataConflicts:   return .metadataConflicts
         }
     }
 }

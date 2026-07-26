@@ -1,9 +1,25 @@
 import SwiftUI
 
 struct ReadingHistoryView: View {
+    @EnvironmentObject var vm: LibraryViewModel
     @State private var history: [HistoryEntry] = []
-    @State private var grouped: [(date: String, entries: [HistoryEntry])] = []
     @State private var isLoading = true
+
+    private var filteredHistory: [HistoryEntry] {
+        guard !vm.searchText.isEmpty else { return history }
+        let q = vm.searchText.lowercased()
+        return history.filter {
+            $0.title.lowercased().contains(q) ||
+            $0.series.lowercased().contains(q) ||
+            $0.publisher.lowercased().contains(q)
+        }
+    }
+
+    private var grouped: [(date: String, entries: [HistoryEntry])] {
+        Dictionary(grouping: filteredHistory) { Self.localDayKey(from: $0.readAt) }
+            .sorted { $0.key > $1.key }
+            .map { (date: $0.key, entries: $0.value) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -26,6 +42,14 @@ struct ReadingHistoryView: View {
                         .foregroundStyle(.secondary)
                     Text("Open a comic in the reader to start tracking.")
                         .font(.caption).foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filteredHistory.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 48)).foregroundStyle(.quaternary)
+                    Text("No matching history.")
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -95,28 +119,51 @@ struct ReadingHistoryView: View {
 
     private func load() async {
         isLoading = true
-        let (h, g) = await Task.detached(priority: .userInitiated) {
-            let rows = DatabaseManager.shared.readingHistory(limit: 500)
-            let grp  = Dictionary(grouping: rows) { String($0.readAt.prefix(10)) }
-                .sorted { $0.key > $1.key }
-                .map { (date: $0.key, entries: $0.value) }
-            return (rows, grp)
+        history = await Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.readingHistory(limit: 500)
         }.value
-        history = h; grouped = g; isLoading = false
+        isLoading = false
+    }
+
+    // Explicitly `nonisolated` -- see the identical note in DiaryView.swift: `localDayKey` is
+    // called from inside the Task.detached in load() above, and without `nonisolated` these
+    // static members are inferred MainActor-isolated like the rest of this View type, which the
+    // compiler flags as a real isolation violation when called from that background context.
+    nonisolated private static let utcParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    nonisolated private static let localDayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static let localTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    nonisolated private static func localDayKey(from iso: String) -> String {
+        guard let d = utcParser.date(from: iso) else { return String(iso.prefix(10)) }
+        return localDayKeyFormatter.string(from: d)
     }
 
     private func formattedGroupDate(_ iso: String) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        guard let d = fmt.date(from: iso) else { return iso }
+        guard let d = Self.localDayKeyFormatter.date(from: iso) else { return iso }
         let out = DateFormatter()
         out.dateStyle = .full
         return out.string(from: d).uppercased()
     }
 
     private func shortTime(_ iso: String) -> String {
-        guard iso.count >= 16 else { return "" }
-        return String(iso.dropFirst(11).prefix(5))
+        guard let d = Self.utcParser.date(from: iso) else { return "" }
+        return Self.localTimeFormatter.string(from: d)
     }
 }

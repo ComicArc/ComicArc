@@ -10,9 +10,7 @@ struct ComicArcIPadApp: App {
     private let fileService   = makePlatformFileService()
     private let windowService = makePlatformWindowService()
 
-    private var needsOnboarding: Bool {
-        completedBuild.isEmpty && UserDefaults.standard.string(forKey: "libraryPath").flatMap { $0.isEmpty ? nil : $0 } == nil
-    }
+    private var needsOnboarding: Bool { OnboardingGate.isNeeded(completedBuild: completedBuild) }
 
     var body: some Scene {
         WindowGroup {
@@ -31,7 +29,7 @@ struct ComicArcIPadApp: App {
                 .environment(\.windowService, windowService)
                 .onChange(of: scenePhase) { _, phase in
 
-                    if phase == .active, !vm.libraryPath.isEmpty { vm.scan() }
+                    if phase == .active, !vm.libraryPaths.isEmpty { vm.scan() }
 
                     if phase == .background { DatabaseManager.shared.checkpoint() }
                 }
@@ -42,7 +40,7 @@ struct ComicArcIPadApp: App {
             CommandMenu("Library") {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(vm.libraryPath.isEmpty)
+                    .disabled(vm.libraryPaths.isEmpty)
                 Divider()
                 Button("Rename Files to Match Library…") {
                     NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)
@@ -61,6 +59,8 @@ struct ComicArcIPadApp: App {
                 Button("Lists")            { vm.select(.lists) }           .keyboardShortcut("7", modifiers: .command)
                 Button("Statistics")       { vm.select(.stats) }           .keyboardShortcut("8", modifiers: .command)
                 Button("History")          { vm.select(.history) }         .keyboardShortcut("9", modifiers: .command)
+                Button("Tier Lists")       { vm.select(.tierLists) }       .keyboardShortcut("0", modifiers: .command)
+                Button("Favorite Moments") { vm.select(.favoriteMoments) } .keyboardShortcut("0", modifiers: [.command, .shift])
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }

@@ -1,11 +1,13 @@
 #if os(macOS)
 import AppKit
+import UniformTypeIdentifiers
 
 struct MacFileService: FileServiceProtocol {
     func pickFiles(
         allowsMultiple: Bool,
         message: String,
         prompt: String,
+        contentTypes: [UTType],
         completion: @escaping ([URL]) -> Void
     ) {
         let panel = NSOpenPanel()
@@ -14,6 +16,7 @@ struct MacFileService: FileServiceProtocol {
         panel.allowsMultipleSelection = allowsMultiple
         panel.message = message
         panel.prompt = prompt
+        if !contentTypes.isEmpty { panel.allowedContentTypes = contentTypes }
         if panel.runModal() == .OK { completion(panel.urls) } else { completion([]) }
     }
 

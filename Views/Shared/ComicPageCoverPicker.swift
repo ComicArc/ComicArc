@@ -65,7 +65,10 @@ private struct CoverPickerPageCell: View {
         .buttonStyle(.plain)
         .disabled(image == nil)
         .task(id: index) {
-            PageCache.shared.load(comic: comic, page: index) { image = $0 }
+            // Same rationale as the reader filmstrip: a grid of every page in the comic would
+            // otherwise decode full-resolution pages through the shared reading-page cache,
+            // evicting real reading pages for a picker that only needs small thumbnails.
+            PageThumbnailCache.shared.thumbnail(comic: comic, page: index) { image = $0 }
         }
     }
 }

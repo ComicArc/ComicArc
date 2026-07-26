@@ -99,6 +99,10 @@ struct iPadReaderView: View {
         .gesture(dragGesture)
         .onChange(of: currentPage) { _, _ in
             withAnimation(.easeOut(duration: 0.15)) { scale = 1; offset = .zero }
+            // Reset the gesture baselines too, not just the animated scale/offset -- otherwise
+            // zooming on this page, then swiping to the next page without zooming back out,
+            // leaves the next pinch/drag starting from the *previous* page's zoomed baseline.
+            lastScale = 1; lastOffset = .zero
             scheduleHide()
         }
     }
@@ -193,6 +197,7 @@ struct iPadReaderView: View {
                             iPadFilmstripThumb(comic: comic, index: idx, isCurrent: idx == currentPage)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Page \(idx + 1)")
                         .id(idx)
                     }
                 }
@@ -270,7 +275,7 @@ struct iPadReaderView: View {
             Slider(
                 value: Binding(
                     get: { Double(currentPage) },
-                    set: { currentPage = Int($0) }
+                    set: { currentPage = Int($0.rounded()) }
                 ),
                 in: 0...max(1, Double(pageCount - 1)),
                 step: 1
@@ -308,17 +313,16 @@ struct iPadReaderView: View {
         guard autoplay, !scrollMode else { return }
         let steps = 60
         for i in 0..<steps {
-            guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
+            guard autoplay, !Task.isCancelled else { await MainActor.run { countdownProgress = 0 }; return }
             await MainActor.run { countdownProgress = Double(i) / Double(steps) }
             do {
                 try await Task.sleep(for: .milliseconds(Int(autoplaySpeed * 1000) / steps))
             } catch {
-
-                countdownProgress = 0
+                await MainActor.run { countdownProgress = 0 }
                 return
             }
         }
-        guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
+        guard autoplay, !Task.isCancelled else { await MainActor.run { countdownProgress = 0 }; return }
         await MainActor.run {
             countdownProgress = 0
             if currentPage < pageCount - 1 { currentPage += 1 }
@@ -331,6 +335,7 @@ private struct ReaderPageView: View {
     let comic: Comic
     let pageIndex: Int
     @State private var image: PlatformImage?
+    @State private var loadFailed = false
 
     var body: some View {
         GeometryReader { geo in
@@ -340,6 +345,10 @@ private struct ReaderPageView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: geo.size.width, height: geo.size.height)
+                } else if loadFailed {
+                    Color.black
+                        .overlay(Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.secondary))
+                        .frame(width: geo.size.width, height: geo.size.height)
                 } else {
                     Color.black
                         .overlay(ProgressView().tint(.white))
@@ -348,7 +357,9 @@ private struct ReaderPageView: View {
             }
         }
         .task {
-            PageCache.shared.load(comic: comic, page: pageIndex) { img in image = img }
+            PageCache.shared.load(comic: comic, page: pageIndex) { img in
+                if let img { image = img } else { loadFailed = true }
+            }
         }
     }
 }
@@ -374,7 +385,7 @@ private struct iPadFilmstripThumb: View {
                 .stroke(isCurrent ? Design.brandGold : Color.white.opacity(0.15), lineWidth: isCurrent ? 2 : 1)
         )
         .task(id: index) {
-            PageCache.shared.load(comic: comic, page: index) { image = $0 }
+            PageThumbnailCache.shared.thumbnail(comic: comic, page: index) { image = $0 }
         }
     }
 }

@@ -4,8 +4,10 @@ extension Notification.Name {
 }
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RunsListView: View {
+    @EnvironmentObject var vm: LibraryViewModel
     @Binding var selectedRun: Run?
     @State private var runs:          [Run]   = []
     @State private var isLoading      = true
@@ -14,6 +16,15 @@ struct RunsListView: View {
     @State private var newRunDesc     = ""
     @State private var draggedRunId:  Int64?
     @State private var dropTargetRunId: Int64?
+
+    // Filters the rendered list only -- reordering (drag-and-drop, Move Up/Down/Top/Bottom)
+    // still looks rows up by id in the full `runs` array below, so a search doesn't corrupt
+    // the real underlying order, it just narrows what's currently visible.
+    private var filteredRuns: [Run] {
+        guard !vm.searchText.isEmpty else { return runs }
+        let q = vm.searchText.lowercased()
+        return runs.filter { $0.title.lowercased().contains(q) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,10 +64,17 @@ struct RunsListView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(20)
+            } else if filteredRuns.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 42)).foregroundStyle(.quaternary)
+                    Text("No matching reading paths.").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(runs) { run in
+                        ForEach(filteredRuns) { run in
                             let isTarget = dropTargetRunId == run.id && draggedRunId != run.id
                             RunListCard(
                                 run: run,
@@ -274,7 +292,8 @@ struct RunListCard: View {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(run.title)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             if let url = urls.first {
                 LibraryViewModel.shared.setRunCover(runId: run.id, imageURL: url)
@@ -459,7 +478,7 @@ struct RunDetailView: View {
                     .help("Rate & Review")
 
                     Button(role: .destructive) {
-                        LibraryViewModel.shared.deleteRunWithUndo(run)
+                        LibraryViewModel.shared.deleteRunWithUndo(currentRun)
                         onDelete()
                     } label: {
                         Text("Delete Run")
@@ -475,7 +494,11 @@ struct RunDetailView: View {
 
     private var reviewSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Rate & Review: \(run.title)")
+            // Reads `currentRun` (the synced @State copy), not the immutable `run` init
+            // parameter -- otherwise this sheet keeps showing the pre-edit title/buy link after
+            // EditRunView updates currentRun, since `run` itself never changes for this view's
+            // lifetime.
+            Text("Rate & Review: \(currentRun.title)")
                 .font(.title2.bold())
 
             Text("Rating").font(.headline)
@@ -489,7 +512,7 @@ struct RunDetailView: View {
                 .frame(minHeight: 120)
                 .border(Design.borderColor)
 
-            if let link = run.buyLink {
+            if let link = currentRun.buyLink {
                 HStack {
                     Text("Buy Link:").foregroundStyle(.secondary).font(.caption)
                     Text(link).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -500,7 +523,7 @@ struct RunDetailView: View {
                 Button("Cancel") { showReviewSheet = false }.keyboardShortcut(.escape)
                 Spacer()
                 Button("Save") {
-                    LibraryViewModel.shared.setRunRating(run.id,
+                    LibraryViewModel.shared.setRunRating(currentRun.id,
                                                         rating: runRating,
                                                         review: reviewText.isEmpty ? nil : reviewText)
                     showReviewSheet = false

@@ -49,6 +49,7 @@ struct CoverPickerSheet: View {
     @State private var searchText = ""
     @State private var results: [Comic] = []
     @State private var isLoading = true
+    @State private var searchGeneration = 0
 
     private let columns = [GridItem(.adaptive(minimum: 108, maximum: 130), spacing: 12)]
 
@@ -99,10 +100,20 @@ struct CoverPickerSheet: View {
     private func load() {
         isLoading = true
         let query = searchText
-        Task.detached(priority: .userInitiated) {
-            let comics = DatabaseManager.shared.allComics(search: query.isEmpty ? nil : query, sortOrder: .title)
-            let limited = Array(comics.prefix(300))
-            await MainActor.run { results = limited; isLoading = false }
+        searchGeneration += 1
+        let gen = searchGeneration
+        // Debounced and generation-guarded: without this, every keystroke fires its own
+        // detached query with no ordering guarantee, so a slow early query completing after a
+        // faster later one would overwrite the correct, more recent results with stale ones.
+        Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard gen == searchGeneration else { return }
+            let comics = await Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.allComics(search: query.isEmpty ? nil : query, sortOrder: .title)
+            }.value
+            guard gen == searchGeneration else { return }
+            results = Array(comics.prefix(300))
+            isLoading = false
         }
     }
 }

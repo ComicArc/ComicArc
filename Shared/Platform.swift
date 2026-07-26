@@ -101,3 +101,13 @@ extension Image {
         #endif
     }
 }
+
+enum OnboardingGate {
+    /// Shared between the Mac and iPad app entry points -- previously duplicated verbatim in
+    /// both ComicArcMacApp.swift and ComicArcIPadApp.swift. Uses `readMigrating()` (not a raw
+    /// key read) so an existing install's pre-multi-folder single library path still counts as
+    /// "already configured" and never re-triggers onboarding after this update.
+    static func isNeeded(completedBuild: String) -> Bool {
+        completedBuild.isEmpty && LibraryFolders.readMigrating().isEmpty
+    }
+}

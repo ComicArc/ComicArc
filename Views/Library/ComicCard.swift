@@ -4,6 +4,7 @@ struct ComicCard: View {
     let comic:      Comic
     let isSelected: Bool
     let onOpen:     () -> Void
+    var onSelect:   () -> Void = {}
     var cardWidth:  CGFloat = Design.cardWidth
     var cardHeight: CGFloat = Design.cardHeight
 
@@ -76,10 +77,16 @@ struct ComicCard: View {
                 .frame(width: cardWidth + 5, height: cardHeight + 5)
         )
         .onHover { isHovered = $0 }
+        // Both tap counts attached at the same view level via `.exclusively(before:)` instead of
+        // splitting single-tap (attached by the caller, outside this view) from double-tap
+        // (attached in here) across two different nodes in the hierarchy -- two independently
+        // attached recognizers at different levels is fragile in SwiftUI's gesture arbitration
+        // and can swallow the double-tap before it ever resolves.
         .gesture(
             TapGesture(count: 2).onEnded {
                 if !vm.bulkMode { onOpen() }
             }
+            .exclusively(before: TapGesture(count: 1).onEnded { onSelect() })
         )
         .contextMenu { contextMenu }
         .sheet(isPresented: $showMetadataInspector) { MetadataInspectorView(comicId: comic.id) }
@@ -90,7 +97,7 @@ struct ComicCard: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Open") { if !vm.bulkMode { onOpen() } }
         .accessibilityAction(named: comic.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
-            LibraryViewModel.shared.toggleFavorite(comic)
+            vm.toggleFavorite(comic)
         }
     }
 
@@ -145,23 +152,23 @@ struct ComicCard: View {
             Divider()
 
             Button(comic.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
-                LibraryViewModel.shared.toggleFavorite(comic)
+                vm.toggleFavorite(comic)
             }
             Button(comic.inReadingList ? "Remove from Reading List" : "Add to Reading List") {
-                LibraryViewModel.shared.toggleReadingList(comic)
+                vm.toggleReadingList(comic)
             }
 
             Divider()
 
             if comic.isFinished {
-                Button("Mark as Unread") { LibraryViewModel.shared.markUnread(comic) }
+                Button("Mark as Unread") { vm.markUnread(comic) }
             } else {
-                Button("Mark as Read")   { LibraryViewModel.shared.markRead(comic) }
+                Button("Mark as Read")   { vm.markRead(comic) }
             }
 
             Divider()
 
-            Button("Set as Series Cover") { LibraryViewModel.shared.setSeriesCover(comic) }
+            Button("Set as Series Cover") { vm.setSeriesCover(comic) }
             Button("Select Multiple")     { vm.toggleBulkMode() }
             Button("Metadata Inspector…") { showMetadataInspector = true }
 
@@ -176,7 +183,7 @@ struct ComicCard: View {
 
             Divider()
 
-            Button("Delete", role: .destructive) { LibraryViewModel.shared.delete([comic]) }
+            Button("Delete", role: .destructive) { vm.delete([comic]) }
         }
     }
 

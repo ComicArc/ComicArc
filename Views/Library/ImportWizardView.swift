@@ -1,12 +1,19 @@
 import SwiftUI
 
 struct ImportWizardView: View {
-    let report: LibraryHealthReport
+    // @State (seeded from the initializer) instead of `let` so the sheet's own sections/counts
+    // can be refreshed after a "Fix Automatically" action -- otherwise the button just flashes
+    // "Fixing..." and reverts with no way to tell whether anything actually changed.
+    @State private var report: LibraryHealthReport
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var vm: LibraryViewModel
     @State private var isRepositioning = false
     @State private var showRenameFiles = false
     @State private var isBreakingCycles = false
+
+    init(report: LibraryHealthReport) {
+        _report = State(initialValue: report)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -183,8 +190,10 @@ struct ImportWizardView: View {
         Task.detached(priority: .userInitiated) {
             DatabaseManager.shared.positionSpecialsChronologically()
             DatabaseManager.shared.recomputeReadingOrder(affectedGroupKeys: keys)
+            let refreshed = LibraryHealthAnalyzer.analyze()
             await MainActor.run {
                 isRepositioning = false
+                report = refreshed
                 vm.reload()
                 vm.refreshLibraryHealth()
             }
@@ -196,8 +205,10 @@ struct ImportWizardView: View {
         Task.detached(priority: .userInitiated) {
             DatabaseManager.shared.breakSeriesLinkCycles()
             DatabaseManager.shared.recomputeReadingOrder()
+            let refreshed = LibraryHealthAnalyzer.analyze()
             await MainActor.run {
                 isBreakingCycles = false
+                report = refreshed
                 vm.reload()
                 vm.refreshLibraryHealth()
             }

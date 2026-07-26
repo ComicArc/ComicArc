@@ -7,6 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		08DECB7533ECEE0C1073CF11 /* FavoriteMomentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B777CED3A2DD08D46C5B6C /* FavoriteMomentTests.swift */; };
+		48E504804A69D63625CEC92B /* LibraryFoldersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CFDD96FDE0B47A67F224E15 /* LibraryFoldersTests.swift */; };
+		53B5D8675D5E68885B7232DB /* TierListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEEFD8707CDC81989CC224BD /* TierListsView.swift */; };
+		70DDD120E87777137746DE2C /* LibraryFolders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0DC295A4864D99A4AC71B63 /* LibraryFolders.swift */; };
+		7F8AB581EC6882ED9029B1CD /* FavoriteMomentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0FED25D57102A744BB2BD /* FavoriteMomentsView.swift */; };
+		81BC48B4E8B3D416855809E5 /* PageThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82780A472F50D244793ADA4A /* PageThumbnailCache.swift */; };
+		9969D34ECD66673444E22746 /* YearInReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444B867BC6E5AD7AE1F7EDB2 /* YearInReviewView.swift */; };
+		9ADC024409F536D30B87B63C /* YearInReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444B867BC6E5AD7AE1F7EDB2 /* YearInReviewView.swift */; };
+		A79AF1C1D9F880F4E4506575 /* GCDMatchPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A43A8384FDA1E2FA28C37BE /* GCDMatchPickerView.swift */; };
 		B00000000000000000000001 /* ComicArcMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001 /* ComicArcMacApp.swift */; };
 		B00000000000000000000002 /* Comic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Comic.swift */; };
 		B00000000000000000000003 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* DatabaseManager.swift */; };
@@ -19,57 +28,75 @@
 		B0000000000000000000000A /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* Design.swift */; };
 		B0000000000000000000000B /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000B /* LibraryView.swift */; };
 		B0000000000000000000000C /* ComicCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000C /* ComicCard.swift */; };
-
+		B0000000000000000000000D /* BulkReassignView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* BulkReassignView.swift */; };
 		B0000000000000000000000E /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000E /* ReaderView.swift */; };
 		B0000000000000000000000F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000F /* SettingsView.swift */; };
-		B00000000000000000000061 /* RenameFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* RenameFilesView.swift */; };
 		B00000000000000000000010 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
 		B00000000000000000000011 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
-		D10000000000000000000009 /* ListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000007 /* ListsView.swift */; };
+		B00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
+		B00000000000000000000013 /* icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* icon.icns */; };
 		B00000000000000000000020 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		B00000000000000000000021 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
-		D10000000000000000000003 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
-		D10000000000000000000011 /* AllTagsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000F /* AllTagsView.swift */; };
 		B00000000000000000000023 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		B00000000000000000000024 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		B00000000000000000000025 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
+		B00000000000000000000026 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* PrivacyInfo.xcprivacy */; };
 		B00000000000000000000030 /* DuplicatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000030 /* DuplicatesView.swift */; };
 		B00000000000000000000040 /* ComicSortClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000040 /* ComicSortClassifier.swift */; };
 		B00000000000000000000050 /* SidebarCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* SidebarCustomization.swift */; };
 		B00000000000000000000060 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060 /* AppTheme.swift */; };
+		B00000000000000000000061 /* RenameFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* RenameFilesView.swift */; };
 		B00000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
 		B00000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* LibraryHealthAnalyzer.swift */; };
 		B00000000000000000000065 /* ImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000065 /* ImportWizardView.swift */; };
+		B00000000000000000000066 /* SeriesLinkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000066 /* SeriesLinkPickerView.swift */; };
 		B00000000000000000000067 /* ReadingOrderManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000067 /* ReadingOrderManagerView.swift */; };
 		B00000000000000000000068 /* MetadataInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000068 /* MetadataInspectorView.swift */; };
-		B00000000000000000000066 /* SeriesLinkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000066 /* SeriesLinkPickerView.swift */; };
+		B00000000000000000000069 /* MetadataConflict.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000069 /* MetadataConflict.swift */; };
+		B0000000000000000000006A /* ComicIdentityResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006A /* ComicIdentityResolver.swift */; };
+		B0000000000000000000006B /* SeriesContinuity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B /* SeriesContinuity.swift */; };
+		B0000000000000000000006C /* MetadataConflictsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C /* MetadataConflictsView.swift */; };
 		B10000000000000000000001 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
 		B10000000000000000000002 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
 		B10000000000000000000003 /* iPadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* iPadReaderView.swift */; };
-		B0000000000000000000000D /* ComicDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* ComicDetailView.swift */; };
 		B10000000000000000000010 /* PlatformServiceProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* PlatformServiceProtocols.swift */; };
 		B10000000000000000000011 /* EnvironmentServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* EnvironmentServices.swift */; };
 		B10000000000000000000012 /* MacPlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* MacPlatformServices.swift */; };
-		IB0000000000000000000031 /* IOSPlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* IOSPlatformServices.swift */; };
-		B10000000000000000000031 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* BackupService.swift */; };
-		B10000000000000000000033 /* OfflineMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* OfflineMetadataStore.swift */; };
-		B10000000000000000000034 /* GCDDatabaseDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* GCDDatabaseDownloader.swift */; };
-		IB0000000000000000000032 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* BackupService.swift */; };
-		IB0000000000000000000033 /* OfflineMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* OfflineMetadataStore.swift */; };
-		IB0000000000000000000034 /* GCDDatabaseDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* GCDDatabaseDownloader.swift */; };
 		B10000000000000000000013 /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
 		B10000000000000000000014 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
+		B10000000000000000000031 /* BackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* BackupService.swift */; };
 		B10000000000000000000032 /* ComicPageCoverPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* ComicPageCoverPicker.swift */; };
+		B10000000000000000000033 /* OfflineMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* OfflineMetadataStore.swift */; };
+		B10000000000000000000034 /* GCDDatabaseDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* GCDDatabaseDownloader.swift */; };
+		BD5ECA93E767BA41E0BA4304 /* TierListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEEFD8707CDC81989CC224BD /* TierListsView.swift */; };
+		C60F11CA20411F48460506B6 /* LibraryFolders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0DC295A4864D99A4AC71B63 /* LibraryFolders.swift */; };
+		C732EEB3C48A0FA0FBA7F634 /* GCDMatchPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A43A8384FDA1E2FA28C37BE /* GCDMatchPickerView.swift */; };
+		C762B3EBF752D9ADAC95B822 /* TierListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0296BC977F13C069A058148 /* TierListTests.swift */; };
+		D10000000000000000000003 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
+		D10000000000000000000004 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
+		D10000000000000000000006 /* DiaryEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000005 /* DiaryEntryTests.swift */; };
+		D10000000000000000000009 /* ListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000007 /* ListsView.swift */; };
+		D1000000000000000000000A /* ListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000007 /* ListsView.swift */; };
+		D1000000000000000000000C /* ComicListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000B /* ComicListTests.swift */; };
+		D1000000000000000000000E /* SortOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000D /* SortOrderTests.swift */; };
+		D10000000000000000000011 /* AllTagsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000F /* AllTagsView.swift */; };
+		D10000000000000000000012 /* AllTagsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000F /* AllTagsView.swift */; };
+		D10000000000000000000014 /* TagCategoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000013 /* TagCategoryTests.swift */; };
+		D1000000000000000000001C /* ComicRevivalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000001B /* ComicRevivalTests.swift */; };
+		E00000000000000000000003 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000002 /* ZIPFoundation */; };
+		E00000000000000000000022 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000021 /* Sparkle */; };
+		EFBB28F9C59BCE7DF1A98BB4 /* FavoriteMomentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A0FED25D57102A744BB2BD /* FavoriteMomentsView.swift */; };
+		F070DF5569E24F7FF41CDB06 /* YearInReviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704924DAEF0D0F316096BA69 /* YearInReviewTests.swift */; };
+		F08C09BB7A00B2B6B8544661 /* PageThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82780A472F50D244793ADA4A /* PageThumbnailCache.swift */; };
 		F10000000000000000000001 /* ComicArcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* ComicArcTests.swift */; };
 		F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* ReadingOrderEngineTests.swift */; };
 		F10000000000000000000010 /* OfflineMetadataStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000F /* OfflineMetadataStoreTests.swift */; };
-		D10000000000000000000006 /* DiaryEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000005 /* DiaryEntryTests.swift */; };
-		D1000000000000000000000C /* ComicListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000B /* ComicListTests.swift */; };
-		D1000000000000000000000E /* SortOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000D /* SortOrderTests.swift */; };
-		D10000000000000000000014 /* TagCategoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000013 /* TagCategoryTests.swift */; };
-		D1000000000000000000001C /* ComicRevivalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000001B /* ComicRevivalTests.swift */; };
-		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
-		IP000000000000000000000C /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = IP000000000000000000000B /* ZIPFoundation */; };
+		F10000000000000000000011 /* LibraryScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000012 /* LibraryScannerTests.swift */; };
+		F10000000000000000000013 /* DatabaseTestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000014 /* DatabaseTestFixture.swift */; };
+		F10000000000000000000015 /* MetadataConflictTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000016 /* MetadataConflictTests.swift */; };
+		F10000000000000000000017 /* ComicIdentityResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000018 /* ComicIdentityResolverTests.swift */; };
+		F10000000000000000000019 /* SeriesContinuityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000001A /* SeriesContinuityTests.swift */; };
+		F1000000000000000000001B /* RenameReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000001C /* RenameReportTests.swift */; };
 		IB0000000000000000000001 /* Comic.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Comic.swift */; };
 		IB0000000000000000000002 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* DatabaseManager.swift */; };
 		IB0000000000000000000003 /* LibraryScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* LibraryScanner.swift */; };
@@ -81,30 +108,16 @@
 		IB0000000000000000000009 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000A /* Design.swift */; };
 		IB000000000000000000000A /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000B /* LibraryView.swift */; };
 		IB000000000000000000000B /* ComicCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000C /* ComicCard.swift */; };
-		IB000000000000000000000C /* ComicDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* ComicDetailView.swift */; };
+		IB000000000000000000000C /* BulkReassignView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000D /* BulkReassignView.swift */; };
 		IB000000000000000000000D /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000E /* ReaderView.swift */; };
 		IB000000000000000000000E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000F /* SettingsView.swift */; };
-		IB0000000000000000000061 /* RenameFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* RenameFilesView.swift */; };
 		IB000000000000000000000F /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
 		IB0000000000000000000010 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
-		D1000000000000000000000A /* ListsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000007 /* ListsView.swift */; };
 		IB0000000000000000000011 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		IB0000000000000000000012 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
-		D10000000000000000000004 /* DiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* DiaryView.swift */; };
-		D10000000000000000000012 /* AllTagsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1000000000000000000000F /* AllTagsView.swift */; };
 		IB0000000000000000000014 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
 		IB0000000000000000000015 /* SeriesManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* SeriesManagerView.swift */; };
 		IB0000000000000000000016 /* TutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TutorialView.swift */; };
-		IB0000000000000000000030 /* DuplicatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000030 /* DuplicatesView.swift */; };
-		IB0000000000000000000040 /* ComicSortClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000040 /* ComicSortClassifier.swift */; };
-		IB0000000000000000000050 /* SidebarCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* SidebarCustomization.swift */; };
-		IB0000000000000000000060 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060 /* AppTheme.swift */; };
-		IB0000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
-		IB0000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* LibraryHealthAnalyzer.swift */; };
-		IB0000000000000000000065 /* ImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000065 /* ImportWizardView.swift */; };
-		IB0000000000000000000067 /* ReadingOrderManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000067 /* ReadingOrderManagerView.swift */; };
-		IB0000000000000000000068 /* MetadataInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000068 /* MetadataInspectorView.swift */; };
-		IB0000000000000000000066 /* SeriesLinkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000066 /* SeriesLinkPickerView.swift */; };
 		IB0000000000000000000017 /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* Platform.swift */; };
 		IB0000000000000000000018 /* iPadRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* iPadRootView.swift */; };
 		IB0000000000000000000019 /* iPadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* iPadReaderView.swift */; };
@@ -112,13 +125,29 @@
 		IB000000000000000000001B /* EnvironmentServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* EnvironmentServices.swift */; };
 		IB000000000000000000001C /* ReadingSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* ReadingSessionService.swift */; };
 		IB000000000000000000001D /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SharedComponents.swift */; };
-		IB0000000000000000000032 /* ComicPageCoverPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* ComicPageCoverPicker.swift */; };
 		IB000000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
 		IB000000000000000000001F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* PrivacyInfo.xcprivacy */; };
-		B00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
-		B00000000000000000000013 /* icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* icon.icns */; };
-		E00000000000000000000003 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000002 /* ZIPFoundation */; };
-		E00000000000000000000022 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E00000000000000000000021 /* Sparkle */; };
+		IB0000000000000000000030 /* DuplicatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000030 /* DuplicatesView.swift */; };
+		IB0000000000000000000031 /* IOSPlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* IOSPlatformServices.swift */; };
+		IB0000000000000000000032 /* ComicPageCoverPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* ComicPageCoverPicker.swift */; };
+		IB0000000000000000000033 /* OfflineMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* OfflineMetadataStore.swift */; };
+		IB0000000000000000000034 /* GCDDatabaseDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* GCDDatabaseDownloader.swift */; };
+		IB0000000000000000000040 /* ComicSortClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000040 /* ComicSortClassifier.swift */; };
+		IB0000000000000000000050 /* SidebarCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* SidebarCustomization.swift */; };
+		IB0000000000000000000060 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060 /* AppTheme.swift */; };
+		IB0000000000000000000061 /* RenameFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* RenameFilesView.swift */; };
+		IB0000000000000000000062 /* ReadingOrderEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* ReadingOrderEngine.swift */; };
+		IB0000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* LibraryHealthAnalyzer.swift */; };
+		IB0000000000000000000065 /* ImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000065 /* ImportWizardView.swift */; };
+		IB0000000000000000000066 /* SeriesLinkPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000066 /* SeriesLinkPickerView.swift */; };
+		IB0000000000000000000067 /* ReadingOrderManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000067 /* ReadingOrderManagerView.swift */; };
+		IB0000000000000000000068 /* MetadataInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000068 /* MetadataInspectorView.swift */; };
+		IB0000000000000000000069 /* MetadataConflict.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000069 /* MetadataConflict.swift */; };
+		IB000000000000000000006A /* ComicIdentityResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006A /* ComicIdentityResolver.swift */; };
+		IB000000000000000000006B /* SeriesContinuity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006B /* SeriesContinuity.swift */; };
+		IB000000000000000000006C /* MetadataConflictsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006C /* MetadataConflictsView.swift */; };
+		IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = IP0000000000000000000001 /* ComicArcIPadApp.swift */; };
+		IP000000000000000000000C /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = IP000000000000000000000B /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -132,6 +161,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		2A43A8384FDA1E2FA28C37BE /* GCDMatchPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GCDMatchPickerView.swift; sourceTree = "<group>"; };
+		30B777CED3A2DD08D46C5B6C /* FavoriteMomentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteMomentTests.swift; sourceTree = "<group>"; };
+		41A0FED25D57102A744BB2BD /* FavoriteMomentsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteMomentsView.swift; sourceTree = "<group>"; };
+		444B867BC6E5AD7AE1F7EDB2 /* YearInReviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YearInReviewView.swift; sourceTree = "<group>"; };
+		6CFDD96FDE0B47A67F224E15 /* LibraryFoldersTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryFoldersTests.swift; sourceTree = "<group>"; };
+		704924DAEF0D0F316096BA69 /* YearInReviewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YearInReviewTests.swift; sourceTree = "<group>"; };
+		82780A472F50D244793ADA4A /* PageThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageThumbnailCache.swift; sourceTree = "<group>"; };
 		A00000000000000000000001 /* ComicArcMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcMacApp.swift; sourceTree = "<group>"; };
 		A00000000000000000000002 /* Comic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Comic.swift; sourceTree = "<group>"; };
 		A00000000000000000000003 /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
@@ -144,60 +180,71 @@
 		A0000000000000000000000A /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		A0000000000000000000000B /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		A0000000000000000000000C /* ComicCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicCard.swift; sourceTree = "<group>"; };
-
+		A0000000000000000000000D /* BulkReassignView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkReassignView.swift; sourceTree = "<group>"; };
 		A0000000000000000000000E /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
 		A0000000000000000000000F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A00000000000000000000061 /* RenameFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameFilesView.swift; sourceTree = "<group>"; };
 		A00000000000000000000010 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* RunsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunsView.swift; sourceTree = "<group>"; };
-		D10000000000000000000007 /* ListsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00000000000000000000013 /* icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = assets/icon.icns; sourceTree = "<group>"; };
+		A00000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A00000000000000000000015 /* ComicArcMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ComicArcMac.entitlements; sourceTree = "<group>"; };
+		A00000000000000000000016 /* ComicArc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArc.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000020 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A00000000000000000000021 /* ReadingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryView.swift; sourceTree = "<group>"; };
-		D10000000000000000000001 /* DiaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryView.swift; sourceTree = "<group>"; };
-		D1000000000000000000000F /* AllTagsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllTagsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000023 /* IssueDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssueDetailPage.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* SeriesManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesManagerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000025 /* TutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialView.swift; sourceTree = "<group>"; };
+		A00000000000000000000026 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A00000000000000000000030 /* DuplicatesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicatesView.swift; sourceTree = "<group>"; };
 		A00000000000000000000040 /* ComicSortClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicSortClassifier.swift; sourceTree = "<group>"; };
 		A00000000000000000000050 /* SidebarCustomization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarCustomization.swift; sourceTree = "<group>"; };
 		A00000000000000000000060 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		A00000000000000000000061 /* RenameFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameFilesView.swift; sourceTree = "<group>"; };
 		A00000000000000000000062 /* ReadingOrderEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngine.swift; sourceTree = "<group>"; };
 		A00000000000000000000063 /* LibraryHealthAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryHealthAnalyzer.swift; sourceTree = "<group>"; };
 		A00000000000000000000065 /* ImportWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportWizardView.swift; sourceTree = "<group>"; };
+		A00000000000000000000066 /* SeriesLinkPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesLinkPickerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000067 /* ReadingOrderManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderManagerView.swift; sourceTree = "<group>"; };
 		A00000000000000000000068 /* MetadataInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataInspectorView.swift; sourceTree = "<group>"; };
-		A00000000000000000000066 /* SeriesLinkPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesLinkPickerView.swift; sourceTree = "<group>"; };
-		A00000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A00000000000000000000013 /* icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = "assets/icon.icns"; sourceTree = "<group>"; };
-		A00000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A00000000000000000000026 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		B00000000000000000000026 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* PrivacyInfo.xcprivacy */; };
-		A00000000000000000000015 /* ComicArcMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ComicArcMac.entitlements; sourceTree = "<group>"; };
-		A00000000000000000000016 /* ComicArc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArc.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000069 /* MetadataConflict.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataConflict.swift; sourceTree = "<group>"; };
+		A0000000000000000000006A /* ComicIdentityResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicIdentityResolver.swift; sourceTree = "<group>"; };
+		A0000000000000000000006B /* SeriesContinuity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesContinuity.swift; sourceTree = "<group>"; };
+		A0000000000000000000006C /* MetadataConflictsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataConflictsView.swift; sourceTree = "<group>"; };
+		A0DC295A4864D99A4AC71B63 /* LibraryFolders.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryFolders.swift; sourceTree = "<group>"; };
 		A10000000000000000000001 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* iPadRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadRootView.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* iPadReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadReaderView.swift; sourceTree = "<group>"; };
-		A0000000000000000000000D /* ComicDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicDetailView.swift; sourceTree = "<group>"; };
 		A10000000000000000000010 /* PlatformServiceProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformServiceProtocols.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* EnvironmentServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentServices.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* MacPlatformServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPlatformServices.swift; sourceTree = "<group>"; };
-		A10000000000000000000030 /* IOSPlatformServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPlatformServices.swift; sourceTree = "<group>"; };
-		A10000000000000000000031 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
-		A10000000000000000000033 /* OfflineMetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineMetadataStore.swift; sourceTree = "<group>"; };
-		A10000000000000000000034 /* GCDDatabaseDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GCDDatabaseDownloader.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* ReadingSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingSessionService.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		A10000000000000000000030 /* IOSPlatformServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPlatformServices.swift; sourceTree = "<group>"; };
+		A10000000000000000000031 /* BackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupService.swift; sourceTree = "<group>"; };
 		A10000000000000000000032 /* ComicPageCoverPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicPageCoverPicker.swift; sourceTree = "<group>"; };
-		F10000000000000000000002 /* ComicArcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcTests.swift; sourceTree = "<group>"; };
-		F1000000000000000000000D /* ReadingOrderEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngineTests.swift; sourceTree = "<group>"; };
-		F1000000000000000000000F /* OfflineMetadataStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineMetadataStoreTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000033 /* OfflineMetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineMetadataStore.swift; sourceTree = "<group>"; };
+		A10000000000000000000034 /* GCDDatabaseDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GCDDatabaseDownloader.swift; sourceTree = "<group>"; };
+		B0296BC977F13C069A058148 /* TierListTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TierListTests.swift; sourceTree = "<group>"; };
+		D10000000000000000000001 /* DiaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryView.swift; sourceTree = "<group>"; };
 		D10000000000000000000005 /* DiaryEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryEntryTests.swift; sourceTree = "<group>"; };
+		D10000000000000000000007 /* ListsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsView.swift; sourceTree = "<group>"; };
 		D1000000000000000000000B /* ComicListTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicListTests.swift; sourceTree = "<group>"; };
 		D1000000000000000000000D /* SortOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortOrderTests.swift; sourceTree = "<group>"; };
+		D1000000000000000000000F /* AllTagsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllTagsView.swift; sourceTree = "<group>"; };
 		D10000000000000000000013 /* TagCategoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagCategoryTests.swift; sourceTree = "<group>"; };
 		D1000000000000000000001B /* ComicRevivalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicRevivalTests.swift; sourceTree = "<group>"; };
+		F10000000000000000000002 /* ComicArcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000004 /* ComicArcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ComicArcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1000000000000000000000D /* ReadingOrderEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingOrderEngineTests.swift; sourceTree = "<group>"; };
+		F1000000000000000000000F /* OfflineMetadataStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineMetadataStoreTests.swift; sourceTree = "<group>"; };
+		F10000000000000000000012 /* LibraryScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryScannerTests.swift; sourceTree = "<group>"; };
+		F10000000000000000000014 /* DatabaseTestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseTestFixture.swift; sourceTree = "<group>"; };
+		F10000000000000000000016 /* MetadataConflictTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataConflictTests.swift; sourceTree = "<group>"; };
+		F10000000000000000000018 /* ComicIdentityResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicIdentityResolverTests.swift; sourceTree = "<group>"; };
+		F1000000000000000000001A /* SeriesContinuityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeriesContinuityTests.swift; sourceTree = "<group>"; };
+		F1000000000000000000001C /* RenameReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenameReportTests.swift; sourceTree = "<group>"; };
+		FEEFD8707CDC81989CC224BD /* TierListsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TierListsView.swift; sourceTree = "<group>"; };
 		IP0000000000000000000001 /* ComicArcIPadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComicArcIPadApp.swift; sourceTree = "<group>"; };
 		IP0000000000000000000004 /* ComicArcPad.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArcPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -212,9 +259,193 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F10000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		IP0000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				IP000000000000000000000C /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		11C15A4491B1927C279A47CC /* TierLists */ = {
+			isa = PBXGroup;
+			children = (
+				FEEFD8707CDC81989CC224BD /* TierListsView.swift */,
+			);
+			path = TierLists;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000001 /* ComicArcMacApp.swift */,
+				C10000000000000000000001 /* Shared */,
+				C10000000000000000000002 /* iPad */,
+				C10000000000000000000010 /* Services */,
+				C00000000000000000000004 /* Models */,
+				C00000000000000000000005 /* Database */,
+				C00000000000000000000006 /* Scanner */,
+				C00000000000000000000007 /* Caches */,
+				C00000000000000000000008 /* ViewModels */,
+				C00000000000000000000009 /* Views */,
+				A00000000000000000000012 /* Assets.xcassets */,
+				A00000000000000000000013 /* icon.icns */,
+				A00000000000000000000014 /* Info.plist */,
+				A00000000000000000000026 /* PrivacyInfo.xcprivacy */,
+				A00000000000000000000015 /* ComicArcMac.entitlements */,
+				F10000000000000000000005 /* ComicArcTests */,
+				C00000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C00000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000016 /* ComicArc.app */,
+				F10000000000000000000004 /* ComicArcTests.xctest */,
+				IP0000000000000000000004 /* ComicArcPad.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000002 /* Comic.swift */,
+				A00000000000000000000040 /* ComicSortClassifier.swift */,
+				A00000000000000000000050 /* SidebarCustomization.swift */,
+				A00000000000000000000060 /* AppTheme.swift */,
+				A00000000000000000000062 /* ReadingOrderEngine.swift */,
+				A00000000000000000000069 /* MetadataConflict.swift */,
+				A0000000000000000000006A /* ComicIdentityResolver.swift */,
+				A0000000000000000000006B /* SeriesContinuity.swift */,
+				A0DC295A4864D99A4AC71B63 /* LibraryFolders.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000005 /* Database */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000003 /* DatabaseManager.swift */,
+			);
+			path = Database;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000006 /* Scanner */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000004 /* LibraryScanner.swift */,
+				A00000000000000000000063 /* LibraryHealthAnalyzer.swift */,
+				A00000000000000000000005 /* FileWatcher.swift */,
+			);
+			path = Scanner;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000007 /* Caches */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000006 /* ThumbnailCache.swift */,
+				A00000000000000000000007 /* PageCache.swift */,
+				82780A472F50D244793ADA4A /* PageThumbnailCache.swift */,
+			);
+			path = Caches;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000008 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000008 /* LibraryViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		C00000000000000000000009 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000009 /* ContentView.swift */,
+				A0000000000000000000000A /* Design.swift */,
+				A00000000000000000000020 /* OnboardingView.swift */,
+				A00000000000000000000025 /* TutorialView.swift */,
+				C10000000000000000000012 /* Shared */,
+				C0000000000000000000000A /* Library */,
+				C0000000000000000000000B /* Reader */,
+				C0000000000000000000000C /* Settings */,
+				C0000000000000000000000D /* Stats */,
+				C0000000000000000000000E /* Runs */,
+				D10000000000000000000002 /* Diary */,
+				D10000000000000000000008 /* Lists */,
+				D10000000000000000000010 /* Tags */,
+				11C15A4491B1927C279A47CC /* TierLists */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000A /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000B /* LibraryView.swift */,
+				A0000000000000000000000C /* ComicCard.swift */,
+				A0000000000000000000000D /* BulkReassignView.swift */,
+				A00000000000000000000023 /* IssueDetailPage.swift */,
+				A00000000000000000000024 /* SeriesManagerView.swift */,
+				A00000000000000000000065 /* ImportWizardView.swift */,
+				A00000000000000000000067 /* ReadingOrderManagerView.swift */,
+				A0000000000000000000006C /* MetadataConflictsView.swift */,
+				A00000000000000000000068 /* MetadataInspectorView.swift */,
+				A00000000000000000000066 /* SeriesLinkPickerView.swift */,
+				A00000000000000000000030 /* DuplicatesView.swift */,
+				2A43A8384FDA1E2FA28C37BE /* GCDMatchPickerView.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000B /* Reader */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000E /* ReaderView.swift */,
+				41A0FED25D57102A744BB2BD /* FavoriteMomentsView.swift */,
+			);
+			path = Reader;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000C /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000000F /* SettingsView.swift */,
+				A00000000000000000000061 /* RenameFilesView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000D /* Stats */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000010 /* StatsView.swift */,
+				A00000000000000000000021 /* ReadingHistoryView.swift */,
+				444B867BC6E5AD7AE1F7EDB2 /* YearInReviewView.swift */,
+			);
+			path = Stats;
+			sourceTree = "<group>";
+		};
+		C0000000000000000000000E /* Runs */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000011 /* RunsView.swift */,
+			);
+			path = Runs;
+			sourceTree = "<group>";
+		};
 		C10000000000000000000001 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
@@ -260,115 +491,6 @@
 			path = macOS;
 			sourceTree = "<group>";
 		};
-		C10000000000000000000030 /* iOS */ = {
-			isa = PBXGroup;
-			children = (
-				A10000000000000000000030 /* IOSPlatformServices.swift */,
-			);
-			name = iOS;
-			path = iOS;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000001 /* = */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000001 /* ComicArcMacApp.swift */,
-				C10000000000000000000001 /* Shared */,
-				C10000000000000000000002 /* iPad */,
-				C10000000000000000000010 /* Services */,
-				C00000000000000000000004 /* Models */,
-				C00000000000000000000005 /* Database */,
-				C00000000000000000000006 /* Scanner */,
-				C00000000000000000000007 /* Caches */,
-				C00000000000000000000008 /* ViewModels */,
-				C00000000000000000000009 /* Views */,
-				A00000000000000000000012 /* Assets.xcassets */,
-				A00000000000000000000013 /* icon.icns */,
-				A00000000000000000000014 /* Info.plist */,
-				A00000000000000000000026 /* PrivacyInfo.xcprivacy */,
-				A00000000000000000000015 /* ComicArcMac.entitlements */,
-				F10000000000000000000005 /* ComicArcTests */,
-				C00000000000000000000002 /* Products */,
-			);
-			sourceTree = "<group>";
-		};
-		C00000000000000000000002 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000016 /* ComicArc.app */,
-				F10000000000000000000004 /* ComicArcTests.xctest */,
-				IP0000000000000000000004 /* ComicArcPad.app */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000004 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000002 /* Comic.swift */,
-				A00000000000000000000040 /* ComicSortClassifier.swift */,
-				A00000000000000000000050 /* SidebarCustomization.swift */,
-				A00000000000000000000060 /* AppTheme.swift */,
-				A00000000000000000000062 /* ReadingOrderEngine.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000005 /* Database */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000003 /* DatabaseManager.swift */,
-			);
-			path = Database;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000006 /* Scanner */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000004 /* LibraryScanner.swift */,
-				A00000000000000000000063 /* LibraryHealthAnalyzer.swift */,
-				A00000000000000000000005 /* FileWatcher.swift */,
-			);
-			path = Scanner;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000007 /* Caches */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000006 /* ThumbnailCache.swift */,
-				A00000000000000000000007 /* PageCache.swift */,
-			);
-			path = Caches;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000008 /* ViewModels */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000008 /* LibraryViewModel.swift */,
-			);
-			path = ViewModels;
-			sourceTree = "<group>";
-		};
-		C00000000000000000000009 /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000009 /* ContentView.swift */,
-				A0000000000000000000000A /* Design.swift */,
-				A00000000000000000000020 /* OnboardingView.swift */,
-				A00000000000000000000025 /* TutorialView.swift */,
-				C10000000000000000000012 /* Shared */,
-				C0000000000000000000000A /* Library */,
-				C0000000000000000000000B /* Reader */,
-				C0000000000000000000000C /* Settings */,
-				C0000000000000000000000D /* Stats */,
-				C0000000000000000000000E /* Runs */,
-				D10000000000000000000002 /* Diary */,
-				D10000000000000000000008 /* Lists */,
-				D10000000000000000000010 /* Tags */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
 		C10000000000000000000012 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
@@ -379,78 +501,13 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
-		F10000000000000000000005 /* ComicArcTests */ = {
+		C10000000000000000000030 /* iOS */ = {
 			isa = PBXGroup;
 			children = (
-				F10000000000000000000002 /* ComicArcTests.swift */,
-				F1000000000000000000000D /* ReadingOrderEngineTests.swift */,
-				F1000000000000000000000F /* OfflineMetadataStoreTests.swift */,
-				D10000000000000000000005 /* DiaryEntryTests.swift */,
-				D1000000000000000000000B /* ComicListTests.swift */,
-				D1000000000000000000000D /* SortOrderTests.swift */,
-				D10000000000000000000013 /* TagCategoryTests.swift */,
-				D1000000000000000000001B /* ComicRevivalTests.swift */,
+				A10000000000000000000030 /* IOSPlatformServices.swift */,
 			);
-			path = ComicArcTests;
-			sourceTree = "<group>";
-		};
-		C0000000000000000000000A /* Library */ = {
-			isa = PBXGroup;
-			children = (
-				A0000000000000000000000B /* LibraryView.swift */,
-				A0000000000000000000000C /* ComicCard.swift */,
-				A0000000000000000000000D /* ComicDetailView.swift */,
-				A00000000000000000000023 /* IssueDetailPage.swift */,
-				A00000000000000000000024 /* SeriesManagerView.swift */,
-				A00000000000000000000065 /* ImportWizardView.swift */,
-				A00000000000000000000067 /* ReadingOrderManagerView.swift */,
-				A00000000000000000000068 /* MetadataInspectorView.swift */,
-				A00000000000000000000066 /* SeriesLinkPickerView.swift */,
-				A00000000000000000000030 /* DuplicatesView.swift */,
-			);
-			path = Library;
-			sourceTree = "<group>";
-		};
-		C0000000000000000000000B /* Reader */ = {
-			isa = PBXGroup;
-			children = (
-				A0000000000000000000000E /* ReaderView.swift */,
-			);
-			path = Reader;
-			sourceTree = "<group>";
-		};
-		C0000000000000000000000C /* Settings */ = {
-			isa = PBXGroup;
-			children = (
-				A0000000000000000000000F /* SettingsView.swift */,
-				A00000000000000000000061 /* RenameFilesView.swift */,
-			);
-			path = Settings;
-			sourceTree = "<group>";
-		};
-		C0000000000000000000000D /* Stats */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000010 /* StatsView.swift */,
-				A00000000000000000000021 /* ReadingHistoryView.swift */,
-			);
-			path = Stats;
-			sourceTree = "<group>";
-		};
-		C0000000000000000000000E /* Runs */ = {
-			isa = PBXGroup;
-			children = (
-				A00000000000000000000011 /* RunsView.swift */,
-			);
-			path = Runs;
-			sourceTree = "<group>";
-		};
-		D10000000000000000000008 /* Lists */ = {
-			isa = PBXGroup;
-			children = (
-				D10000000000000000000007 /* ListsView.swift */,
-			);
-			path = Lists;
+			name = iOS;
+			path = iOS;
 			sourceTree = "<group>";
 		};
 		D10000000000000000000002 /* Diary */ = {
@@ -461,12 +518,45 @@
 			path = Diary;
 			sourceTree = "<group>";
 		};
+		D10000000000000000000008 /* Lists */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000007 /* ListsView.swift */,
+			);
+			path = Lists;
+			sourceTree = "<group>";
+		};
 		D10000000000000000000010 /* Tags */ = {
 			isa = PBXGroup;
 			children = (
 				D1000000000000000000000F /* AllTagsView.swift */,
 			);
 			path = Tags;
+			sourceTree = "<group>";
+		};
+		F10000000000000000000005 /* ComicArcTests */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000002 /* ComicArcTests.swift */,
+				F1000000000000000000000D /* ReadingOrderEngineTests.swift */,
+				F1000000000000000000000F /* OfflineMetadataStoreTests.swift */,
+				F10000000000000000000012 /* LibraryScannerTests.swift */,
+				F10000000000000000000014 /* DatabaseTestFixture.swift */,
+				F10000000000000000000016 /* MetadataConflictTests.swift */,
+				F10000000000000000000018 /* ComicIdentityResolverTests.swift */,
+				F1000000000000000000001A /* SeriesContinuityTests.swift */,
+				F1000000000000000000001C /* RenameReportTests.swift */,
+				D10000000000000000000005 /* DiaryEntryTests.swift */,
+				D1000000000000000000000B /* ComicListTests.swift */,
+				D1000000000000000000000D /* SortOrderTests.swift */,
+				D10000000000000000000013 /* TagCategoryTests.swift */,
+				D1000000000000000000001B /* ComicRevivalTests.swift */,
+				30B777CED3A2DD08D46C5B6C /* FavoriteMomentTests.swift */,
+				B0296BC977F13C069A058148 /* TierListTests.swift */,
+				704924DAEF0D0F316096BA69 /* YearInReviewTests.swift */,
+				6CFDD96FDE0B47A67F224E15 /* LibraryFoldersTests.swift */,
+			);
+			path = ComicArcTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -533,28 +623,6 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXShellScriptBuildPhase section */
-		D000000000000000000000CC /* Copy to app folder */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Copy to app folder";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -e\n\n# Bundle unar and lsar for CBR support (no Homebrew required at runtime).\n# IMPORTANT: these must be copied into $BUILT_PRODUCTS_DIR/ComicArc.app \u2014 the actual build\n# product that gets archived/installed \u2014 not only into the app/ dev convenience copy below.\n# This used to only try Homebrew paths (/opt/homebrew/bin, /usr/local/bin) and only wrote\n# into app/, so a real Release build on a machine without Homebrew's unar/lsar installed \u2014\n# or Xcode's own DerivedData output, which is what actually ships \u2014 silently never had CBR\n# support at all, despite the docs and code claiming it was always bundled. Vendored copies\n# in Vendor/unar/ (tracked in git) remove the dependency on the local machine's state.\nfor TOOL in unar lsar; do\n  cp -f \"$SRCROOT/Vendor/unar/$TOOL\" \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\n  chmod 755 \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\ndone\n\n# Skip deep codesign when xctest bundles are embedded (test/build-for-testing builds) \u2014\n# adding files after Xcode's own signing pass invalidates the seal, so re-sign here.\nif ! ls \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/PlugIns\"/*.xctest >/dev/null 2>&1; then\n  codesign --force --deep --sign - \"$BUILT_PRODUCTS_DIR/ComicArc.app\"\nfi\n\nAPP_DEST=\"$SRCROOT/app/ComicArc.app\"\nrm -rf \"$APP_DEST\"\ncp -R \"$BUILT_PRODUCTS_DIR/ComicArc.app\" \"$APP_DEST\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXProject section */
 		D00000000000000000000001 /* Project object */ = {
 			isa = PBXProject;
@@ -585,7 +653,7 @@
 			);
 			mainGroup = C00000000000000000000001;
 			packageReferences = (
-				E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */,
+				E00000000000000000000001 /* XCLocalSwiftPackageReference "ZIPFoundation" */,
 				E00000000000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = C00000000000000000000002 /* Products */;
@@ -610,7 +678,38 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		IP0000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				IB000000000000000000001E /* Assets.xcassets in Resources */,
+				IB000000000000000000001F /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D000000000000000000000CC /* Copy to app folder */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy to app folder";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n\n# Bundle unar and lsar for CBR support (no Homebrew required at runtime).\n# IMPORTANT: these must be copied into $BUILT_PRODUCTS_DIR/ComicArc.app u2014 the actual build\n# product that gets archived/installed u2014 not only into the app/ dev convenience copy below.\n# This used to only try Homebrew paths (/opt/homebrew/bin, /usr/local/bin) and only wrote\n# into app/, so a real Release build on a machine without Homebrew's unar/lsar installed u2014\n# or Xcode's own DerivedData output, which is what actually ships u2014 silently never had CBR\n# support at all, despite the docs and code claiming it was always bundled. Vendored copies\n# in Vendor/unar/ (tracked in git) remove the dependency on the local machine's state.\nfor TOOL in unar lsar; do\n  cp -f \"$SRCROOT/Vendor/unar/$TOOL\" \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\n  chmod 755 \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/MacOS/$TOOL\"\ndone\n\n# Skip deep codesign when xctest bundles are embedded (test/build-for-testing builds) u2014\n# adding files after Xcode's own signing pass invalidates the seal, so re-sign here.\nif ! ls \"$BUILT_PRODUCTS_DIR/ComicArc.app/Contents/PlugIns\"/*.xctest >/dev/null 2>&1; then\n  codesign --force --deep --sign - \"$BUILT_PRODUCTS_DIR/ComicArc.app\"\nfi\n\nAPP_DEST=\"$SRCROOT/app.noindex/ComicArc.app\"\nrm -rf \"$APP_DEST\"\nmkdir -p \"$SRCROOT/app.noindex\"\ncp -R \"$BUILT_PRODUCTS_DIR/ComicArc.app\" \"$APP_DEST\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D00000000000000000000003 /* Sources */ = {
@@ -619,18 +718,21 @@
 			files = (
 				B00000000000000000000001 /* ComicArcMacApp.swift in Sources */,
 				B00000000000000000000002 /* Comic.swift in Sources */,
+				B00000000000000000000069 /* MetadataConflict.swift in Sources */,
+				B0000000000000000000006A /* ComicIdentityResolver.swift in Sources */,
+				B0000000000000000000006B /* SeriesContinuity.swift in Sources */,
 				B00000000000000000000003 /* DatabaseManager.swift in Sources */,
 				B00000000000000000000004 /* LibraryScanner.swift in Sources */,
 				B00000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */,
 				B00000000000000000000005 /* FileWatcher.swift in Sources */,
 				B00000000000000000000006 /* ThumbnailCache.swift in Sources */,
 				B00000000000000000000007 /* PageCache.swift in Sources */,
+				F08C09BB7A00B2B6B8544661 /* PageThumbnailCache.swift in Sources */,
 				B00000000000000000000008 /* LibraryViewModel.swift in Sources */,
 				B00000000000000000000009 /* ContentView.swift in Sources */,
 				B0000000000000000000000A /* Design.swift in Sources */,
 				B0000000000000000000000B /* LibraryView.swift in Sources */,
 				B0000000000000000000000C /* ComicCard.swift in Sources */,
-
 				B0000000000000000000000E /* ReaderView.swift in Sources */,
 				B0000000000000000000000F /* SettingsView.swift in Sources */,
 				B00000000000000000000061 /* RenameFilesView.swift in Sources */,
@@ -645,6 +747,7 @@
 				B00000000000000000000024 /* SeriesManagerView.swift in Sources */,
 				B00000000000000000000065 /* ImportWizardView.swift in Sources */,
 				B00000000000000000000067 /* ReadingOrderManagerView.swift in Sources */,
+				B0000000000000000000006C /* MetadataConflictsView.swift in Sources */,
 				B00000000000000000000068 /* MetadataInspectorView.swift in Sources */,
 				B00000000000000000000066 /* SeriesLinkPickerView.swift in Sources */,
 				B00000000000000000000025 /* TutorialView.swift in Sources */,
@@ -659,13 +762,18 @@
 				B10000000000000000000001 /* Platform.swift in Sources */,
 				B10000000000000000000002 /* iPadRootView.swift in Sources */,
 				B10000000000000000000003 /* iPadReaderView.swift in Sources */,
-				B0000000000000000000000D /* ComicDetailView.swift in Sources */,
+				B0000000000000000000000D /* BulkReassignView.swift in Sources */,
 				B10000000000000000000010 /* PlatformServiceProtocols.swift in Sources */,
 				B10000000000000000000011 /* EnvironmentServices.swift in Sources */,
 				B10000000000000000000012 /* MacPlatformServices.swift in Sources */,
 				B10000000000000000000013 /* ReadingSessionService.swift in Sources */,
 				B10000000000000000000014 /* SharedComponents.swift in Sources */,
 				B10000000000000000000032 /* ComicPageCoverPicker.swift in Sources */,
+				7F8AB581EC6882ED9029B1CD /* FavoriteMomentsView.swift in Sources */,
+				BD5ECA93E767BA41E0BA4304 /* TierListsView.swift in Sources */,
+				C732EEB3C48A0FA0FBA7F634 /* GCDMatchPickerView.swift in Sources */,
+				9969D34ECD66673444E22746 /* YearInReviewView.swift in Sources */,
+				70DDD120E87777137746DE2C /* LibraryFolders.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -676,11 +784,21 @@
 				F10000000000000000000001 /* ComicArcTests.swift in Sources */,
 				F1000000000000000000000E /* ReadingOrderEngineTests.swift in Sources */,
 				F10000000000000000000010 /* OfflineMetadataStoreTests.swift in Sources */,
+				F10000000000000000000011 /* LibraryScannerTests.swift in Sources */,
+				F10000000000000000000013 /* DatabaseTestFixture.swift in Sources */,
+				F10000000000000000000015 /* MetadataConflictTests.swift in Sources */,
+				F10000000000000000000017 /* ComicIdentityResolverTests.swift in Sources */,
+				F10000000000000000000019 /* SeriesContinuityTests.swift in Sources */,
+				F1000000000000000000001B /* RenameReportTests.swift in Sources */,
 				D10000000000000000000006 /* DiaryEntryTests.swift in Sources */,
 				D1000000000000000000000C /* ComicListTests.swift in Sources */,
 				D1000000000000000000000E /* SortOrderTests.swift in Sources */,
 				D10000000000000000000014 /* TagCategoryTests.swift in Sources */,
 				D1000000000000000000001C /* ComicRevivalTests.swift in Sources */,
+				08DECB7533ECEE0C1073CF11 /* FavoriteMomentTests.swift in Sources */,
+				C762B3EBF752D9ADAC95B822 /* TierListTests.swift in Sources */,
+				F070DF5569E24F7FF41CDB06 /* YearInReviewTests.swift in Sources */,
+				48E504804A69D63625CEC92B /* LibraryFoldersTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -690,18 +808,22 @@
 			files = (
 				IP0000000000000000000002 /* ComicArcIPadApp.swift in Sources */,
 				IB0000000000000000000001 /* Comic.swift in Sources */,
+				IB0000000000000000000069 /* MetadataConflict.swift in Sources */,
+				IB000000000000000000006A /* ComicIdentityResolver.swift in Sources */,
+				IB000000000000000000006B /* SeriesContinuity.swift in Sources */,
 				IB0000000000000000000002 /* DatabaseManager.swift in Sources */,
 				IB0000000000000000000003 /* LibraryScanner.swift in Sources */,
 				IB0000000000000000000063 /* LibraryHealthAnalyzer.swift in Sources */,
 				IB0000000000000000000004 /* FileWatcher.swift in Sources */,
 				IB0000000000000000000005 /* ThumbnailCache.swift in Sources */,
 				IB0000000000000000000006 /* PageCache.swift in Sources */,
+				81BC48B4E8B3D416855809E5 /* PageThumbnailCache.swift in Sources */,
 				IB0000000000000000000007 /* LibraryViewModel.swift in Sources */,
 				IB0000000000000000000008 /* ContentView.swift in Sources */,
 				IB0000000000000000000009 /* Design.swift in Sources */,
 				IB000000000000000000000A /* LibraryView.swift in Sources */,
 				IB000000000000000000000B /* ComicCard.swift in Sources */,
-				IB000000000000000000000C /* ComicDetailView.swift in Sources */,
+				IB000000000000000000000C /* BulkReassignView.swift in Sources */,
 				IB000000000000000000000D /* ReaderView.swift in Sources */,
 				IB000000000000000000000E /* SettingsView.swift in Sources */,
 				IB0000000000000000000061 /* RenameFilesView.swift in Sources */,
@@ -716,6 +838,7 @@
 				IB0000000000000000000015 /* SeriesManagerView.swift in Sources */,
 				IB0000000000000000000065 /* ImportWizardView.swift in Sources */,
 				IB0000000000000000000067 /* ReadingOrderManagerView.swift in Sources */,
+				IB000000000000000000006C /* MetadataConflictsView.swift in Sources */,
 				IB0000000000000000000068 /* MetadataInspectorView.swift in Sources */,
 				IB0000000000000000000066 /* SeriesLinkPickerView.swift in Sources */,
 				IB0000000000000000000016 /* TutorialView.swift in Sources */,
@@ -725,7 +848,7 @@
 				IB0000000000000000000060 /* AppTheme.swift in Sources */,
 				IB0000000000000000000062 /* ReadingOrderEngine.swift in Sources */,
 				IB0000000000000000000031 /* IOSPlatformServices.swift in Sources */,
-				IB0000000000000000000032 /* BackupService.swift in Sources */,
+				IB0000000000000000000032 /* ComicPageCoverPicker.swift in Sources */,
 				IB0000000000000000000033 /* OfflineMetadataStore.swift in Sources */,
 				IB0000000000000000000034 /* GCDDatabaseDownloader.swift in Sources */,
 				IB0000000000000000000017 /* Platform.swift in Sources */,
@@ -736,40 +859,15 @@
 				IB000000000000000000001C /* ReadingSessionService.swift in Sources */,
 				IB000000000000000000001D /* SharedComponents.swift in Sources */,
 				IB0000000000000000000032 /* ComicPageCoverPicker.swift in Sources */,
+				EFBB28F9C59BCE7DF1A98BB4 /* FavoriteMomentsView.swift in Sources */,
+				53B5D8675D5E68885B7232DB /* TierListsView.swift in Sources */,
+				A79AF1C1D9F880F4E4506575 /* GCDMatchPickerView.swift in Sources */,
+				9ADC024409F536D30B87B63C /* YearInReviewView.swift in Sources */,
+				C60F11CA20411F48460506B6 /* LibraryFolders.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXFrameworksBuildPhase section */
-		F10000000000000000000009 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		IP0000000000000000000006 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				IP000000000000000000000C /* ZIPFoundation in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXFrameworksBuildPhase section */
-
-/* Begin PBXResourcesBuildPhase section (iPad) */
-		IP0000000000000000000007 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				IB000000000000000000001E /* Assets.xcassets in Resources */,
-				IB000000000000000000001F /* PrivacyInfo.xcprivacy in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section (iPad) */
 
 /* Begin PBXTargetDependency section */
 		F1000000000000000000000A /* PBXTargetDependency */ = {
@@ -896,8 +994,8 @@
 				);
 				MARKETING_VERSION = 2.2;
 				OTHER_LDFLAGS = "-lsqlite3";
-				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.app;
 				PRODUCT_BUNDLE_ICON_FILE = icon;
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.app;
 				PRODUCT_NAME = ComicArc;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -923,8 +1021,8 @@
 				);
 				MARKETING_VERSION = 2.2;
 				OTHER_LDFLAGS = "-lsqlite3";
-				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.app;
 				PRODUCT_BUNDLE_ICON_FILE = icon;
+				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.app;
 				PRODUCT_NAME = ComicArc;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -1038,15 +1136,6 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		IP0000000000000000000008 /* Build configuration list for PBXNativeTarget "ComicArcPad" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				IP0000000000000000000009 /* Debug */,
-				IP000000000000000000000A /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		F10000000000000000000007 /* Build configuration list for PBXNativeTarget "ComicArcTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1056,7 +1145,23 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		IP0000000000000000000008 /* Build configuration list for PBXNativeTarget "ComicArcPad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				IP0000000000000000000009 /* Debug */,
+				IP000000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E00000000000000000000001 /* XCLocalSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ZIPFoundation;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		E00000000000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
@@ -1069,22 +1174,10 @@
 		};
 /* End XCRemoteSwiftPackageReference section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/ZIPFoundation;
-		};
-/* End XCLocalSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
 		E00000000000000000000002 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */;
-			productName = ZIPFoundation;
-		};
-		IP000000000000000000000B /* ZIPFoundation */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/ZIPFoundation" */;
+			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
 		};
 		E00000000000000000000021 /* Sparkle */ = {
@@ -1092,8 +1185,12 @@
 			package = E00000000000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
+		IP000000000000000000000B /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E00000000000000000000001 /* XCLocalSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = D00000000000000000000001 /* Project object */;
 }

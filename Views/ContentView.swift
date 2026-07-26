@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension Notification.Name {
     static let showTutorial        = Notification.Name("showTutorial")
@@ -32,9 +33,14 @@ struct ContentView: View {
             .navigationSplitViewStyle(.balanced)
 
             if let comic = vm.readerComic {
-                ReaderView(comic: comic) {
-                    withAnimation(.easeInOut(duration: 0.25)) { vm.readerComic = nil }
+                ReaderView(comic: comic, initialPage: vm.readerInitialPage) {
+                    withAnimation(.easeInOut(duration: 0.25)) { vm.closeReader() }
                 }
+                // Ties this view's identity to the comic itself rather than just to the `if`
+                // branch -- without it, a future reassignment of readerComic straight from one
+                // comic to another (skipping the nil in between) would carry over ReaderView's
+                // @State (currentPage, zoom, bookmarks) into the new comic instead of resetting.
+                .id(comic.id)
                 .transition(.opacity)
                 .zIndex(10)
             }
@@ -124,6 +130,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.6))
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
         .background(.black.opacity(0.92), in: Capsule())
@@ -151,6 +158,10 @@ struct ContentView: View {
             DiaryView()
         case .lists:
             listsContent
+        case .tierLists:
+            tierListsContent
+        case .favoriteMoments:
+            FavoriteMomentsView()
         case .stats:
             StatsView()
         case .history:
@@ -159,6 +170,8 @@ struct ContentView: View {
             DuplicatesView()
         case .readingOrderManager:
             ReadingOrderManagerView()
+        case .metadataConflicts:
+            MetadataConflictsView()
         case .settings:
             SettingsView()
         }
@@ -217,6 +230,36 @@ struct ContentView: View {
             Text("Select a List")
                 .font(.title3.bold()).foregroundStyle(.secondary)
             Text("Build curated collections and rankings, no reading order required.")
+                .font(.subheadline).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Design.appBackground)
+    }
+
+    private var tierListsContent: some View {
+        HStack(spacing: 0) {
+            TierListsListView(selectedTierList: $vm.selectedTierList)
+                .frame(width: 320)
+                .background(Design.navBackground)
+            Rectangle().fill(Design.borderColor).frame(width: 1)
+            if let tierList = vm.selectedTierList {
+                TierListDetailView(tierList: tierList, onDelete: { vm.selectedTierList = nil })
+                    .frame(maxWidth: .infinity)
+                    .background(Design.appBackground)
+            } else {
+                tierListsPlaceholder
+            }
+        }
+    }
+
+    private var tierListsPlaceholder: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 52)).foregroundStyle(.quaternary)
+            Text("Select a Tier List")
+                .font(.title3.bold()).foregroundStyle(.secondary)
+            Text("Rank your comics into S/A/B/C/D/F tiers by dragging them between rows.")
                 .font(.subheadline).foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
         }
@@ -293,8 +336,8 @@ struct ContentView: View {
 
                 Label("Scan", systemImage: "magnifyingglass")
             }
-            .help("Scan library folder for new comics (⇧⌘R)")
-            .disabled(vm.libraryPath.isEmpty)
+            .help("Scan library folders for new comics (⇧⌘R)")
+            .disabled(vm.libraryPaths.isEmpty)
         }
     }
 
@@ -310,7 +353,7 @@ struct ContentView: View {
                 Label("Resync", systemImage: "arrow.triangle.2.circlepath")
             }
             .help("Rescan and re-derive metadata for every comic — fixes wrong reading order or metadata (⌥⇧⌘R)")
-            .disabled(vm.libraryPath.isEmpty || vm.isScanning)
+            .disabled(vm.libraryPaths.isEmpty || vm.isScanning)
         }
     }
 
@@ -320,10 +363,16 @@ struct ContentView: View {
     }
 
     private func importFiles() {
+        let types: [UTType] = [
+            UTType(filenameExtension: "cbz") ?? .zip,
+            UTType(filenameExtension: "cbr") ?? .archive,
+            .pdf, .image
+        ]
         fileService.pickFiles(
             allowsMultiple: true,
             message: "Select comic files to import into your library",
-            prompt: "Import"
+            prompt: "Import",
+            contentTypes: types
         ) { urls in if !urls.isEmpty { vm.importFiles(urls) } }
     }
 
@@ -423,6 +472,11 @@ struct SidebarView: View {
                             navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
                                    trailingText: "\(vm.autoPlacedIssues.count)")
                         }
+                    } else if discoverItem == .metadataConflicts {
+                        if !vm.pendingMetadataConflicts.isEmpty {
+                            navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                   trailingText: "\(vm.pendingMetadataConflicts.count)")
+                        }
                     } else {
                         navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
                     }
@@ -447,6 +501,8 @@ struct SidebarView: View {
                     sidebarScanProgress
                 } else if vm.showScanReport {
                     scanReportBanner
+                } else if vm.renameCandidateCount > 0, !vm.renameSuggestionDismissed {
+                    renameSuggestionBanner
                 }
             }
         }
@@ -566,6 +622,35 @@ struct SidebarView: View {
                     Image(systemName: "xmark").font(.caption2)
                 }
                 .buttonStyle(.plain).foregroundStyle(.tertiary)
+                .accessibilityLabel("Dismiss")
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+        }
+        .background(Design.navBackground)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var renameSuggestionBanner: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "textformat")
+                    .foregroundStyle(Design.brandBlue).font(.caption)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Filenames Could Be Cleaned Up").font(.caption.bold()).foregroundStyle(.primary)
+                    Text("\(vm.renameCandidateCount) file\(vm.renameCandidateCount == 1 ? "" : "s") don't match the library's naming convention.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Review") {
+                    NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                Button { vm.dismissRenameSuggestion() } label: {
+                    Image(systemName: "xmark").font(.caption2)
+                }
+                .buttonStyle(.plain).foregroundStyle(.tertiary)
+                .accessibilityLabel("Dismiss")
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
         }

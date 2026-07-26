@@ -1,10 +1,30 @@
 import SwiftUI
 
 struct DiaryView: View {
+    @EnvironmentObject var vm: LibraryViewModel
     @State private var entries: [DiaryEntry] = []
-    @State private var grouped: [(date: String, entries: [DiaryEntry])] = []
     @State private var isLoading = true
     @State private var openedComic: Comic?
+
+    private var filteredEntries: [DiaryEntry] {
+        guard !vm.searchText.isEmpty else { return entries }
+        let q = vm.searchText.lowercased()
+        return entries.filter {
+            $0.comic.title.lowercased().contains(q) ||
+            $0.comic.series.lowercased().contains(q) ||
+            $0.comic.publisher.lowercased().contains(q)
+        }
+    }
+
+    // loggedAt is stored as CURRENT_TIMESTAMP (UTC) -- grouping by its raw date substring would
+    // split/merge entries on a UTC midnight boundary that has nothing to do with the user's
+    // actual calendar day (e.g. a US-timezone reading session in the evening can straddle UTC
+    // midnight and get split across two day headers), hence localDayKey's timezone conversion.
+    private var grouped: [(date: String, entries: [DiaryEntry])] {
+        Dictionary(grouping: filteredEntries) { Self.localDayKey(from: $0.loggedAt) }
+            .sorted { $0.key > $1.key }
+            .map { (date: $0.key, entries: $0.value) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -27,6 +47,14 @@ struct DiaryView: View {
                         .foregroundStyle(.secondary)
                     Text("Rate or review a comic to start your diary.")
                         .font(.caption).foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if filteredEntries.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 48)).foregroundStyle(.quaternary)
+                    Text("No matching entries.")
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -103,9 +131,22 @@ struct DiaryView: View {
         .padding(.horizontal, 24).padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture { openedComic = entry.comic }
+        .contextMenu {
+            Button("Delete Entry", role: .destructive) { delete(entry) }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(entry.comic.title), \(entry.comic.series), \(entry.rating) star\(entry.rating == 1 ? "" : "s")\(entry.isReread ? ", reread" : "")")
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Delete Entry") { delete(entry) }
+    }
+
+    private func delete(_ entry: DiaryEntry) {
+        Task {
+            await Task.detached(priority: .utility) {
+                DatabaseManager.shared.deleteDiaryEntry(id: entry.id)
+            }.value
+            await load()
+        }
     }
 
     private func readOnlyStars(_ rating: Int) -> some View {
@@ -121,21 +162,18 @@ struct DiaryView: View {
 
     private func load() async {
         isLoading = true
-        let (e, g) = await Task.detached(priority: .userInitiated) {
-            let rows = DatabaseManager.shared.diaryEntries(limit: 500)
-            // loggedAt is stored as CURRENT_TIMESTAMP (UTC) -- grouping by its raw date substring
-            // splits/merges entries on a UTC midnight boundary that has nothing to do with the
-            // user's actual calendar day (e.g. a US-timezone reading session in the evening can
-            // straddle UTC midnight and get split across two day headers).
-            let grp  = Dictionary(grouping: rows) { Self.localDayKey(from: $0.loggedAt) }
-                .sorted { $0.key > $1.key }
-                .map { (date: $0.key, entries: $0.value) }
-            return (rows, grp)
+        entries = await Task.detached(priority: .userInitiated) {
+            DatabaseManager.shared.diaryEntries(limit: 500)
         }.value
-        entries = e; grouped = g; isLoading = false
+        isLoading = false
     }
 
-    private static let utcParser: DateFormatter = {
+    // Explicitly `nonisolated`: these are read-only after initialization (DateFormatter is safe
+    // to use concurrently once configured), and `localDayKey` is called from inside the
+    // Task.detached in load() above -- without `nonisolated`, these static members are inferred
+    // MainActor-isolated (like the rest of this View type), producing a real compiler warning
+    // for calling a main-actor-isolated method from that nonisolated background context.
+    nonisolated private static let utcParser: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -143,7 +181,7 @@ struct DiaryView: View {
         return f
     }()
 
-    private static let localDayKeyFormatter: DateFormatter = {
+    nonisolated private static let localDayKeyFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -156,7 +194,7 @@ struct DiaryView: View {
         return f
     }()
 
-    private static func localDayKey(from iso: String) -> String {
+    nonisolated private static func localDayKey(from iso: String) -> String {
         guard let d = utcParser.date(from: iso) else { return String(iso.prefix(10)) }
         return localDayKeyFormatter.string(from: d)
     }

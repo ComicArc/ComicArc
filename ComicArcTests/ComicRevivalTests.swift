@@ -1,34 +1,27 @@
-import XCTest
+import Testing
+import Foundation
 @testable import ComicArc
 
-final class ComicRevivalTests: XCTestCase {
-    private var db: DatabaseManager!
-    private var tempPath: String!
+final class ComicRevivalTests {
+    private let db: DatabaseManager
+    private let tempPath: String
 
-    override func setUp() {
-        super.setUp()
-        tempPath = NSTemporaryDirectory() + "ComicRevivalTests-\(UUID().uuidString).sqlite"
-        db = DatabaseManager(dbPath: tempPath)
+    init() {
+        (db, tempPath) = makeTestDatabase(name: "ComicRevivalTests")
     }
 
-    override func tearDown() {
-        db = nil
+    deinit {
         try? FileManager.default.removeItem(atPath: tempPath)
-        super.tearDown()
     }
 
-    private func insert(title: String, path: String) {
-        db.batchInsert([DatabaseManager.ComicInsert(
-            title: title, filePath: path, publisher: "DC",
-            character: nil, series: "Batman", issueNumber: "1", pageCount: 20,
-            writer: nil, penciller: nil, year: nil, storyArc: nil, languageIso: nil, fileHash: nil
-        )])
+    private func insert(title: String, path: String) throws {
+        try insertTestComic(into: db, series: "Batman", publisher: "DC", issue: "1", title: title, filePath: path)
     }
 
-    func test_softDeletedComic_revivesOnRescanAtSamePath() {
+    @Test func softDeletedComicRevivesOnRescanAtSamePath() throws {
         let path = "/tmp/\(UUID().uuidString).cbz"
-        insert(title: "Batman #1", path: path)
-        let original = db.allComics(series: "Batman", sortOrder: .manual).first!
+        try insert(title: "Batman #1", path: path)
+        let original = try #require(db.allComics(series: "Batman", sortOrder: .manual).first)
         let originalId = original.id
 
         // Rate it and mark it a favorite, so we can confirm this survives the revival --
@@ -37,34 +30,34 @@ final class ComicRevivalTests: XCTestCase {
         db.setFavorite(originalId, true)
 
         db.softDelete([originalId])
-        XCTAssertTrue(db.allComics(series: "Batman", sortOrder: .manual).isEmpty,
-                      "soft-deleted comic must not appear in the library")
+        #expect(db.allComics(series: "Batman", sortOrder: .manual).isEmpty,
+                "soft-deleted comic must not appear in the library")
 
         // Simulate a rescan finding the file again at the exact same path.
-        insert(title: "Batman #1", path: path)
+        try insert(title: "Batman #1", path: path)
 
         let revived = db.allComics(series: "Batman", sortOrder: .manual)
-        XCTAssertEqual(revived.count, 1, "the comic must come back -- this is the core of the bug: INSERT OR IGNORE could never revive a soft-deleted row due to the UNIQUE(file_path) conflict")
-        XCTAssertEqual(revived[0].id, originalId, "reviving the SAME row (not creating a new one) is what keeps rating/favorite/tags/list-membership intact")
-        XCTAssertEqual(revived[0].rating, 5, "user data on the row must survive a revival")
-        XCTAssertTrue(revived[0].isFavorite)
+        #expect(revived.count == 1, "the comic must come back -- this is the core of the bug: INSERT OR IGNORE could never revive a soft-deleted row due to the UNIQUE(file_path) conflict")
+        #expect(revived[0].id == originalId, "reviving the SAME row (not creating a new one) is what keeps rating/favorite/tags/list-membership intact")
+        #expect(revived[0].rating == 5, "user data on the row must survive a revival")
+        #expect(revived[0].isFavorite)
     }
 
-    func test_softDeletedComicId_findsOnlyDeletedRows() {
+    @Test func softDeletedComicIdFindsOnlyDeletedRows() throws {
         let path = "/tmp/\(UUID().uuidString).cbz"
-        insert(title: "Batman #1", path: path)
-        let id = db.allComics(series: "Batman", sortOrder: .manual).first!.id
+        try insert(title: "Batman #1", path: path)
+        let id = try #require(db.allComics(series: "Batman", sortOrder: .manual).first).id
 
-        XCTAssertNil(db.softDeletedComicId(atPath: path), "an active (non-deleted) comic must not match")
+        #expect(db.softDeletedComicId(atPath: path) == nil, "an active (non-deleted) comic must not match")
 
         db.softDelete([id])
-        XCTAssertEqual(db.softDeletedComicId(atPath: path), id)
+        #expect(db.softDeletedComicId(atPath: path) == id)
     }
 
-    func test_revival_refreshesMetadataFromNewScan() {
+    @Test func revivalRefreshesMetadataFromNewScan() throws {
         let path = "/tmp/\(UUID().uuidString).cbz"
-        insert(title: "Batman #1", path: path)
-        let id = db.allComics(series: "Batman", sortOrder: .manual).first!.id
+        try insert(title: "Batman #1", path: path)
+        let id = try #require(db.allComics(series: "Batman", sortOrder: .manual).first).id
         db.softDelete([id])
 
         // Revive with different metadata, simulating the file having been re-tagged/renamed
@@ -75,10 +68,10 @@ final class ComicRevivalTests: XCTestCase {
             writer: "Tom King", penciller: nil, year: 2016, storyArc: nil, languageIso: nil, fileHash: nil
         )])
 
-        let revived = db.allComics(series: "Batman", sortOrder: .manual).first!
-        XCTAssertEqual(revived.id, id)
-        XCTAssertEqual(revived.title, "Batman #1 (2016)")
-        XCTAssertEqual(revived.pageCount, 22)
-        XCTAssertEqual(revived.writer, "Tom King")
+        let revived = try #require(db.allComics(series: "Batman", sortOrder: .manual).first)
+        #expect(revived.id == id)
+        #expect(revived.title == "Batman #1 (2016)")
+        #expect(revived.pageCount == 22)
+        #expect(revived.writer == "Tom King")
     }
 }
