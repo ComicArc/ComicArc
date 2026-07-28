@@ -180,7 +180,17 @@ struct StarRating: View {
 
 struct TagChip: View {
     let name: String
+    var category: String? = nil
     var onRemove: (() -> Void)? = nil
+
+    private var tint: Color {
+        switch TagCategory(rawValue: category ?? "") {
+        case .genre:  return Design.brandGold
+        case .mood:   return .purple
+        case .format: return .teal
+        case .custom, nil: return Design.brandBlue
+        }
+    }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -193,11 +203,11 @@ struct TagChip: View {
                 .accessibilityLabel("Remove tag \(name)")
             }
         }
-        .foregroundStyle(Design.brandBlue)
+        .foregroundStyle(tint)
         .padding(.horizontal, 10).padding(.vertical, 4)
-        .background(Design.brandBlue.opacity(0.14))
+        .background(tint.opacity(0.14))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Design.brandBlue.opacity(0.3)))
+        .overlay(Capsule().stroke(tint.opacity(0.3)))
     }
 }
 

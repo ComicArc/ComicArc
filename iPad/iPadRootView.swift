@@ -44,10 +44,18 @@ struct iPadRootView: View {
                     Spacer()
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
+            } else if vm.renameCandidateCount > 0, !vm.renameSuggestionDismissed {
+                VStack {
+                    iPadRenameSuggestionBanner
+                        .padding(.top, 8)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(Design.springGentle, value: vm.pendingUndo?.message)
         .animation(Design.springGentle, value: vm.showScanReport)
+        .animation(Design.springGentle, value: vm.renameCandidateCount)
         .onReceive(NotificationCenter.default.publisher(for: .triggerRenameFiles)) { _ in
             showRenameFilesGlobal = true
         }
@@ -68,6 +76,31 @@ struct iPadRootView: View {
                 Image(systemName: "xmark").font(.caption2)
             }
             .buttonStyle(.plain).foregroundStyle(.white.opacity(0.6))
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 20)
+    }
+
+    private var iPadRenameSuggestionBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "textformat")
+                .foregroundStyle(Design.brandBlue).font(.caption)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Filenames Could Be Cleaned Up").font(.caption.bold()).foregroundStyle(.white)
+                Text("\(vm.renameCandidateCount) file\(vm.renameCandidateCount == 1 ? "" : "s") don't match the library's naming convention.")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.7))
+            }
+            Button("Review") { showRenameFilesGlobal = true }
+                .font(.caption.bold())
+                .foregroundStyle(Design.brandGold)
+                .buttonStyle(.plain)
+            Button { vm.dismissRenameSuggestion() } label: {
+                Image(systemName: "xmark").font(.caption2)
+            }
+            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.6))
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
@@ -100,6 +133,7 @@ struct iPadRootView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.6))
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
         .background(.black.opacity(0.92), in: Capsule())
@@ -112,6 +146,17 @@ private struct iPadSidebar: View {
     @AppStorage(SidebarCustomization.orderKey)  private var discoverOrderRaw  = ""
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @State private var draggedPublisher: String?
+    @State private var showAllTags = false
+    @State private var showMoreDiscover = false
+
+    // Matches ContentView.swift's Mac sidebar: three daily-use Discover items stay always
+    // visible, everything else collapses into "More" so day-one doesn't show 9 equally-weighted
+    // rows at once.
+    private let coreDiscoverItems: Set<DiscoverItem> = [.runs, .stats, .history]
+
+    private var moreDiscoverAlertCount: Int {
+        vm.duplicateGroups.count + vm.autoPlacedIssues.count + vm.pendingMetadataConflicts.count
+    }
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -145,6 +190,16 @@ private struct iPadSidebar: View {
                                 draggedPublisher = nil
                                 return true
                             }
+                            // Keyboard/VoiceOver alternative to the drag reorder above -- onDrag/
+                            // onDrop alone has no accessible fallback for a user who can't drag.
+                            .accessibilityAction(named: "Move Up") {
+                                guard let idx = vm.publishers.firstIndex(of: pub), idx > 0 else { return }
+                                vm.movePublisher(from: pub, to: vm.publishers[idx - 1])
+                            }
+                            .accessibilityAction(named: "Move Down") {
+                                guard let idx = vm.publishers.firstIndex(of: pub), idx + 1 < vm.publishers.count else { return }
+                                vm.movePublisher(from: pub, to: vm.publishers[idx + 1])
+                            }
                     }
                 }
             }
@@ -155,24 +210,60 @@ private struct iPadSidebar: View {
                             .tag(AppDestination.tag(t.tag.name))
                             .badge(t.count)
                     }
+                    Button("See All Tags…") { showAllTags = true }
                 }
             }
             Section("Discover") {
-                ForEach(visibleDiscoverItems) { item in
-                    if item == .duplicates {
-                        if !vm.duplicateGroups.isEmpty {
-                            Label(item.title, systemImage: item.icon)
-                                .tag(item.destination)
-                                .badge(vm.duplicateGroups.count)
+                ForEach(visibleDiscoverItems.filter { coreDiscoverItems.contains($0) }) { item in
+                    Label(item.title, systemImage: item.icon).tag(item.destination)
+                }
+
+                let moreItems = visibleDiscoverItems.filter { !coreDiscoverItems.contains($0) }
+                if !moreItems.isEmpty {
+                    DisclosureGroup(isExpanded: $showMoreDiscover) {
+                        ForEach(moreItems) { item in
+                            if item == .duplicates {
+                                if !vm.duplicateGroups.isEmpty {
+                                    Label(item.title, systemImage: item.icon)
+                                        .tag(item.destination)
+                                        .badge(vm.duplicateGroups.count)
+                                }
+                            } else if item == .readingOrderManager {
+                                if !vm.autoPlacedIssues.isEmpty {
+                                    Label(item.title, systemImage: item.icon)
+                                        .tag(item.destination)
+                                        .badge(vm.autoPlacedIssues.count)
+                                }
+                            } else if item == .metadataConflicts {
+                                if !vm.pendingMetadataConflicts.isEmpty {
+                                    Label(item.title, systemImage: item.icon)
+                                        .tag(item.destination)
+                                        .badge(vm.pendingMetadataConflicts.count)
+                                }
+                            } else {
+                                Label(item.title, systemImage: item.icon).tag(item.destination)
+                            }
                         }
-                    } else if item == .readingOrderManager {
-                        if !vm.autoPlacedIssues.isEmpty {
-                            Label(item.title, systemImage: item.icon)
-                                .tag(item.destination)
-                                .badge(vm.autoPlacedIssues.count)
+                    } label: {
+                        // Same fix as the Mac sidebar: make the whole label row the tap target for
+                        // expanding/collapsing, not just the disclosure chevron.
+                        Button {
+                            withAnimation { showMoreDiscover.toggle() }
+                        } label: {
+                            HStack {
+                                Text("More")
+                                Spacer()
+                                if moreDiscoverAlertCount > 0 {
+                                    Text("\(moreDiscoverAlertCount)")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Design.brandGold, in: Capsule())
+                                }
+                            }
+                            .contentShape(Rectangle())
                         }
-                    } else {
-                        Label(item.title, systemImage: item.icon).tag(item.destination)
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -188,6 +279,9 @@ private struct iPadSidebar: View {
             } else if let err = vm.scanState.error, !vm.isScanning {
                 scanErrorBanner(err)
             }
+        }
+        .sheet(isPresented: $showAllTags) {
+            AllTagsView().environmentObject(vm)
         }
     }
 
@@ -237,6 +331,15 @@ private struct iPadContentColumn: View {
             case .runs:
                 RunsView().environmentObject(vm)
                     .navigationTitle("Reading Paths")
+            case .diary:
+                DiaryView()
+                    .navigationTitle("Diary")
+            case .tierLists:
+                TierListsView().environmentObject(vm)
+                    .navigationTitle("Tier Lists")
+            case .favoriteMoments:
+                FavoriteMomentsView().environmentObject(vm)
+                    .navigationTitle("Favorite Moments")
             case .history:
                 ReadingHistoryView().environmentObject(vm)
                     .navigationTitle("History")
@@ -246,6 +349,9 @@ private struct iPadContentColumn: View {
             case .readingOrderManager:
                 ReadingOrderManagerView().environmentObject(vm)
                     .navigationTitle("Reading Order Suggestions")
+            case .metadataConflicts:
+                MetadataConflictsView().environmentObject(vm)
+                    .navigationTitle("Needs Review")
             case .settings:
                 iPadSettingsView()
                     .navigationTitle("Settings")
@@ -267,7 +373,7 @@ private struct iPadContentColumn: View {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
                 }
-                .disabled(vm.isScanning || vm.isResyncing || vm.libraryPath.isEmpty)
+                .disabled(vm.isScanning || vm.isResyncing || vm.libraryPaths.isEmpty)
                 .accessibilityLabel("Resync Library")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -280,6 +386,7 @@ private struct iPadContentColumn: View {
 private struct iPadDetailColumn: View {
     let comic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
+    @State private var showInfo = false
 
     var body: some View {
         Group {
@@ -324,6 +431,14 @@ private struct iPadDetailColumn: View {
                             .buttonStyle(.bordered)
                             .controlSize(.large)
                             .accessibilityLabel(comic.inReadingList ? "Remove from reading list" : "Add to reading list")
+
+                            Button { showInfo = true } label: {
+                                Image(systemName: "info.circle")
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .accessibilityLabel("Metadata info")
                         }
                         .padding(.horizontal)
 
@@ -332,6 +447,9 @@ private struct iPadDetailColumn: View {
                 }
                 .navigationTitle(comic.title)
                 .navigationBarTitleDisplayMode(.large)
+                .sheet(isPresented: $showInfo) {
+                    MetadataInspectorView(comicId: comic.id).environmentObject(vm)
+                }
             } else {
                 ContentUnavailableView("Select a Comic",
                                        systemImage: "book.closed",
@@ -390,6 +508,17 @@ private struct iPadComicGrid: View {
                                 vm.moveComic(id: from, before: comic.id)
                                 draggedId = nil; dropTargetId = nil
                                 return true
+                            }
+                            // Keyboard/VoiceOver alternative to the drag reorder above.
+                            .accessibilityAction(named: "Move Up") {
+                                guard let idx = comics.firstIndex(where: { $0.id == comic.id }), idx > 0 else { return }
+                                vm.moveComic(id: comic.id, before: comics[idx - 1].id)
+                            }
+                            .accessibilityAction(named: "Move Down") {
+                                guard let idx = comics.firstIndex(where: { $0.id == comic.id }), idx + 1 < comics.count else { return }
+                                // Moving the *next* comic to before this one is equivalent to
+                                // moving this comic down by one, without needing a "move after" API.
+                                vm.moveComic(id: comics[idx + 1].id, before: comic.id)
                             }
                     }
                 }
@@ -528,7 +657,7 @@ private struct iPadComicMeta: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(tags) { tag in
-                                TagChip(name: tag.name) { removeTag(tag) }
+                                TagChip(name: tag.name, category: tag.category) { removeTag(tag) }
                             }
                         }
                         .padding(.horizontal)
@@ -605,8 +734,9 @@ struct iPadSettingsView: View {
     @Environment(\.fileService) private var fileService
     @AppStorage("scrollMode")    private var scrollMode    = false
     @AppStorage("autoplaySpeed") private var autoplaySpeed: Double = 6.0
-    @AppStorage("libraryPath")   private var libraryPath   = ""
     @State private var showClearConfirm = false
+    @State private var showClearLibraryConfirm = false
+    @State private var showRerunOnboardingConfirm = false
     @State private var showRenameFiles  = false
     @State private var cacheCleared     = false
     @State private var comicCount       = 0
@@ -617,6 +747,7 @@ struct iPadSettingsView: View {
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @AppStorage("appTheme") private var appThemeRaw = AppTheme.dark.rawValue
     @AppStorage("customAccentColorHex") private var customAccentHex: String = ""
+    @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
 
     private var smartReadingOrderIsOn: Binding<Bool> {
         Binding(get: { vm.readingOrderMode == .intelligent },
@@ -638,8 +769,32 @@ struct iPadSettingsView: View {
         }
     }
 
+    private static let sectionTitles = ["Appearance", "Sidebar", "Reader", "Library", "Reading Order",
+                                        "Comics Database", "Fix Filenames", "Data", "Backup", "Help", "About"]
+
+    private func sectionMatches(_ title: String) -> Bool {
+        SettingsSearch.matches(title, query: vm.searchText)
+    }
+
+    private var noSectionsMatch: Bool {
+        SettingsSearch.noneMatch(Self.sectionTitles, query: vm.searchText)
+    }
+
     var body: some View {
         Form {
+            if noSectionsMatch {
+                Section {
+                    VStack(spacing: 14) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 36)).foregroundStyle(.quaternary)
+                        Text("No Matching Settings").foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 30)
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if sectionMatches("Appearance") {
             Section {
                 Picker("Theme", selection: Binding(
                     get: { AppTheme(rawValue: appThemeRaw) ?? .dark },
@@ -669,7 +824,9 @@ struct iPadSettingsView: View {
             } header: {
                 Text("Appearance")
             }
+            }
 
+            if sectionMatches("Sidebar") {
             Section("Sidebar") {
                 Text("Reorder or hide the Discover section. Library, Publishers, and Tags always show.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -705,7 +862,9 @@ struct iPadSettingsView: View {
                     }
                 }
             }
+            }
 
+            if sectionMatches("Reader") {
             Section("Reader") {
                 Toggle("Scroll Mode", isOn: $scrollMode)
                 VStack(alignment: .leading, spacing: 4) {
@@ -717,29 +876,35 @@ struct iPadSettingsView: View {
                     Slider(value: $autoplaySpeed, in: 1.0...15.0, step: 0.5)
                 }
             }
+            }
 
+            if sectionMatches("Library") {
             Section {
-                if libraryPath.isEmpty {
+                if vm.libraryPaths.isEmpty {
                     Text("No library folder set. Comics can still be imported one at a time with the + button, or choose a folder here to scan its whole contents (including subfolders) and pick up new files automatically whenever you return to the app.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
-                    HStack {
-                        Label("Library Folder", systemImage: "folder")
-                        Spacer()
-                        Text(URL(fileURLWithPath: libraryPath).lastPathComponent)
-                            .foregroundStyle(.secondary).lineLimit(1)
+                    ForEach(vm.libraryPaths, id: \.self) { path in
+                        HStack {
+                            Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "folder")
+                            Spacer()
+                            Button(role: .destructive) { vm.removeLibraryFolder(path) } label: {
+                                Image(systemName: "minus.circle.fill")
+                            }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .accessibilityLabel("Remove \(path)")
+                        }
                     }
                 }
                 Button {
                     fileService.pickFolder { url in
                         guard let url else { return }
-                        libraryPath = url.path
-                        vm.scan()
+                        vm.addLibraryFolder(url.path)
                     }
                 } label: {
-                    Label(libraryPath.isEmpty ? "Choose Library Folder…" : "Change Library Folder…", systemImage: "folder.badge.plus")
+                    Label(vm.libraryPaths.isEmpty ? "Choose Library Folder…" : "Add Another Folder…", systemImage: "folder.badge.plus")
                 }
-                if !libraryPath.isEmpty {
+                if !vm.libraryPaths.isEmpty {
                     Button { vm.scan() } label: {
                         Label("Scan Now", systemImage: "arrow.clockwise")
                     }
@@ -763,7 +928,9 @@ struct iPadSettingsView: View {
             } footer: {
                 Text("CBZ, PDF, JPG, and PNG are supported. CBR isn't readable on iPad — extraction needs a command-line tool that doesn't exist in the iOS sandbox. If reading order or metadata looks wrong, use Resync Library — it rescans and re-derives metadata for every comic.")
             }
+            }
 
+            if sectionMatches("Reading Order") {
             Section("Reading Order") {
                 Toggle("Smart Reading Order", isOn: smartReadingOrderIsOn)
                 Text("Automatically places annuals and specials in their correct spot in a series instead of dumping them at the end. Turn this off to go back to the original order.")
@@ -785,7 +952,9 @@ struct iPadSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            }
 
+            if sectionMatches("Comics Database") {
             Section("Comics Database") {
                 if OfflineMetadataStore.shared.isAvailable {
                     Label("Downloaded" + (gcdSizeLabel.map { " · \($0)" } ?? ""), systemImage: "checkmark.circle.fill")
@@ -816,9 +985,11 @@ struct iPadSettingsView: View {
                     }
                 }
             }
+            }
 
+            if sectionMatches("Fix Filenames") {
             Section {
-                Text("ComicArc reads folders as Publisher / Character / Series, and file names as \"Series #Issue\" (e.g. \"Batman #427.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
+                Text("ComicArc reads folders as Publisher / Character / Series. It's flexible about the exact filename on import, but reads most reliably — and renames to — ComicArc's canonical format: \"Series (Edition) #Issue\" (e.g. \"Batman (2016) #001.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button {
                     showRenameFiles = true
@@ -828,8 +999,10 @@ struct iPadSettingsView: View {
             } header: {
                 Text("Fix Filenames")
             }
+            }
 
-            Section {
+            if sectionMatches("Data") {
+            Section("Data") {
                 HStack {
                     Label("Comics imported", systemImage: "books.vertical")
                     Spacer()
@@ -838,8 +1011,23 @@ struct iPadSettingsView: View {
                 Button(role: .destructive) { showClearConfirm = true } label: {
                     Label("Clear Thumbnail Cache", systemImage: "trash")
                 }
+                Button(role: .destructive) { showClearLibraryConfirm = true } label: {
+                    Label("Clear Library…", systemImage: "trash.fill")
+                }
+            }
             }
 
+            if sectionMatches("Help") {
+            Section("Help") {
+                Button {
+                    showRerunOnboardingConfirm = true
+                } label: {
+                    Label("Run Setup Again…", systemImage: "arrow.counterclockwise")
+                }
+            }
+            }
+
+            if sectionMatches("Backup") {
             Section {
                 Button {
                     BackupService.export(fileService: fileService) { backupErrorMessage = $0 }
@@ -854,9 +1042,11 @@ struct iPadSettingsView: View {
             } header: {
                 Text("Backup")
             } footer: {
-                Text("Backs up ratings, reviews, tags, bookmarks, and reading orders. Comics themselves stay wherever they already are.")
+                Text("Backs up ratings, reviews, tags, bookmarks, reading orders, lists, diary entries, and series links. Comics themselves stay wherever they already are.")
+            }
             }
 
+            if sectionMatches("About") {
             Section("About") {
                 HStack {
                     Text("ComicArc")
@@ -869,6 +1059,7 @@ struct iPadSettingsView: View {
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
+            }
         }
         .formStyle(.grouped)
         .confirmationDialog("Clear the thumbnail cache? Thumbnails will be regenerated on next view.",
@@ -880,6 +1071,19 @@ struct iPadSettingsView: View {
         }
         .alert("Cache cleared", isPresented: $cacheCleared) {
             Button("OK", role: .cancel) {}
+        }
+        .confirmationDialog("Clear Library?", isPresented: $showClearLibraryConfirm, titleVisibility: .visible) {
+            Button("Clear Library", role: .destructive) { vm.clearLibrary() }
+        } message: {
+            Text("This will permanently remove all comics, reading progress, ratings, reviews, reading paths, tier lists, tags, bookmarks, and cached thumbnails. Your actual comic files will not be deleted.")
+        }
+        .confirmationDialog("Run Setup Again?", isPresented: $showRerunOnboardingConfirm, titleVisibility: .visible) {
+            Button("Erase & Run Setup", role: .destructive) {
+                vm.clearLibrary(resetPreferences: true)
+                completedBuild = ""
+            }
+        } message: {
+            Text("This will erase your entire library database, all reading progress, ratings, reviews, reading paths, tier lists, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
         }
         .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
         .alert("Backup Error", isPresented: Binding(get: { backupErrorMessage != nil }, set: { if !$0 { backupErrorMessage = nil } })) {

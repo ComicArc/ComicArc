@@ -1,6 +1,8 @@
 import Foundation
+import UniformTypeIdentifiers
 
 enum BackupService {
+    @MainActor
     static func export(fileService: any FileServiceProtocol, filename: String = "ComicArc-backup.json",
                         onError: @escaping (String) -> Void) {
         fileService.pickSaveDestination(filename: filename) { savedURL in
@@ -9,6 +11,8 @@ enum BackupService {
                 let backup: [String: Any] = await Task.detached(priority: .utility) {
                     let db = DatabaseManager.shared
                     let comics = db.allComics()
+                    let manualMatchesById = Dictionary(uniqueKeysWithValues:
+                        db.manualGCDMatchDetails().map { ($0.comicId, $0) })
 
                     let comicsJSON: [[String: Any]] = comics.map { c in
                         var d: [String: Any] = ["id": c.id, "title": c.title, "file_path": c.filePath,
@@ -22,7 +26,17 @@ enum BackupService {
                         if !tagNames.isEmpty { d["tags"] = tagNames }
                         let marks = db.bookmarks(comicId: c.id)
                         if !marks.isEmpty {
-                            d["bookmarks"] = marks.map { ["page": $0.page, "label": $0.label] }
+                            d["bookmarks"] = marks.map { ["page": $0.page, "label": $0.label, "is_favorite": $0.isFavorite] }
+                        }
+                        // A manual GCD match is a deliberate user choice (via the "Fix Match"
+                        // picker) -- worth preserving across a restore, unlike an automatic match,
+                        // which is disposable derived data the next scan regenerates on its own.
+                        if let manual = manualMatchesById[c.id] {
+                            var match: [String: Any] = ["gcd_issue_id": manual.gcdIssueId]
+                            if let s = manual.seriesName { match["gcd_series_name"] = s }
+                            if let n = manual.issueNumber { match["gcd_issue_number"] = n }
+                            if let cd = manual.coverDate { match["gcd_cover_date"] = cd }
+                            d["gcd_manual_match"] = match
                         }
                         return d
                     }
@@ -40,7 +54,39 @@ enum BackupService {
                         return d
                     }
 
-                    return ["comics": comicsJSON, "runs": runsJSON]
+                    let tierListsJSON: [[String: Any]] = db.allTierLists().map { tierList in
+                        var d: [String: Any] = ["title": tierList.title, "description": tierList.description]
+                        if let r = tierList.rating { d["rating"] = r }
+                        if let rv = tierList.review { d["review"] = rv }
+                        d["items"] = db.tierListItems(tierListId: tierList.id).compactMap { item -> [String: Any]? in
+                            guard let path = pathById[item.comic.id] else { return nil }
+                            return ["file_path": path, "tier": item.tier, "position": item.position]
+                        }
+                        return d
+                    }
+
+                    let diaryJSON: [[String: Any]] = db.diaryEntries(limit: Int.max).compactMap { entry -> [String: Any]? in
+                        guard let path = pathById[entry.comic.id] else { return nil }
+                        var d: [String: Any] = ["file_path": path, "rating": entry.rating,
+                                                "is_reread": entry.isReread, "logged_at": entry.loggedAt]
+                        if let rv = entry.review, !rv.isEmpty { d["review"] = rv }
+                        return d
+                    }
+
+                    let seriesLinksJSON: [[String: Any]] = db.seriesLinks().map { link in
+                        ["parent_publisher": link.parentPublisher, "parent_series": link.parentSeries,
+                         "child_publisher": link.childPublisher, "child_series": link.childSeries,
+                         "sequence_order": link.sequenceOrder, "source": link.source]
+                    }
+
+                    let overridesJSON: [[String: Any]] = db.allReadingOrderOverrides().map { o in
+                        ["file_path": o.filePath, "position": o.position, "reason": o.reason]
+                    }
+
+                    return ["comics": comicsJSON, "runs": runsJSON,
+                            "tier_lists": tierListsJSON,
+                            "diary": diaryJSON, "series_links": seriesLinksJSON,
+                            "reading_order_overrides": overridesJSON]
                 }.value
                 do {
                     let data = try JSONSerialization.data(withJSONObject: backup, options: .prettyPrinted)
@@ -56,25 +102,38 @@ enum BackupService {
     @MainActor
     static func `import`(fileService: any FileServiceProtocol, vm: LibraryViewModel,
                           onError: @escaping (String) -> Void) {
-        fileService.pickFiles(allowsMultiple: false, message: "", prompt: "Import") { urls in
+        fileService.pickFiles(allowsMultiple: false, message: "", prompt: "Import", contentTypes: [.json]) { urls in
             guard let url = urls.first else { return }
             Task {
                 let result = await Task.detached(priority: .utility) { () -> String? in
-                    guard let data = try? Data(contentsOf: url),
-                          let parsed = try? JSONSerialization.jsonObject(with: data) else {
-                        return "Could not read backup file."
+                    let data: Data
+                    do {
+                        data = try Data(contentsOf: url)
+                    } catch {
+                        return "Could not read backup file: \(error.localizedDescription)"
+                    }
+                    let parsed: Any
+                    do {
+                        parsed = try JSONSerialization.jsonObject(with: data)
+                    } catch {
+                        return "Backup file is not valid JSON: \(error.localizedDescription)"
                     }
                     let db = DatabaseManager.shared
-                    let knownPaths = db.knownPaths()
 
                     let root = parsed as? [String: Any]
                     let comicsArr = root?["comics"] as? [[String: Any]] ?? (parsed as? [[String: Any]]) ?? []
+                    // Resolve each backed-up comic to its *current* row by file path rather than
+                    // trusting the numeric "id" stored in the backup JSON -- SQLite autoincrement
+                    // ids are reassigned after clearLibrary()/resyncLibrary(), both user-triggered,
+                    // so a path that still exists can belong to a different row than the id
+                    // recorded at backup time. Restoring against the wrong id would silently
+                    // overwrite an unrelated comic's rating/favorites/progress/notes/tags/bookmarks.
+                    let pathsInBackup = comicsArr.compactMap { $0["file_path"] as? String }
+                    let currentIdByPath = Dictionary(uniqueKeysWithValues: db.comics(withPaths: pathsInBackup).map { ($0.filePath, $0.id) })
                     var comicIdByPath: [String: Int64] = [:]
                     for item in comicsArr {
-                        guard let path = item["file_path"] as? String, knownPaths.contains(path) else { continue }
-                        let id = (item["id"] as? Int64) ?? (item["id"] as? Int).map(Int64.init)
-                               ?? (item["id"] as? Double).map(Int64.init) ?? nil
-                        guard let comicId = id, comicId > 0 else { continue }
+                        guard let path = item["file_path"] as? String,
+                              let comicId = currentIdByPath[path] else { continue }
                         comicIdByPath[path] = comicId
                         if let r = item["rating"] as? Int, r > 0 { db.setRating(comicId, rating: r) }
                         if let f = item["is_favorite"] as? Bool   { db.setFavorite(comicId, f) }
@@ -90,7 +149,16 @@ enum BackupService {
                                 guard let page = m["page"] as? Int else { continue }
                                 if !db.isBookmarked(comicId: comicId, page: page) { db.toggleBookmark(comicId: comicId, page: page) }
                                 if let label = m["label"] as? String, !label.isEmpty { db.setBookmarkLabel(comicId: comicId, page: page, label: label) }
+                                if let fav = m["is_favorite"] as? Bool, fav { db.setBookmarkFavorite(comicId: comicId, page: page, isFavorite: true) }
                             }
+                        }
+                        if let match = item["gcd_manual_match"] as? [String: Any], let gcdIssueId = match["gcd_issue_id"] as? Int {
+                            db.restoreManualGCDMatch(
+                                comicId: comicId, gcdIssueId: gcdIssueId,
+                                seriesName: match["gcd_series_name"] as? String,
+                                issueNumber: match["gcd_issue_number"] as? String,
+                                coverDate: match["gcd_cover_date"] as? String
+                            )
                         }
                     }
 
@@ -121,6 +189,61 @@ enum BackupService {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    if let tierListsArr = root?["tier_lists"] as? [[String: Any]] {
+                        for tl in tierListsArr {
+                            guard let title = tl["title"] as? String,
+                                  let items = tl["items"] as? [[String: Any]], !items.isEmpty else { continue }
+                            let tierListId = db.tierListId(withTitle: title)
+                                ?? db.createTierList(title: title, description: tl["description"] as? String ?? "")
+                            let byTier = Dictionary(grouping: items) { $0["tier"] as? String ?? "B" }
+                            for (tier, tierItems) in byTier {
+                                let orderedComicIds: [Int64] = tierItems
+                                    .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
+                                    .compactMap { i in (i["file_path"] as? String).flatMap { currentIdByPath[$0] } }
+                                guard !orderedComicIds.isEmpty else { continue }
+                                db.addToTierList(tierListId: tierListId, comicIds: orderedComicIds, tier: tier)
+                            }
+                            if let rating = tl["rating"] as? Int {
+                                db.setTierListRating(tierListId, rating: rating, review: tl["review"] as? String)
+                            }
+                        }
+                    }
+
+                    if let diaryArr = root?["diary"] as? [[String: Any]] {
+                        for entry in diaryArr {
+                            guard let path = entry["file_path"] as? String,
+                                  let comicId = currentIdByPath[path],
+                                  let rating = entry["rating"] as? Int,
+                                  let loggedAt = entry["logged_at"] as? String else { continue }
+                            db.restoreDiaryEntry(comicId: comicId, rating: rating,
+                                                  review: entry["review"] as? String,
+                                                  isReread: entry["is_reread"] as? Bool ?? false,
+                                                  loggedAt: loggedAt)
+                        }
+                    }
+
+                    if let linksArr = root?["series_links"] as? [[String: Any]] {
+                        for link in linksArr {
+                            guard let parentPub = link["parent_publisher"] as? String,
+                                  let parentSer = link["parent_series"] as? String,
+                                  let childPub = link["child_publisher"] as? String,
+                                  let childSer = link["child_series"] as? String else { continue }
+                            db.addSeriesLink(parentPublisher: parentPub, parentSeries: parentSer,
+                                              childPublisher: childPub, childSeries: childSer,
+                                              source: link["source"] as? String ?? "manual")
+                        }
+                    }
+
+                    if let overridesArr = root?["reading_order_overrides"] as? [[String: Any]] {
+                        for o in overridesArr {
+                            guard let path = o["file_path"] as? String,
+                                  let comicId = currentIdByPath[path],
+                                  let position = o["position"] as? Int else { continue }
+                            db.setReadingOrderOverride(comicId: comicId, position: position,
+                                                        reason: o["reason"] as? String ?? "Manually placed")
                         }
                     }
                     return nil

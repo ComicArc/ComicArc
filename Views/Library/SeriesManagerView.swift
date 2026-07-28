@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SeriesManagerView: View {
     let series:    String
@@ -16,6 +17,10 @@ struct SeriesManagerView: View {
     @State private var showOnlyFlagged  = false
     @State private var showSeriesLinkPicker = false
     @State private var pagePickerIssue: Comic? = nil
+    // Bumped whenever a custom cover is set for a row -- IssueThumbnail's `.task` only runs once
+    // per view identity, so merely refetching `issues` (same comic ids, same ForEach identity)
+    // would never make an already-appeared row re-query ThumbnailCache and pick up the new image.
+    @State private var thumbnailRefreshToken = 0
 
     private var flaggedCount: Int { issues.filter { ($0.readingOrderConfidence ?? 100) < 85 }.count }
     private var visibleIssues: [Comic] {
@@ -75,6 +80,7 @@ struct SeriesManagerView: View {
         .sheet(item: $pagePickerIssue) { issue in
             ComicPageCoverPicker(comic: issue) { image in
                 ThumbnailCache.shared.setCustomCover(comicId: issue.id, image: image)
+                thumbnailRefreshToken += 1
                 Task { await loadIssues() }
             }
         }
@@ -176,6 +182,7 @@ struct SeriesManagerView: View {
 
             IssueThumbnail(comic: issue)
                 .frame(width: 36, height: 52)
+                .id("\(issue.id)-\(thumbnailRefreshToken)")
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -346,10 +353,12 @@ struct SeriesManagerView: View {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(issue.title)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             guard let url = urls.first else { return }
             ThumbnailCache.shared.setCustomCover(comicId: issue.id, imageURL: url)
+            thumbnailRefreshToken += 1
         }
     }
 }

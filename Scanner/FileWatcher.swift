@@ -6,7 +6,6 @@ import CoreServices
 final class FileWatcher {
     private var stream: FSEventStreamRef?
     private let supported = LibraryScanner.supportedExtensions
-    private var libraryPath: String = ""
     private let onAdded:   (URL)    -> Void
     private let onRemoved: (String) -> Void
 
@@ -20,10 +19,11 @@ final class FileWatcher {
         self.onVolumeUnavailable  = onVolumeUnavailable
     }
 
-    func start(path: String) {
+    /// One FSEventStream watching every configured root at once -- FSEvents natively accepts an
+    /// array of paths here, so this needs no per-folder stream/callback multiplication.
+    func start(paths: [String]) {
         stop()
-        libraryPath = path
-        let paths = [path] as CFArray
+        let cfPaths = paths as CFArray
         var ctx = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
                                        retain: nil, release: nil, copyDescription: nil)
         stream = FSEventStreamCreate(
@@ -60,7 +60,7 @@ final class FileWatcher {
                     }
                 }
             },
-            &ctx, paths,
+            &ctx, cfPaths,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 1.0,
             FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents |
                                      kFSEventStreamCreateFlagUseCFTypes |
@@ -84,7 +84,7 @@ final class FileWatcher {
     init(onAdded: @escaping (URL) -> Void,
          onRemoved: @escaping (String) -> Void,
          onVolumeUnavailable: (() -> Void)? = nil) {}
-    func start(path: String) {}
+    func start(paths: [String]) {}
     func stop() {}
 }
 

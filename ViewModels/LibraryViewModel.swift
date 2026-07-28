@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CoreSpotlight
 import UserNotifications
+import os
 
 enum AppDestination: Hashable, Codable {
     case library
@@ -11,10 +12,14 @@ enum AppDestination: Hashable, Codable {
     case publisher(String)
     case tag(String)
     case runs
+    case diary
+    case tierLists
+    case favoriteMoments
     case stats
     case history
     case duplicates
     case readingOrderManager
+    case metadataConflicts
     case settings
 
     var title: String {
@@ -26,10 +31,14 @@ enum AppDestination: Hashable, Codable {
         case .publisher(let p):     return p
         case .tag(let t):           return "#\(t)"
         case .runs:                 return "Reading Paths"
+        case .diary:                return "Diary"
+        case .tierLists:            return "Tier Lists"
+        case .favoriteMoments:      return "Favorite Moments"
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
         case .readingOrderManager:  return "Reading Order Suggestions"
+        case .metadataConflicts:    return "Needs Review"
         case .settings:             return "Settings"
         }
     }
@@ -43,10 +52,14 @@ enum AppDestination: Hashable, Codable {
         case .publisher:            return "building.columns"
         case .tag:                  return "tag"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
+        case .diary:                return "text.book.closed.fill"
+        case .tierLists:            return "square.stack.3d.up.fill"
+        case .favoriteMoments:      return "star.circle.fill"
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
         case .duplicates:           return "doc.on.doc"
         case .readingOrderManager:  return "checkmark.seal"
+        case .metadataConflicts:    return "exclamationmark.triangle"
         case .settings:             return "gear"
         }
     }
@@ -83,6 +96,8 @@ final class LibraryViewModel: ObservableObject {
     @Published var showScanReport:      Bool = false
     @Published var showImportWizard:    Bool = false
     @Published var libraryHealthReport: LibraryHealthReport? = nil
+    @Published var renameCandidateCount: Int = 0
+    @Published var renameSuggestionDismissed: Bool = false
     private var scanReportDismissTask: DispatchWorkItem?
 
     struct UndoableAction {
@@ -115,7 +130,23 @@ final class LibraryViewModel: ObservableObject {
     @Published var isLibraryAvailable:  Bool = true
     @Published var selectedComic:     Comic? = nil
     @Published var selectedRun:       Run? = nil
-    @Published var readerComic:       Comic? = nil
+    @Published var selectedTierList:  TierList? = nil
+    /// Set alongside `readerComic` when opening at a specific page (e.g. jumping to a favorite
+    /// moment) rather than the comic's own saved resume position -- read once by ReaderView's
+    /// init. `openReader(_:atPage:)`'s `nil` default means every ordinary open already resets
+    /// this, so it can't leak a stale page onto the next comic.
+    @Published var readerInitialPage: Int? = nil
+    @Published var readerComic:       Comic? = nil {
+        didSet {
+            // The reader is presented as a ZStack overlay in ContentView, not a navigation push,
+            // so RunDetailView never disappears/reappears around a read and is never otherwise
+            // told its `items` snapshot (progress, "first unfinished"/Resume target) is now
+            // stale. Broadcast on close so it can refresh.
+            if oldValue != nil, readerComic == nil {
+                NotificationCenter.default.post(name: .readerDidClose, object: nil)
+            }
+        }
+    }
 
     @Published var characterGroups:   [DatabaseManager.CharacterGroup] = []
     @Published var seriesGroups:      [DatabaseManager.SeriesGroup] = []
@@ -129,14 +160,19 @@ final class LibraryViewModel: ObservableObject {
 
     @Published var duplicateGroups:   [[Comic]] = []
     @Published var autoPlacedIssues:  [Comic] = []
+    @Published var pendingMetadataConflicts: [MetadataConflictRow] = []
 
     var selectedSection: SidebarSection {
         switch destination {
         case .runs:            return .runs
+        case .diary:           return .diary
+        case .tierLists:       return .tierLists
+        case .favoriteMoments: return .favoriteMoments
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
         case .readingOrderManager: return .readingOrderManager
+        case .metadataConflicts: return .metadataConflicts
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
         case .readingList:     return .readingList
@@ -155,7 +191,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, stats, history, duplicates, readingOrderManager, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, diary, tierLists, favoriteMoments, stats, history, duplicates, readingOrderManager, metadataConflicts, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -168,23 +204,52 @@ final class LibraryViewModel: ObservableObject {
     private var db: DatabaseManager { .shared }
     private var watcher: FileWatcher?
     private var searchCancellable: AnyCancellable?
-    var libraryPath: String { UserDefaults.standard.string(forKey: "libraryPath") ?? "" }
+
+    /// The list of configured library folders -- the single source of truth every scan/watch/
+    /// import operation threads through. Backed by a real `@Published` var (not a plain computed
+    /// UserDefaults getter) so SwiftUI views observing this view model -- the Settings folder
+    /// list chief among them -- actually redraw when a folder is added or removed, not just
+    /// incidentally alongside some unrelated state change. `LibraryFolders.readMigrating()` seeds
+    /// the initial value, transparently upgrading an existing install's old single `libraryPath`
+    /// value into a one-element array the first time this runs.
+    @Published private var libraryPathsStorage: [String] = LibraryFolders.readMigrating()
+    var libraryPaths: [String] {
+        get { libraryPathsStorage }
+        set {
+            libraryPathsStorage = newValue
+            LibraryFolders.write(newValue)
+        }
+    }
+
+    func addLibraryFolder(_ path: String) {
+        var paths = libraryPaths
+        guard !paths.contains(path) else { return }
+        paths.append(path)
+        libraryPaths = paths
+        restartWatcher()
+        scan()
+    }
+
+    func removeLibraryFolder(_ path: String) {
+        var paths = libraryPaths
+        paths.removeAll { $0 == path }
+        libraryPaths = paths
+        #if os(iOS)
+        // Otherwise the underlying security-scoped bookmark survives in its own array and
+        // silently re-adds this path back to `libraryPaths` on the next launch.
+        removeLibraryFolderBookmark(path: path)
+        #endif
+        restartWatcher()
+    }
 
     private init() {
         #if os(iOS)
 
-        if let folder = resolveLibraryFolderBookmark() {
-            UserDefaults.standard.set(folder.path, forKey: "libraryPath")
-        }
+        let resolved = resolveLibraryFolderBookmarks()
+        if !resolved.isEmpty { libraryPaths = resolved.map(\.path) }
         #endif
 
         useGroupedView = true
-
-        if let data = UserDefaults.standard.data(forKey: "session.destination"),
-           let dest = try? JSONDecoder().decode(AppDestination.self, from: data) {
-            destination = dest
-            if case .tag = dest { useGroupedView = false }
-        }
 
         searchCancellable = $searchText
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
@@ -199,50 +264,16 @@ final class LibraryViewModel: ObservableObject {
 
         scan()
         #endif
-
-        if case .library = destination { restoreLibraryDrillDown() }
-    }
-
-    func saveNavigationState() {
-        if let data = try? JSONEncoder().encode(destination) {
-            UserDefaults.standard.set(data, forKey: "session.destination")
-        }
-        UserDefaults.standard.set(selectedGroup?.groupName ?? "", forKey: "session.groupName")
-        UserDefaults.standard.set(selectedGroup?.publisher ?? "", forKey: "session.groupPublisher")
-        UserDefaults.standard.set(selectedSeries ?? "", forKey: "session.series")
-    }
-
-    private func restoreLibraryDrillDown() {
-        let groupName = UserDefaults.standard.string(forKey: "session.groupName") ?? ""
-        let groupPub  = UserDefaults.standard.string(forKey: "session.groupPublisher") ?? ""
-        let series    = UserDefaults.standard.string(forKey: "session.series") ?? ""
-        guard !groupName.isEmpty else { return }
-
-        Task.detached(priority: .userInitiated) { [db] in
-            let groups = db.characterGroups(publisher: nil, search: nil)
-            guard let group = groups.first(where: { $0.groupName == groupName && $0.publisher == groupPub })
-            else { return }
-            let seriesList = db.seriesGroups(groupName: groupName, publisher: groupPub.isEmpty ? nil : groupPub)
-            await MainActor.run {
-                self.selectedGroup = group
-                if !series.isEmpty, seriesList.contains(where: { $0.series == series }) {
-                    self.selectedSeries = series
-                    self.reload()
-                } else {
-                    self.seriesGroups = seriesList
-                }
-            }
-        }
     }
 
     func reparseMetaIfNeeded() {
 
         let key = "folderMetaReparseV3"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        let path = libraryPath
-        guard !path.isEmpty else { return }
+        let paths = libraryPaths
+        guard !paths.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            LibraryScanner.shared.reparseAllMeta(libraryPath: path)
+            LibraryScanner.shared.reparseAllMeta(libraryRoots: paths)
             UserDefaults.standard.set(true, forKey: key)
             DispatchQueue.main.async { self?.reload() }
         }
@@ -251,7 +282,7 @@ final class LibraryViewModel: ObservableObject {
     func rehashLibraryIfNeeded() {
         let key = "fileHashRehashV1"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        guard !libraryPath.isEmpty else { return }
+        guard !libraryPaths.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async {
             LibraryScanner.shared.rehashAll()
             UserDefaults.standard.set(true, forKey: key)
@@ -259,21 +290,23 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func resyncLibrary() {
-        let path = libraryPath
-        guard !path.isEmpty, !isScanning, !isResyncing else { return }
+        let paths = libraryPaths
+        guard !paths.isEmpty, !isScanning, !isResyncing else { return }
         isResyncing = true
-        LibraryScanner.shared.scan(libraryPath: path) { [weak self] state in
+        LibraryScanner.shared.scan(libraryPaths: paths) { [weak self] state in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.scanState  = state
                 self.isScanning = state.running
                 guard !state.running else { return }
+                if !state.removedIds.isEmpty { self.removeFromSpotlight(state.removedIds) }
                 DispatchQueue.global(qos: .utility).async {
-                    LibraryScanner.shared.reparseAllMeta(libraryPath: path)
+                    LibraryScanner.shared.reparseAllMeta(libraryRoots: paths)
                     DispatchQueue.main.async {
                         self.reload()
                         self.indexSpotlight()
                         self.refreshDuplicates()
+                        self.refreshRenameCandidates()
                         self.isResyncing = false
                     }
                 }
@@ -380,8 +413,10 @@ final class LibraryViewModel: ObservableObject {
         selectedComicIds.removeAll()
 
         showSeriesManager = false
-        if case .tag = item { useGroupedView = false } else { useGroupedView = true }
-        saveNavigationState()
+        switch item {
+        case .tag: useGroupedView = false
+        default: useGroupedView = true
+        }
         reload()
     }
 
@@ -404,11 +439,9 @@ final class LibraryViewModel: ObservableObject {
                 self.selectedGroup = group
                 if series.count == 1 {
                     self.selectedSeries = series[0].series
-                    self.saveNavigationState()
                     self.reload()
                 } else {
                     self.seriesGroups = series
-                    self.saveNavigationState()
                 }
             }
         }
@@ -416,7 +449,6 @@ final class LibraryViewModel: ObservableObject {
 
     func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
         selectedSeries = sg.series
-        saveNavigationState()
         reload()
     }
 
@@ -444,7 +476,6 @@ final class LibraryViewModel: ObservableObject {
             comics         = []
             loadCharacterGroups()
         }
-        saveNavigationState()
     }
 
     func toggleBulkMode() {
@@ -497,6 +528,7 @@ final class LibraryViewModel: ObservableObject {
         let ids = Array(selectedComicIds)
         db.softDelete(ids)
         ids.forEach { ThumbnailCache.shared.evict($0) }
+        removeFromSpotlight(ids)
         selectedComicIds.removeAll()
         bulkMode = false
         reload()
@@ -505,15 +537,16 @@ final class LibraryViewModel: ObservableObject {
         offerUndo("\(ids.count) comic\(ids.count == 1 ? "" : "s") deleted") { [weak self] in
             self?.db.restore(ids)
             self?.reload()
+            self?.indexSpotlight()
         }
     }
 
     func scan() {
-        let path = libraryPath
-        guard !path.isEmpty, !isScanning else { return }
+        let paths = libraryPaths
+        guard !paths.isEmpty, !isScanning else { return }
         isScanning = true
         scanState = .init()
-        LibraryScanner.shared.scan(libraryPath: path) { [weak self] state in
+        LibraryScanner.shared.scan(libraryPaths: paths) { [weak self] state in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.scanState  = state
@@ -521,19 +554,21 @@ final class LibraryViewModel: ObservableObject {
                 if !state.running {
                     self.reload()
                     self.indexSpotlight()
+                    if !state.removedIds.isEmpty { self.removeFromSpotlight(state.removedIds) }
                     self.notifyScanComplete(added: state.added)
                     self.refreshDuplicates()
                     self.presentScanReport(state)
                     self.refreshLibraryHealth()
+                    self.refreshRenameCandidates()
                 }
             }
         }
     }
 
     func importFiles(_ urls: [URL]) {
-        let path = libraryPath
+        let roots = libraryPaths
         Task.detached(priority: .utility) { [weak self] in
-            for url in urls { LibraryScanner.shared.addSingle(url: url, libraryPath: path) }
+            for url in urls { LibraryScanner.shared.addSingle(url: url, libraryRoots: roots) }
             await self?.reload()
             await self?.refreshDuplicates()
 
@@ -547,9 +582,11 @@ final class LibraryViewModel: ObservableObject {
         Task.detached(priority: .utility) { [db] in
             let groups = db.duplicateGroups()
             let autoPlaced = db.autoPlacedSpecialIssues()
+            let conflicts = db.pendingMetadataConflicts().map { MetadataConflictRow(conflict: $0.conflict, comic: $0.comic) }
             await MainActor.run {
                 self.duplicateGroups = groups
                 self.autoPlacedIssues = autoPlaced
+                self.pendingMetadataConflicts = conflicts
             }
         }
     }
@@ -559,6 +596,25 @@ final class LibraryViewModel: ObservableObject {
             let report = LibraryHealthAnalyzer.analyze()
             await MainActor.run { self.libraryHealthReport = report.isEmpty ? nil : report }
         }
+    }
+
+    /// Surfaces "N files could be renamed to match the library" as a dismissible sidebar banner
+    /// after a scan, rather than requiring the user to remember Settings > Rename Files exists.
+    /// Renaming itself stays a manual, reviewable action (RenameFilesView) -- it moves files on
+    /// disk, which is exactly the kind of permanent change the app's own philosophy says should
+    /// always be confirmed, not auto-applied.
+    func refreshRenameCandidates() {
+        Task.detached(priority: .utility) { [db] in
+            let count = ComicFileNaming.renameCandidateCount(for: db.allComics())
+            await MainActor.run {
+                if count != self.renameCandidateCount { self.renameSuggestionDismissed = false }
+                self.renameCandidateCount = count
+            }
+        }
+    }
+
+    func dismissRenameSuggestion() {
+        renameSuggestionDismissed = true
     }
 
     func runManualHealthCheck() {
@@ -571,9 +627,9 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func openReader(_ comic: Comic) { readerComic = comic }
-    func openReader(id: Int64) { if let c = db.comic(id: id) { readerComic = c } }
-    func closeReader() { readerComic = nil }
+    func openReader(_ comic: Comic, atPage page: Int? = nil) { readerInitialPage = page; readerComic = comic }
+    func openReader(id: Int64, atPage page: Int? = nil) { if let c = db.comic(id: id) { readerInitialPage = page; readerComic = c } }
+    func closeReader() { readerComic = nil; readerInitialPage = nil }
 
     func clearLibrary(resetPreferences: Bool = false) {
 
@@ -593,32 +649,41 @@ final class LibraryViewModel: ObservableObject {
             }
         }
 
-        LibraryScanner.shared.runAfterCurrentWork { [db] in
+        LibraryScanner.shared.runAfterCurrentWork { [weak self, db] in
             db.clearAll()
             ThumbnailCache.shared.clearAll()
             CSSearchableIndex.default().deleteAllSearchableItems { _ in }
-            DispatchQueue.main.async { self.reload() }
+            DispatchQueue.main.async { self?.reload() }
         }
     }
 
     func startWatcher() {
-        let path = libraryPath
-        guard !path.isEmpty else { return }
+        let roots = libraryPaths
+        guard !roots.isEmpty else { return }
         let w = FileWatcher(
             onAdded: { [weak self] url in
                 self?.isLibraryAvailable = true
-                LibraryScanner.shared.addSingle(url: url, libraryPath: path)
-                self?.reload()
+                // addSingle does file hashing, ComicInfo.xml parsing, and a synchronous DB
+                // write on the scanner's serial queue -- run it off the main thread like
+                // importFiles does, or a Finder drop into the watched folder freezes the UI
+                // for the duration of that work, one file at a time.
+                Task.detached(priority: .utility) {
+                    LibraryScanner.shared.addSingle(url: url, libraryRoots: roots)
+                    await self?.reload()
+                }
             },
             onRemoved: { [weak self] p in
-                LibraryScanner.shared.removeSingle(path: p)
-                self?.reload()
+                Task.detached(priority: .utility) {
+                    let removedIds = LibraryScanner.shared.removeSingle(path: p)
+                    if !removedIds.isEmpty { await self?.removeFromSpotlight(removedIds) }
+                    await self?.reload()
+                }
             },
             onVolumeUnavailable: { [weak self] in
                 self?.isLibraryAvailable = false
             }
         )
-        w.start(path: path)
+        w.start(paths: roots)
         watcher = w
     }
 
@@ -739,8 +804,17 @@ final class LibraryViewModel: ObservableObject {
     private func patchComicLocally(_ comicId: Int64, removeIfNoLongerVisible: Bool = false, _ mutate: (inout Comic) -> Void) {
         guard let idx = comics.firstIndex(where: { $0.id == comicId }) else { return }
         mutate(&comics[idx])
-        if selectedComic?.id == comicId { mutate(&selectedComic!) }
+        if var sc = selectedComic, sc.id == comicId {
+            mutate(&sc)
+            selectedComic = sc
+        }
         if removeIfNoLongerVisible { comics.remove(at: idx) }
+        // Invalidate any reload that's still in flight: _reload() only applies its result if
+        // its captured generation still matches when it lands (see _reload()'s `guard gen ==
+        // self.reloadGeneration`). Without bumping it here too, a reload started just before
+        // this optimistic patch but landing just after it would silently overwrite this fresher
+        // state with the stale pre-patch snapshot it queried.
+        reloadGeneration += 1
     }
 
     func toggleFavorite(_ comic: Comic) {
@@ -786,8 +860,11 @@ final class LibraryViewModel: ObservableObject {
     func setReview(_ comic: Comic, review: String?) { db.setComicReview(comic.id, review: review?.isEmpty == false ? review : nil) }
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) { db.updateMeta(comicId: comicId, fields: fields) }
 
-    func addTag(name: String, to comic: Comic) { db.addTag(name: name, to: comic.id) }
+    func addTag(name: String, to comic: Comic, category: TagCategory = .custom) { db.addTag(name: name, to: comic.id, category: category) }
     func removeTag(tagId: Int64, from comic: Comic) { db.removeTag(tagId: tagId, from: comic.id) }
+    func renameTag(id: Int64, newName: String) { db.renameTag(id: id, newName: newName); reload() }
+    func deleteTagGlobally(id: Int64) { db.deleteTagGlobally(id: id); reload() }
+    func setTagCategory(id: Int64, category: TagCategory) { db.setTagCategory(id: id, category: category); reload() }
 
 
     func restoreComic(id: Int64) { db.restoreComic(id: id); reload() }
@@ -815,6 +892,22 @@ final class LibraryViewModel: ObservableObject {
     func reorderComics(orderedIds: [Int64]) {
         db.reorderComics(orderedIds: orderedIds)
         if sortOrder != .manual { sortOrder = .manual }
+    }
+
+    /// `apply`: adopts the proposed ComicInfo.xml-derived value (and reruns GCD matching/series
+    /// linking/reading order, since a corrected series/publisher can change all three). `dismiss`:
+    /// keeps the comic's current value untouched -- the conflict just stops being pending until
+    /// something re-detects it (e.g. a future rescan with a still-differing value).
+    func resolveMetadataConflict(_ row: MetadataConflictRow, apply: Bool) {
+        Task.detached(priority: .userInitiated) { [db] in
+            db.resolveMetadataConflict(id: row.conflict.id, apply: apply)
+            if apply {
+                db.recomputeGCDMatches()
+                db.autoPopulateSeriesLinksFromGCD()
+                db.recomputeReadingOrder()
+            }
+            await MainActor.run { self.reload(); self.refreshDuplicates() }
+        }
     }
 
     func rejectAutoPlacement(_ comic: Comic) {
@@ -917,26 +1010,121 @@ final class LibraryViewModel: ObservableObject {
         db.clearSeriesCover(series: series, publisher: publisher)
         reload()
     }
-    func updateRun(id: Int64, title: String, description: String, buyLink: String?) { db.updateRun(id: id, title: title, description: description, buyLink: buyLink) }
-    func setRunRating(_ runId: Int64, rating: Int, review: String?) { db.setRunRating(runId, rating: rating, review: review) }
+    func updateRun(id: Int64, title: String, description: String, buyLink: String?) {
+        db.updateRun(id: id, title: title, description: description, buyLink: buyLink)
+        NotificationCenter.default.post(name: .runUpdated, object: nil)
+    }
+    func setRunRating(_ runId: Int64, rating: Int, review: String?) {
+        db.setRunRating(runId, rating: rating, review: review)
+        NotificationCenter.default.post(name: .runUpdated, object: nil)
+    }
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }
+
+    @discardableResult
+    func createTierList(title: String, description: String) -> Int64 {
+        db.createTierList(title: title, description: description)
+    }
+    func deleteTierListWithUndo(_ tierList: TierList) {
+        let items = db.tierListItems(tierListId: tierList.id)
+        db.deleteTierList(tierList.id)
+        NotificationCenter.default.post(name: .tierListDeleted, object: nil)
+        offerUndo("Tier List \"\(tierList.title)\" deleted") { [weak self] in
+            guard let self else { return }
+            let newId = self.db.createTierList(title: tierList.title, description: tierList.description)
+            if let rating = tierList.rating {
+                self.db.setTierListRating(newId, rating: rating, review: tierList.review)
+            }
+            if let cover = tierList.coverImagePath {
+                self.db.setTierListCover(tierListId: newId, imagePath: cover)
+            }
+            for tier in ComicTier.allCases {
+                let ids = items.filter { $0.tier == tier.rawValue }.map(\.comic.id)
+                if !ids.isEmpty { self.db.addToTierList(tierListId: newId, comicIds: ids, tier: tier.rawValue) }
+            }
+            NotificationCenter.default.post(name: .tierListDeleted, object: nil)
+        }
+    }
+    func updateTierList(id: Int64, title: String, description: String) {
+        db.updateTierList(id: id, title: title, description: description)
+        NotificationCenter.default.post(name: .tierListUpdated, object: nil)
+    }
+    func setTierListRating(_ tierListId: Int64, rating: Int, review: String?) {
+        db.setTierListRating(tierListId, rating: rating, review: review)
+        NotificationCenter.default.post(name: .tierListUpdated, object: nil)
+    }
+    func reorderTierLists(orderedIds: [Int64]) { db.reorderTierLists(orderedIds: orderedIds) }
+    func addToTierList(tierListId: Int64, comicIds: [Int64], tier: String = "B") {
+        db.addToTierList(tierListId: tierListId, comicIds: comicIds, tier: tier)
+    }
+    func removeFromTierList(tierListId: Int64, comicIds: [Int64]) {
+        db.removeFromTierList(tierListId: tierListId, comicIds: comicIds)
+    }
+    func setTierListItemTier(itemId: Int64, tierListId: Int64, tier: String) {
+        db.setTierListItemTier(itemId: itemId, tierListId: tierListId, tier: tier)
+    }
+
+    @discardableResult
+    func setTierListCover(tierListId: Int64, imageURL: URL) -> String? {
+        guard let path = ThumbnailCache.shared.saveCustomTierListCover(tierListId: tierListId, imageURL: imageURL) else { return nil }
+        db.setTierListCover(tierListId: tierListId, imagePath: path)
+        return path
+    }
+    func clearTierListCover(tierListId: Int64) { db.clearTierListCover(tierListId: tierListId) }
+
+    func setTierListCover(tierListId: Int64, usingCoverOf comic: Comic, onDone: @escaping () -> Void = {}) {
+        Task.detached(priority: .userInitiated) { [db] in
+            guard let path = ThumbnailCache.shared.saveCoverFromComic(comic, destinationName: "tierlist_\(tierListId)") else { return }
+            db.setTierListCover(tierListId: tierListId, imagePath: path)
+            await MainActor.run { onDone() }
+        }
+    }
+
+    func setManualGCDMatch(comicId: Int64, gcdIssueId: Int, seriesName: String, issueNumber: String,
+                           coverDate: String?, seriesYearBegan: Int?) {
+        db.setManualGCDMatch(comicId: comicId, gcdIssueId: gcdIssueId, seriesName: seriesName,
+                              issueNumber: issueNumber, coverDate: coverDate, seriesYearBegan: seriesYearBegan)
+    }
+    func clearManualGCDMatch(comicId: Int64) {
+        db.clearManualGCDMatch(comicId: comicId)
+    }
 
     func delete(_ toDelete: [Comic]) {
         let ids = toDelete.map(\.id)
         db.softDelete(ids)
         for c in toDelete { ThumbnailCache.shared.evict(c.id) }
+        removeFromSpotlight(ids)
         reload()
         refreshDuplicates()
         offerUndo(toDelete.count == 1 ? "\"\(toDelete[0].title)\" deleted" : "\(toDelete.count) comics deleted") { [weak self] in
             self?.db.restore(ids)
             self?.reload()
+            self?.indexSpotlight()
+        }
+    }
+
+    // indexSpotlight()'s indexSearchableItems is additive/overwriting only -- it never removes
+    // identifiers absent from a later batch. Without this, a deleted comic's title/series/
+    // publisher stays permanently discoverable system-wide via Spotlight until the entire
+    // library is cleared (the only other place that calls deleteAllSearchableItems).
+    // `nonisolated`: os.Logger is safe to use concurrently, and both call sites below log from
+    // inside Task.detached (a nonisolated context) -- without this, the MainActor isolation
+    // inferred for the rest of this class would make the logger uncallable from there.
+    nonisolated private static let spotlightLogger = Logger(subsystem: "com.comicarc", category: "spotlight")
+
+    private func removeFromSpotlight(_ ids: [Int64]) {
+        let identifiers = ids.map { "comicarc-\($0)" }
+        Task.detached(priority: .background) {
+            do {
+                try await CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: identifiers)
+            } catch {
+                Self.spotlightLogger.error("Failed to remove \(identifiers.count) item(s) from Spotlight: \(error.localizedDescription)")
+            }
         }
     }
 
     func updateProgress(comic: Comic, page: Int) {
         db.updateProgress(comicId: comic.id, page: page)
-        if let idx = comics.firstIndex(where: { $0.id == comic.id }) { comics[idx].progress = page }
-        if selectedComic?.id == comic.id { selectedComic?.progress = page }
+        patchComicLocally(comic.id) { $0.progress = page }
     }
 
     func indexSpotlight() {
@@ -953,7 +1141,11 @@ final class LibraryViewModel: ObservableObject {
                     attributeSet: attrs
                 )
             }
-            try? await CSSearchableIndex.default().indexSearchableItems(items)
+            do {
+                try await CSSearchableIndex.default().indexSearchableItems(items)
+            } catch {
+                Self.spotlightLogger.error("Failed to index \(items.count) item(s) in Spotlight: \(error.localizedDescription)")
+            }
         }
     }
 

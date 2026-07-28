@@ -1,10 +1,12 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension Notification.Name {
     static let showTutorial        = Notification.Name("showTutorial")
     static let showReaderShortcuts = Notification.Name("showReaderShortcuts")
     static let triggerImport       = Notification.Name("triggerImport")
     static let triggerRenameFiles  = Notification.Name("triggerRenameFiles")
+    static let readerDidClose      = Notification.Name("readerDidClose")
 }
 
 struct ContentView: View {
@@ -31,9 +33,14 @@ struct ContentView: View {
             .navigationSplitViewStyle(.balanced)
 
             if let comic = vm.readerComic {
-                ReaderView(comic: comic) {
-                    withAnimation(.easeInOut(duration: 0.25)) { vm.readerComic = nil }
+                ReaderView(comic: comic, initialPage: vm.readerInitialPage) {
+                    withAnimation(.easeInOut(duration: 0.25)) { vm.closeReader() }
                 }
+                // Ties this view's identity to the comic itself rather than just to the `if`
+                // branch -- without it, a future reassignment of readerComic straight from one
+                // comic to another (skipping the nil in between) would carry over ReaderView's
+                // @State (currentPage, zoom, bookmarks) into the new comic instead of resetting.
+                .id(comic.id)
                 .transition(.opacity)
                 .zIndex(10)
             }
@@ -123,6 +130,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.6))
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
         .background(.black.opacity(0.92), in: Capsule())
@@ -146,6 +154,12 @@ struct ContentView: View {
             }
         case .runs:
             runsContent
+        case .diary:
+            DiaryView()
+        case .tierLists:
+            tierListsContent
+        case .favoriteMoments:
+            FavoriteMomentsView()
         case .stats:
             StatsView()
         case .history:
@@ -154,6 +168,8 @@ struct ContentView: View {
             DuplicatesView()
         case .readingOrderManager:
             ReadingOrderManagerView()
+        case .metadataConflicts:
+            MetadataConflictsView()
         case .settings:
             SettingsView()
         }
@@ -189,6 +205,36 @@ struct ContentView: View {
         .background(Design.appBackground)
     }
 
+    private var tierListsContent: some View {
+        HStack(spacing: 0) {
+            TierListsListView(selectedTierList: $vm.selectedTierList)
+                .frame(width: 320)
+                .background(Design.navBackground)
+            Rectangle().fill(Design.borderColor).frame(width: 1)
+            if let tierList = vm.selectedTierList {
+                TierListDetailView(tierList: tierList, onDelete: { vm.selectedTierList = nil })
+                    .frame(maxWidth: .infinity)
+                    .background(Design.appBackground)
+            } else {
+                tierListsPlaceholder
+            }
+        }
+    }
+
+    private var tierListsPlaceholder: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 52)).foregroundStyle(.quaternary)
+            Text("Select a Tier List")
+                .font(.title3.bold()).foregroundStyle(.secondary)
+            Text("Rank your comics into S/A/B/C/D/F tiers by dragging them between rows.")
+                .font(.subheadline).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Design.appBackground)
+    }
+
     @ToolbarContentBuilder
     private var mainToolbar: some CustomizableToolbarContent {
         ToolbarItem(id: "scan", placement: .primaryAction) {
@@ -213,10 +259,18 @@ struct ContentView: View {
                 .allowsHitTesting(isLibrarySection)
         }
 
+        ToolbarItem(id: "sort", placement: .primaryAction) {
+            SortPicker()
+                .opacity(isLibrarySection ? 1 : 0)
+                .disabled(!isLibrarySection)
+                .allowsHitTesting(isLibrarySection)
+        }
+
         ToolbarItem(id: "bulk", placement: .primaryAction) {
             let show = vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil
             Button { vm.toggleBulkMode() } label: {
-                Image(systemName: vm.bulkMode ? "checklist.checked" : "checklist")
+                Label(vm.bulkMode ? "Exit Selection" : "Select Multiple",
+                      systemImage: vm.bulkMode ? "checklist.checked" : "checklist")
             }
             .foregroundStyle(vm.bulkMode ? Design.brandBlue : .primary)
             .help(vm.bulkMode ? "Exit selection mode" : "Select multiple comics (⌘E)")
@@ -228,7 +282,7 @@ struct ContentView: View {
         #if os(macOS)
         ToolbarItem(id: "settings", placement: .primaryAction) {
             Button { vm.select(.settings) } label: {
-                Image(systemName: "gearshape")
+                Label("Settings", systemImage: "gearshape")
             }
             .help("Settings (⌘,)")
         }
@@ -250,8 +304,8 @@ struct ContentView: View {
 
                 Label("Scan", systemImage: "magnifyingglass")
             }
-            .help("Scan library folder for new comics (⇧⌘R)")
-            .disabled(vm.libraryPath.isEmpty)
+            .help("Scan library folders for new comics (⇧⌘R)")
+            .disabled(vm.libraryPaths.isEmpty)
         }
     }
 
@@ -267,7 +321,7 @@ struct ContentView: View {
                 Label("Resync", systemImage: "arrow.triangle.2.circlepath")
             }
             .help("Rescan and re-derive metadata for every comic — fixes wrong reading order or metadata (⌥⇧⌘R)")
-            .disabled(vm.libraryPath.isEmpty || vm.isScanning)
+            .disabled(vm.libraryPaths.isEmpty || vm.isScanning)
         }
     }
 
@@ -277,10 +331,16 @@ struct ContentView: View {
     }
 
     private func importFiles() {
+        let types: [UTType] = [
+            UTType(filenameExtension: "cbz") ?? .zip,
+            UTType(filenameExtension: "cbr") ?? .archive,
+            .pdf, .image
+        ]
         fileService.pickFiles(
             allowsMultiple: true,
             message: "Select comic files to import into your library",
-            prompt: "Import"
+            prompt: "Import",
+            contentTypes: types
         ) { urls in if !urls.isEmpty { vm.importFiles(urls) } }
     }
 
@@ -310,6 +370,21 @@ struct SidebarView: View {
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @State private var draggedPublisher: String?
     @State private var dropTargetPublisher: String?
+    @State private var showAllTags = false
+    @State private var showMoreDiscover = false
+
+    // The Discover section is a lot to take in on day one (up to 9 items) with nothing
+    // distinguishing daily-use items from deep-tracking extras -- these three are the ones a
+    // new user is most likely to reach for immediately; everything else collapses into "More"
+    // below so first launch isn't a flat wall of equally-weighted rows.
+    private let coreDiscoverItems: Set<DiscoverItem> = [.runs, .stats, .history]
+
+    /// So a collapsed "More" section can't silently hide something that actually needs attention
+    /// -- a pending duplicate/conflict/suggestion still shows its count on the disclosure row
+    /// itself even while collapsed.
+    private var moreDiscoverAlertCount: Int {
+        vm.duplicateGroups.count + vm.autoPlacedIssues.count + vm.pendingMetadataConflicts.count
+    }
 
     private var visibleDiscoverItems: [DiscoverItem] {
         let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
@@ -318,7 +393,7 @@ struct SidebarView: View {
 
     var body: some View {
         List {
-            Section {
+            Section("Library") {
                 navRow("Library",          icon: "books.vertical.fill", item: .library)
                 navRow("Continue Reading", icon: "book.open.fill",       item: .continueReading)
                 navRow("Favorites",        icon: "heart.fill",           item: .favorites)
@@ -359,23 +434,64 @@ struct SidebarView: View {
                     ForEach(vm.allTags.prefix(15), id: \.tag.id) { t in
                         navRow("#\(t.tag.name)", icon: "tag", item: .tag(t.tag.name), trailingText: "\(t.count)")
                     }
+                    Button("See All Tags…") { showAllTags = true }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Design.brandGold)
+                        .font(.caption)
                 }
             }
 
-            Section {
-                ForEach(visibleDiscoverItems) { discoverItem in
-                    if discoverItem == .duplicates {
-                        if !vm.duplicateGroups.isEmpty {
-                            navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
-                                   trailingText: "\(vm.duplicateGroups.count)")
+
+            Section("Discover") {
+                ForEach(visibleDiscoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
+                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
+                }
+
+                let moreItems = visibleDiscoverItems.filter { !coreDiscoverItems.contains($0) }
+                if !moreItems.isEmpty {
+                    DisclosureGroup(isExpanded: $showMoreDiscover) {
+                        ForEach(moreItems) { discoverItem in
+                            if discoverItem == .duplicates {
+                                if !vm.duplicateGroups.isEmpty {
+                                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                           trailingText: "\(vm.duplicateGroups.count)")
+                                }
+                            } else if discoverItem == .readingOrderManager {
+                                if !vm.autoPlacedIssues.isEmpty {
+                                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                           trailingText: "\(vm.autoPlacedIssues.count)")
+                                }
+                            } else if discoverItem == .metadataConflicts {
+                                if !vm.pendingMetadataConflicts.isEmpty {
+                                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                           trailingText: "\(vm.pendingMetadataConflicts.count)")
+                                }
+                            } else {
+                                navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
+                            }
                         }
-                    } else if discoverItem == .readingOrderManager {
-                        if !vm.autoPlacedIssues.isEmpty {
-                            navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
-                                   trailingText: "\(vm.autoPlacedIssues.count)")
+                    } label: {
+                        // A plain DisclosureGroup label only responds to taps on its small chevron
+                        // in a macOS List, not the row text next to it -- wrapping the label in its
+                        // own Button (with an explicit content shape) makes the whole row clickable,
+                        // not just a few pixels of arrow.
+                        Button {
+                            withAnimation { showMoreDiscover.toggle() }
+                        } label: {
+                            HStack {
+                                Text("More")
+                                Spacer()
+                                if moreDiscoverAlertCount > 0 {
+                                    Text("\(moreDiscoverAlertCount)")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Design.brandGold, in: Capsule())
+                                }
+                            }
+                            .contentShape(Rectangle())
                         }
-                    } else {
-                        navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -398,8 +514,13 @@ struct SidebarView: View {
                     sidebarScanProgress
                 } else if vm.showScanReport {
                     scanReportBanner
+                } else if vm.renameCandidateCount > 0, !vm.renameSuggestionDismissed {
+                    renameSuggestionBanner
                 }
             }
+        }
+        .sheet(isPresented: $showAllTags) {
+            AllTagsView().environmentObject(vm)
         }
     }
 
@@ -514,6 +635,35 @@ struct SidebarView: View {
                     Image(systemName: "xmark").font(.caption2)
                 }
                 .buttonStyle(.plain).foregroundStyle(.tertiary)
+                .accessibilityLabel("Dismiss")
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+        }
+        .background(Design.navBackground)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var renameSuggestionBanner: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "textformat")
+                    .foregroundStyle(Design.brandBlue).font(.caption)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Filenames Could Be Cleaned Up").font(.caption.bold()).foregroundStyle(.primary)
+                    Text("\(vm.renameCandidateCount) file\(vm.renameCandidateCount == 1 ? "" : "s") don't match the library's naming convention.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Review") {
+                    NotificationCenter.default.post(name: .triggerRenameFiles, object: nil)
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                Button { vm.dismissRenameSuggestion() } label: {
+                    Image(systemName: "xmark").font(.caption2)
+                }
+                .buttonStyle(.plain).foregroundStyle(.tertiary)
+                .accessibilityLabel("Dismiss")
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
         }

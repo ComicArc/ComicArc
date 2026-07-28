@@ -57,6 +57,12 @@ struct Run: Identifiable, Equatable, Hashable {
     var readCount:  Int = 0
     var coverImagePath: String? = nil
 
+    // Explicit id-only equality (matching Comic's override above): editing a Run's title/rating
+    // elsewhere and then reloading the sidebar's `runs` array must still recognize the edited
+    // row as "the same Run" for staleness checks like `if !runs.contains(selectedRun)` --
+    // synthesized field-wise Equatable would call the freshly-edited row "different" from the
+    // stale selection and silently clear the selection even though the Run still exists.
+    static func == (lhs: Run, rhs: Run) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
@@ -70,9 +76,44 @@ struct RunItem: Identifiable {
     var isStarted: Bool { comic.isStarted }
 }
 
+/// The fixed set of tier buckets a Tier List sorts comics into, in display order (best first).
+/// Fixed rather than user-customizable to keep the feature to the classic tier-list shape --
+/// still a real ranking tool without needing a whole tier-management UI.
+enum ComicTier: String, CaseIterable, Identifiable {
+    case s = "S", a = "A", b = "B", c = "C", d = "D", f = "F"
+    var id: String { rawValue }
+}
+
+struct TierList: Identifiable, Equatable, Hashable {
+    let id: Int64
+    var title: String
+    var description: String
+    var createdAt: String
+    var comicCount: Int = 0
+    var rating: Int? = nil
+    var review: String? = nil
+    var coverImagePath: String? = nil
+
+    // Explicit id-only equality -- see Run for why.
+    static func == (lhs: TierList, rhs: TierList) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+struct TierListItem: Identifiable {
+    let id: Int64
+    var comic: Comic
+    var tier: String
+    var position: Int
+}
+
+enum TagCategory: String, CaseIterable {
+    case genre = "Genre", format = "Format", mood = "Mood", custom = "Custom"
+}
+
 struct Tag: Identifiable, Hashable {
     let id: Int64
     let name: String
+    var category: String? = nil
 }
 
 struct PublisherStat { let publisher: String; let count: Int }
@@ -85,6 +126,15 @@ struct Bookmark: Identifiable {
     let page: Int
     let label: String
     let createdAt: String
+    var isFavorite: Bool = false
+}
+
+/// A bookmark flagged as a "favorite moment" -- worth revisiting on its own, browsable across the
+/// whole library rather than only from within that one comic's own bookmark list.
+struct FavoriteMoment: Identifiable {
+    let bookmark: Bookmark
+    let comic: Comic
+    var id: Int64 { bookmark.id }
 }
 
 struct HistoryEntry: Identifiable {
@@ -97,6 +147,15 @@ struct HistoryEntry: Identifiable {
     let pageEnd: Int
     let readAt: String
     var pagesRead: Int { max(0, pageEnd - pageStart) }
+}
+
+struct DiaryEntry: Identifiable {
+    let id: Int64  // diary_entries row id -- NOT comic.id, since a reread produces a second row for the same comic
+    let comic: Comic
+    let rating: Int
+    let review: String?
+    let loggedAt: String
+    let isReread: Bool
 }
 
 struct LibraryStats {

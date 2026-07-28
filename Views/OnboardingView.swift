@@ -10,10 +10,11 @@ struct OnboardingView: View {
     @Environment(\.fileService) private var fileService
 
     @State private var step:        OnboardingStep = .welcome
-    @State private var libraryPath: String = ""
+    @State private var libraryPaths: [String] = []
     @State private var scanDone:    Int = 0
     @State private var scanTotal:   Int = 0
     @State private var scanError:   String? = nil
+    @State private var scanFinishedEmpty = false
     @State private var unarInstalled: Bool = false
     @State private var installingUnar: Bool = false
     @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
@@ -96,9 +97,9 @@ struct OnboardingView: View {
             }
 
             HStack(spacing: 40) {
-                featureBullet(icon: "books.vertical.fill",   label: "Organize",   sub: "CBZ, CBR & PDF")
-                featureBullet(icon: "chart.bar.fill",        label: "Track",      sub: "Reading stats")
-                featureBullet(icon: "list.bullet.rectangle", label: "Build Runs", sub: "Reading orders")
+                featureBullet(icon: "books.vertical.fill", label: "Organize", sub: "CBZ, CBR & PDF")
+                featureBullet(icon: "book.fill",           label: "Read",     sub: "Built right in")
+                featureBullet(icon: "chart.bar.fill",      label: "Track",    sub: "Ratings & stats")
             }
 
             Button("Get Started") {
@@ -221,12 +222,12 @@ struct OnboardingView: View {
                     .font(.system(size: 52))
                     .foregroundStyle(Design.goldGradient)
 
-                Text("Choose Your Comics Folder")
+                Text("Choose Your Comics Folders")
                     .font(.system(size: 32, weight: .black, design: .rounded))
                     .foregroundStyle(Design.textPrimary)
                     .kerning(0.5)
 
-                Text("Point ComicArc to the folder where your comics are stored.\nSubfolders are scanned automatically.")
+                Text("Point ComicArc to the folder (or folders) where your comics are stored.\nSubfolders are scanned automatically.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -234,39 +235,50 @@ struct OnboardingView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("LIBRARY FOLDER")
+                Text("LIBRARY FOLDERS")
                     .font(.system(size: 11, weight: .black, design: .rounded))
                     .foregroundStyle(.secondary)
                     .kerning(1.5)
 
-                HStack(spacing: 12) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(libraryPath.isEmpty ? .secondary : Design.brandGold)
-                        .font(.title3)
-
-                    if libraryPath.isEmpty {
-                        Text("No folder selected")
-                            .foregroundStyle(.tertiary)
+                VStack(spacing: 0) {
+                    if libraryPaths.isEmpty {
+                        HStack {
+                            Image(systemName: "folder.fill").foregroundStyle(.secondary).font(.title3)
+                            Text("No folder selected").foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        .padding(16)
                     } else {
-                        Text(libraryPath)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        ForEach(libraryPaths, id: \.self) { path in
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder.fill").foregroundStyle(Design.brandGold).font(.title3)
+                                Text(path)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Button {
+                                    libraryPaths.removeAll { $0 == path }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove \(path)")
+                            }
+                            .padding(16)
+                            if path != libraryPaths.last { Divider() }
+                        }
                     }
-
-                    Spacer()
-
-                    Button("Browse…") { pickFolder() }
-                        .buttonStyle(.bordered)
                 }
-                .padding(16)
                 .background(Design.surfaceBg)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(libraryPath.isEmpty ? Design.borderColor : Design.brandGold.opacity(0.4), lineWidth: 1)
+                        .stroke(libraryPaths.isEmpty ? Design.borderColor : Design.brandGold.opacity(0.4), lineWidth: 1)
                 )
+
+                Button("Add Folder…") { pickFolder() }
+                    .buttonStyle(.bordered)
             }
             .frame(maxWidth: 560)
 
@@ -283,13 +295,13 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary).buttonStyle(.plain)
 
                 Button("Scan Library") {
-                    UserDefaults.standard.set(libraryPath, forKey: "libraryPath")
+                    LibraryFolders.write(libraryPaths)
                     withAnimation { step = .scanning }
                     startScan()
                 }
                 .goldButton()
-                .opacity(libraryPath.isEmpty ? 0.5 : 1)
-                .disabled(libraryPath.isEmpty)
+                .opacity(libraryPaths.isEmpty ? 0.5 : 1)
+                .disabled(libraryPaths.isEmpty)
             }
         }
         .padding(48)
@@ -298,7 +310,39 @@ struct OnboardingView: View {
 
     private var scanningStep: some View {
         VStack(spacing: 36) {
-            if scanTotal == 0 {
+            if let err = scanError {
+                VStack(spacing: 20) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.orange)
+                    Text("Couldn't Read That Folder")
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .foregroundStyle(Design.textPrimary)
+                    Text(err)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).frame(maxWidth: 480)
+                    Button("Choose a Different Folder") { chooseDifferentFolder() }
+                        .goldButton()
+                }
+            } else if scanFinishedEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "questionmark.folder.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.secondary)
+                    Text("No Comics Found")
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .foregroundStyle(Design.textPrimary)
+                    Text("This folder (and its subfolders) don't contain any supported comic files (CBZ, CBR, PDF). Choose a different folder, or continue if you'll add comics later.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).frame(maxWidth: 480)
+                    HStack(spacing: 16) {
+                        Button("Choose a Different Folder") { chooseDifferentFolder() }
+                            .buttonStyle(.bordered)
+                        Button("Continue Anyway") { withAnimation { step = .comicsDatabase } }
+                            .goldButton()
+                    }
+                }
+            } else if scanTotal == 0 {
                 VStack(spacing: 20) {
                     ProgressView()
                         .scaleEffect(2)
@@ -306,7 +350,7 @@ struct OnboardingView: View {
                     Text("Discovering comics…")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(Design.textPrimary)
-                    Text(libraryPath)
+                    Text(libraryPaths.count == 1 ? libraryPaths[0] : "\(libraryPaths.count) folders")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
@@ -329,11 +373,6 @@ struct OnboardingView: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
-            }
-
-            if let err = scanError {
-                Text(err).foregroundStyle(.red).font(.caption)
-                    .padding(.horizontal, 40).multilineTextAlignment(.center)
             }
         }
         .padding(48)
@@ -436,7 +475,7 @@ struct OnboardingView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 8) {
-            ForEach(0..<5, id: \.self) { i in
+            ForEach(0..<6, id: \.self) { i in
                 let isCurrent = stepIndex == i
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isCurrent ? Design.brandGold : Design.borderColor)
@@ -460,21 +499,48 @@ struct OnboardingView: View {
 
     private func pickFolder() {
         fileService.pickFolder { url in
-            if let url { libraryPath = url.path }
+            guard let url, !libraryPaths.contains(url.path) else { return }
+            libraryPaths.append(url.path)
         }
     }
 
     private func startScan() {
-        LibraryScanner.shared.scan(libraryPath: libraryPath) { state in
+        scanError = nil
+        scanFinishedEmpty = false
+        LibraryScanner.shared.scan(libraryPaths: libraryPaths) { state in
             DispatchQueue.main.async {
                 scanDone  = state.done
                 scanTotal = state.total
-                if !state.running {
-                    LibraryViewModel.shared.reload()
-                    withAnimation { step = .comicsDatabase }
+                guard !state.running else { return }
+                // The scanner already distinguishes "path isn't accessible" (e.g. a file was
+                // picked instead of a folder, or permissions were denied) from a genuinely empty
+                // folder -- without checking this, both cases used to silently advance straight
+                // to "You're All Set! 0 comics indexed," which reads as broken, not empty.
+                if let err = state.error {
+                    scanError = err
+                    return
                 }
+                LibraryViewModel.shared.reload()
+                guard state.total > 0 else {
+                    scanFinishedEmpty = true
+                    return
+                }
+                withAnimation { step = .comicsDatabase }
             }
         }
+    }
+
+    /// Resets back to folder selection after a failed or empty scan, so the user can pick a
+    /// different folder rather than being stuck on an error screen with no way forward.
+    private func chooseDifferentFolder() {
+        libraryPaths = []
+        UserDefaults.standard.removeObject(forKey: LibraryFolders.key)
+        UserDefaults.standard.removeObject(forKey: LibraryFolders.legacySingleKey)
+        scanError = nil
+        scanFinishedEmpty = false
+        scanDone = 0
+        scanTotal = 0
+        withAnimation { step = .chooseLibrary }
     }
 
     private func checkUnar() -> Bool {
@@ -501,11 +567,20 @@ struct OnboardingView: View {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: brew)
             proc.arguments = ["install", "unar"]
-            try? proc.run()
-            proc.waitUntilExit()
-            DispatchQueue.main.async {
-                installingUnar = false
-                unarInstalled  = checkUnar()
+            do {
+                try proc.run()
+                // Only safe to wait on a process that actually launched -- calling
+                // waitUntilExit() after a failed run() has no defined behavior.
+                proc.waitUntilExit()
+                DispatchQueue.main.async {
+                    installingUnar = false
+                    unarInstalled  = checkUnar()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    installingUnar = false
+                    scanError = "Couldn't launch Homebrew: \(error.localizedDescription)"
+                }
             }
         }
 #endif

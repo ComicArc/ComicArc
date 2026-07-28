@@ -75,6 +75,16 @@ final class DatabaseManager: @unchecked Sendable {
         try? FileManager.default.removeItem(at: dbURL)
         try? FileManager.default.copyItem(at: bakURL, to: dbURL)
         _ = sqlite3_open(dbURL.path, &db)
+        // PRAGMAs are per-connection, not persisted in the file -- this is a brand new
+        // connection, so foreign_keys/journal_mode/etc. default back off/unset unless
+        // reapplied here. Without this, every ON DELETE CASCADE in the schema silently
+        // stops firing for the rest of the app session after a corruption recovery.
+        exec("PRAGMA foreign_keys = ON")
+        exec("PRAGMA journal_mode = WAL")
+        exec("PRAGMA synchronous = NORMAL")
+        exec("PRAGMA cache_size = -8000")
+        exec("PRAGMA journal_size_limit = 67108864")
+        exec("PRAGMA mmap_size = 268435456")
         registerCustomFunctions()
     }
 
@@ -100,7 +110,8 @@ final class DatabaseManager: @unchecked Sendable {
         return sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
     }
 
-    func scalarInt(_ sql: String, args: [Any?] = []) -> Int {
+    private func scalarInt(_ sql: String, args: [Any?] = []) -> Int {
+        guard db != nil else { return 0 }
         var raw: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return 0 }
         defer { sqlite3_finalize(stmt) }
@@ -108,7 +119,8 @@ final class DatabaseManager: @unchecked Sendable {
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
-    func scalarText(_ sql: String, args: [Any?] = []) -> String? {
+    private func scalarText(_ sql: String, args: [Any?] = []) -> String? {
+        guard db != nil else { return nil }
         var raw: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return nil }
         defer { sqlite3_finalize(stmt) }
@@ -118,7 +130,8 @@ final class DatabaseManager: @unchecked Sendable {
         return String(cString: p)
     }
 
-    func rows<T>(_ sql: String, args: [Any?] = [], map: (OpaquePointer) -> T) -> [T] {
+    private func rows<T>(_ sql: String, args: [Any?] = [], map: (OpaquePointer) -> T) -> [T] {
+        guard db != nil else { return [] }
         var raw: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -128,13 +141,32 @@ final class DatabaseManager: @unchecked Sendable {
         return results
     }
 
-    func colText(_ stmt: OpaquePointer, _ col: Int32) -> String? {
+    private func colText(_ stmt: OpaquePointer, _ col: Int32) -> String? {
         guard let p = sqlite3_column_text(stmt, col) else { return nil }
         return String(cString: p)
     }
-    func colInt(_ stmt: OpaquePointer, _ col: Int32) -> Int { Int(sqlite3_column_int(stmt, col)) }
-    func colInt64(_ stmt: OpaquePointer, _ col: Int32) -> Int64 { sqlite3_column_int64(stmt, col) }
-    func colBool(_ stmt: OpaquePointer, _ col: Int32) -> Bool { sqlite3_column_int(stmt, col) != 0 }
+    private func colInt(_ stmt: OpaquePointer, _ col: Int32) -> Int { Int(sqlite3_column_int(stmt, col)) }
+    private func colInt64(_ stmt: OpaquePointer, _ col: Int32) -> Int64 { sqlite3_column_int64(stmt, col) }
+
+    /// A caller (LibraryScanner, most commonly) can compute an affected group key before a
+    /// backfill (Volume from a GCD match, series_group edit, etc.) has run -- if the row had no
+    /// value yet, that key is a bare "publisher:series" with no volume/series_group component.
+    /// Once the backfill lands, the row's real composite groupKey gains a suffix the caller's
+    /// bare key never had, silently dropping it from a scoped WHERE ... IN filter. Expand every
+    /// bare key to every real composite groupKey currently sharing that publisher/series so
+    /// scoped recomputes (`recomputeReadingOrder`, `recomputeGCDMatches`) never miss a row purely
+    /// because the caller's key predates a backfill.
+    private func expandBareGroupKeys(_ keys: Set<String>) -> Set<String> {
+        let bareKeys = keys.filter { $0.split(separator: ":", omittingEmptySubsequences: false).count <= 2 }
+        guard !bareKeys.isEmpty else { return keys }
+        let placeholders = bareKeys.map { _ in "?" }.joined(separator: ",")
+        let resolvedKeys: [String] = rows("""
+            SELECT DISTINCT publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))
+            FROM comics WHERE deleted_at IS NULL AND (publisher || ':' || series) IN (\(placeholders))
+            """, args: bareKeys.map { $0 as Any? }) { s in colText(s, 0) ?? "" }
+        return keys.union(resolvedKeys)
+    }
+    private func colBool(_ stmt: OpaquePointer, _ col: Int32) -> Bool { sqlite3_column_int(stmt, col) != 0 }
 
     private func bindArgs(_ stmt: OpaquePointer, args: [Any?]) {
         for (i, arg) in args.enumerated() {
@@ -152,12 +184,48 @@ final class DatabaseManager: @unchecked Sendable {
 
     @discardableResult
     private func run(_ sql: String, args: [Any?] = []) -> Int64 {
+        guard db != nil else { return -1 }
         var raw: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return -1 }
         defer { sqlite3_finalize(stmt) }
         bindArgs(stmt, args: args)
-        sqlite3_step(stmt)
+        // Must actually check the result: silently ignoring a failed step (constraint violation,
+        // SQLITE_BUSY, etc.) would fall through to sqlite3_last_insert_rowid, which on failure
+        // still returns the *previous* successful insert's rowid -- handing callers a wrong id
+        // that looks valid instead of a way to detect the write never happened.
+        guard sqlite3_step(stmt) == SQLITE_DONE else { return -1 }
         return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Runs `body` inside a transaction, rolling back if it returns `false` (e.g. a `run(...)`
+    /// call inside it returned -1). Used for batch mutations where a partial failure mid-loop
+    /// would otherwise commit inconsistent data with no way to detect it after the fact.
+    @discardableResult
+    private func inTransaction(_ body: () -> Bool) -> Bool {
+        exec("BEGIN")
+        guard body() else { exec("ROLLBACK"); return false }
+        exec("COMMIT")
+        return true
+    }
+
+    /// Prepares `sql` once and reuses that single compiled statement across every row in
+    /// `rows` (reset + re-bound each iteration) instead of calling `run(...)` per row, which
+    /// re-parses and re-plans identical SQL text on every iteration. Meant to be called inside
+    /// `inTransaction`; returns `false` on the first row that fails to step to completion.
+    @discardableResult
+    private func runBatch(_ sql: String, rows: [[Any?]]) -> Bool {
+        guard !rows.isEmpty else { return true }
+        guard let db else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let s = stmt else { return false }
+        defer { sqlite3_finalize(s) }
+        for args in rows {
+            sqlite3_reset(s)
+            sqlite3_clear_bindings(s)
+            bindArgs(s, args: args)
+            guard sqlite3_step(s) == SQLITE_DONE else { return false }
+        }
+        return true
     }
 
     private func migrate() {
@@ -165,6 +233,18 @@ final class DatabaseManager: @unchecked Sendable {
         let dbPath = Self.dataDir.appendingPathComponent("comics.db")
         let bakPath = Self.dataDir.appendingPathComponent("comics.db.bak")
         if FileManager.default.fileExists(atPath: dbPath.path) {
+            // Checkpoint first so the backup reflects all committed data, not just whatever has
+            // landed in the main file so far -- WAL-mode commits can live only in the -wal file
+            // for a while, and a prior session that ended without a full checkpoint (killed, not
+            // quit normally) would otherwise be missing its most recent writes from this backup.
+            exec("PRAGMA wal_checkpoint(TRUNCATE)")
+            // copyItem throws if the destination already exists, and the throw was silently
+            // swallowed by `try?` below -- meaning this backup was actually only ever written
+            // once, on the very first launch ever (likely a near-empty library), and silently
+            // never updated on any later launch. A corruption recovery months later would have
+            // rolled the whole library back to day one. Remove the stale backup first so this
+            // snapshot is refreshed on every launch instead.
+            try? FileManager.default.removeItem(at: bakPath)
             try? FileManager.default.copyItem(at: dbPath, to: bakPath)
         }
         exec("""
@@ -249,6 +329,25 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("""
+        CREATE TABLE IF NOT EXISTS tier_lists (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT NOT NULL,
+            description TEXT,
+            position    INTEGER,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS tier_list_items (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            tier_list_id INTEGER REFERENCES tier_lists(id) ON DELETE CASCADE,
+            comic_id     INTEGER REFERENCES comics(id)     ON DELETE CASCADE,
+            tier         TEXT NOT NULL DEFAULT 'B',
+            position     INTEGER NOT NULL,
+            UNIQUE(tier_list_id, comic_id)
+        )
+        """)
+        exec("""
         CREATE TABLE IF NOT EXISTS bookmarks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             comic_id   INTEGER REFERENCES comics(id) ON DELETE CASCADE,
@@ -268,25 +367,19 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("""
+        CREATE TABLE IF NOT EXISTS diary_entries (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            comic_id   INTEGER REFERENCES comics(id) ON DELETE CASCADE,
+            rating     INTEGER CHECK(rating BETWEEN 1 AND 5),
+            review     TEXT,
+            is_reread  INTEGER NOT NULL DEFAULT 0,
+            logged_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        exec("""
         CREATE TABLE IF NOT EXISTS reading_goals (
             year       INTEGER PRIMARY KEY,
             goal_count INTEGER NOT NULL DEFAULT 52
-        )
-        """)
-        exec("""
-        CREATE TABLE IF NOT EXISTS shelves (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT UNIQUE NOT NULL,
-            is_builtin INTEGER NOT NULL DEFAULT 0,
-            position   INTEGER NOT NULL DEFAULT 0
-        )
-        """)
-        exec("""
-        CREATE TABLE IF NOT EXISTS comic_shelves (
-            comic_id INTEGER REFERENCES comics(id) ON DELETE CASCADE,
-            shelf_id INTEGER REFERENCES shelves(id) ON DELETE CASCADE,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (comic_id, shelf_id)
         )
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_comics_publisher     ON comics(publisher)")
@@ -298,10 +391,14 @@ final class DatabaseManager: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_rp_last_read         ON reading_progress(last_read DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_rp_comic_id          ON reading_progress(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comics_character     ON comics(character) WHERE deleted_at IS NULL")
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_writer        ON comics(writer) WHERE deleted_at IS NULL")
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_year          ON comics(year) WHERE deleted_at IS NULL")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_comic_id  ON comic_tags(comic_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_tag_id    ON comic_tags(tag_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_run_id     ON run_items(run_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_comic_id   ON run_items(comic_id)")
+        exec("CREATE INDEX IF NOT EXISTS idx_tier_list_items_tier_list_id ON tier_list_items(tier_list_id)")
+        exec("CREATE INDEX IF NOT EXISTS idx_tier_list_items_comic_id     ON tier_list_items(comic_id)")
         exec("""
         CREATE TABLE IF NOT EXISTS series_covers (
             series    TEXT NOT NULL,
@@ -322,8 +419,9 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_history_read_at    ON reading_history(read_at DESC)")
+        exec("CREATE INDEX IF NOT EXISTS idx_diary_comic_id     ON diary_entries(comic_id)")
+        exec("CREATE INDEX IF NOT EXISTS idx_diary_logged_at    ON diary_entries(logged_at DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_comic    ON bookmarks(comic_id)")
-        exec("CREATE INDEX IF NOT EXISTS idx_comic_shelves      ON comic_shelves(comic_id)")
         exec("""
         CREATE TABLE IF NOT EXISTS character_covers (
             group_name TEXT NOT NULL,
@@ -375,6 +473,9 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE runs   ADD COLUMN position INTEGER")
         exec("ALTER TABLE series_covers ADD COLUMN image_path TEXT")
         exec("ALTER TABLE runs   ADD COLUMN cover_image_path TEXT")
+        exec("ALTER TABLE tier_lists ADD COLUMN rating INTEGER")
+        exec("ALTER TABLE tier_lists ADD COLUMN review TEXT")
+        exec("ALTER TABLE tier_lists ADD COLUMN cover_image_path TEXT")
 
         exec("ALTER TABLE comics ADD COLUMN reading_order_position INTEGER")
         exec("ALTER TABLE comics ADD COLUMN reading_order_confidence INTEGER")
@@ -408,6 +509,7 @@ final class DatabaseManager: @unchecked Sendable {
         )
         """)
         exec("ALTER TABLE series_links ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        makeSeriesLinksVolumeAwareIfNeeded()
 
         exec("ALTER TABLE comics ADD COLUMN gcd_issue_id INTEGER")
         exec("ALTER TABLE comics ADD COLUMN gcd_cover_date TEXT")
@@ -415,6 +517,15 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN gcd_match_reason TEXT")
         exec("ALTER TABLE comics ADD COLUMN gcd_series_name TEXT")
         exec("ALTER TABLE comics ADD COLUMN gcd_issue_number TEXT")
+        // 'auto' (the default) means recomputeGCDMatches owns this row and may freely rewrite or
+        // clear it on every rescan; 'manual' means a user explicitly picked this match via the
+        // Fix Match picker, and recomputeGCDMatches must never overwrite it -- the same "don't
+        // clobber a deliberate choice" pattern meta_edited already gives comics' identity fields.
+        exec("ALTER TABLE comics ADD COLUMN gcd_match_source TEXT NOT NULL DEFAULT 'auto'")
+        // Partial index, same pattern as idx_bookmarks_favorite/idx_metadata_conflicts_status --
+        // 'manual' is a small fraction of a potentially 100k-row table, exactly the low-selectivity
+        // shape a partial index helps most, and manualGCDMatchDetails() (backup export) scans it.
+        exec("CREATE INDEX IF NOT EXISTS idx_comics_gcd_manual ON comics(gcd_match_source) WHERE gcd_match_source = 'manual'")
 
         exec("ALTER TABLE comics ADD COLUMN volume TEXT")
 
@@ -423,8 +534,48 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN has_comicinfo INTEGER")
 
         exec("ALTER TABLE comics ADD COLUMN scan_retry_count INTEGER NOT NULL DEFAULT 0")
+        exec("ALTER TABLE tags ADD COLUMN category TEXT")
 
         exec("CREATE INDEX IF NOT EXISTS idx_comics_pub_series_issue ON comics(publisher, series, issue_number) WHERE deleted_at IS NULL")
+
+        // Raw-fact mirrors: comicinfo_issue_number (above) already preserves what ComicInfo.xml
+        // said even when a different source wins for the primary `issue_number` column -- these
+        // extend that same pattern to series/publisher, plus the folder-derived guess, so a
+        // priority decision made at import time can always be revisited later instead of being
+        // silently permanent. Always written through unconditionally on every insert, never
+        // gated by which source won.
+        exec("ALTER TABLE comics ADD COLUMN comicinfo_series TEXT")
+        exec("ALTER TABLE comics ADD COLUMN comicinfo_publisher TEXT")
+        exec("ALTER TABLE comics ADD COLUMN folder_series TEXT")
+        exec("ALTER TABLE comics ADD COLUMN folder_publisher TEXT")
+
+        // A "favorite moment" is just a bookmark the user has flagged as worth revisiting on its
+        // own -- not a new table, since every favorite moment is already a page-position bookmark
+        // (with its own label). Distinct from the resume-reading position, which lives on `comics`.
+        exec("ALTER TABLE bookmarks ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
+        exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_favorite ON bookmarks(is_favorite) WHERE is_favorite = 1")
+
+        // Surfaces a disagreement between an already-imported comic's current series/publisher/
+        // issue_number and what a corrected priority resolution would now produce, instead of
+        // silently overwriting (or silently ignoring) either side. UNIQUE(comic_id, field) so a
+        // re-detected conflict updates the existing row (and re-opens it if it had been
+        // dismissed) rather than accumulating duplicates.
+        exec("""
+        CREATE TABLE IF NOT EXISTS metadata_conflicts (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            comic_id        INTEGER NOT NULL REFERENCES comics(id) ON DELETE CASCADE,
+            field           TEXT NOT NULL CHECK(field IN ('series','publisher','issue_number')),
+            current_value   TEXT,
+            proposed_value  TEXT,
+            proposed_source TEXT NOT NULL,
+            detected_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','applied','dismissed')),
+            resolved_at     TIMESTAMP,
+            UNIQUE(comic_id, field)
+        )
+        """)
+        exec("CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_status ON metadata_conflicts(status) WHERE status = 'pending'")
+        exec("CREATE INDEX IF NOT EXISTS idx_metadata_conflicts_comic  ON metadata_conflicts(comic_id)")
 
         exec("""
         UPDATE comics SET position =
@@ -469,6 +620,44 @@ final class DatabaseManager: @unchecked Sendable {
             + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
         """)
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('positionStride100V1')")
+    }
+
+    // Adds parent_volume/child_volume so two series that share an identical Series name but
+    // differ by ComicInfo.xml's Volume tag (the standard GCD/ComicVine convention for numbered
+    // relaunches, e.g. Amazing Spider-Man Vol. 1 vs Vol. 2) can be linked as their own distinct
+    // continuation instead of only ever resolving to one combined (publisher, series) candidate.
+    // SQLite can't ALTER a UNIQUE constraint in place, so this rebuilds the table; the original
+    // UNIQUE(child_publisher, child_series) is dropped in favor of the app-level uniqueness check
+    // in addSeriesLink (NULL isn't equal to NULL for UNIQUE purposes, which would have let every
+    // volume-less child bypass the constraint entirely).
+    private func makeSeriesLinksVolumeAwareIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'seriesLinksVolumeAwareV1'") > 0
+        guard !alreadyRun else { return }
+        exec("ALTER TABLE series_links RENAME TO series_links_old")
+        exec("""
+        CREATE TABLE series_links (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_publisher TEXT NOT NULL,
+            parent_series    TEXT NOT NULL,
+            parent_volume    TEXT,
+            child_publisher  TEXT NOT NULL,
+            child_series     TEXT NOT NULL,
+            child_volume     TEXT,
+            sequence_order   INTEGER NOT NULL,
+            created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source           TEXT NOT NULL DEFAULT 'manual'
+        )
+        """)
+        exec("""
+        INSERT INTO series_links (id, parent_publisher, parent_series, parent_volume,
+                                   child_publisher, child_series, child_volume,
+                                   sequence_order, created_at, source)
+        SELECT id, parent_publisher, parent_series, NULL, child_publisher, child_series, NULL,
+               sequence_order, created_at, source FROM series_links_old
+        """)
+        exec("DROP TABLE series_links_old")
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('seriesLinksVolumeAwareV1')")
     }
 
     func seedMissingPositions() {
@@ -553,41 +742,75 @@ final class DatabaseManager: @unchecked Sendable {
                 }
             }
             guard !updates.isEmpty else { return }
-            exec("BEGIN")
-            for (id, pos) in updates {
-                _ = run("UPDATE comics SET position = ? WHERE id = ?", args: [pos, id])
+            inTransaction {
+                runBatch("UPDATE comics SET position = ? WHERE id = ?",
+                         rows: updates.map { [$0.1, $0.0] })
             }
-            exec("COMMIT")
         }
     }
 
     func recomputeReadingOrder(mode: ReadingOrderMode = .current, affectedGroupKeys: Set<String>? = nil) {
         queue.sync {
             struct Row {
-                let id: Int64; let publisher: String; let series: String; let groupKey: String
+                let id: Int64; let publisher: String; let series: String; let volume: String?; let groupKey: String
                 let filePath: String; let issueNumber: String?; let comicInfoIssueNumber: String?
                 let title: String
                 let year: Int?; let month: Int?; let day: Int?; let storyArc: String?
                 let gcdCoverDate: String?; let alternateNumber: String?; let format: String?
+                let gcdIssueNumber: String?
             }
 
-            let links: [(parentKey: String, childKey: String)] = rows(
-                "SELECT parent_publisher, parent_series, child_publisher, child_series FROM series_links ORDER BY sequence_order"
+            let links: [(parentKey: String, childKey: String)] = rows("""
+                SELECT parent_publisher, parent_series, COALESCE(NULLIF(parent_volume,''),''),
+                       child_publisher, child_series, COALESCE(NULLIF(child_volume,''),'')
+                FROM series_links ORDER BY sequence_order
+                """
             ) { s in
-                ("\(colText(s, 0) ?? ""):\(colText(s, 1) ?? "")", "\(colText(s, 2) ?? ""):\(colText(s, 3) ?? "")")
+                ("\(colText(s, 0) ?? ""):\(colText(s, 1) ?? ""):\(colText(s, 2) ?? "")",
+                 "\(colText(s, 3) ?? ""):\(colText(s, 4) ?? ""):\(colText(s, 5) ?? "")")
             }
             let childSeriesKeys = Set(links.map(\.childKey))
 
             var effectiveKeys = affectedGroupKeys
             if effectiveKeys != nil, !links.isEmpty {
-                effectiveKeys!.formUnion(links.map(\.parentKey))
-                effectiveKeys!.formUnion(links.map(\.childKey))
+                // series_links stores raw "publisher:series:volume" keys, but the WHERE filter
+                // below scopes rows by the composite groupKey (series_group/volume aware) that
+                // LibraryScanner actually uses for affectedGroupKeys. A linked child whose
+                // series_group differs from a plain "publisher:series:volume" (a normal pattern
+                // for crossover tie-ins) would never match that raw key in the composite filter,
+                // silently dropping its rows from allRows -- walk()'s parent offset would then
+                // never reach it. Resolve each raw link key to every real composite groupKey
+                // currently in use for it instead of unioning the raw key in directly.
+                let linkedRawKeys = Set(links.map(\.parentKey) + links.map(\.childKey))
+                if !linkedRawKeys.isEmpty {
+                    let placeholders = linkedRawKeys.map { _ in "?" }.joined(separator: ",")
+                    let resolvedKeys: [String] = rows("""
+                        SELECT DISTINCT publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))
+                        FROM comics WHERE deleted_at IS NULL
+                        AND (publisher || ':' || series || ':' || COALESCE(NULLIF(volume,''),'')) IN (\(placeholders))
+                        """, args: linkedRawKeys.map { $0 as Any? }) { s in colText(s, 0) ?? "" }
+                    effectiveKeys!.formUnion(resolvedKeys)
+                }
+            }
+
+            if let keys = effectiveKeys, !keys.isEmpty {
+                // A caller (LibraryScanner, most commonly) can compute an affected key before
+                // recomputeGCDMatches has run -- if the comic had no ComicInfo.xml <Volume> tag
+                // yet, that key is a bare "publisher:series" with no volume component at all. If
+                // recomputeGCDMatches then backfills comics.volume from the matched GCD series'
+                // own year, the row's real composite groupKey gains a volume suffix the caller's
+                // key never had, silently dropping it from the filter below -- its
+                // reading_order_position would never get set. Expand every such bare key to every
+                // real composite groupKey currently sharing that publisher/series, the same way
+                // series_links keys are resolved above.
+                effectiveKeys = expandBareGroupKeys(keys)
             }
 
             var sql = """
-            SELECT id, publisher, series, publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), '')),
+            SELECT id, publisher, series, volume,
+                   publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), '')),
                    file_path, issue_number, comicinfo_issue_number, title, year, cover_month, cover_day, story_arc,
-                   gcd_cover_date, alternate_number, format
+                   gcd_cover_date, alternate_number, format, gcd_issue_number
             FROM comics WHERE deleted_at IS NULL
             """
             var args: [Any?] = []
@@ -599,13 +822,13 @@ final class DatabaseManager: @unchecked Sendable {
             }
             let allRows: [Row] = rows(sql, args: args) { s in
                 Row(id: colInt64(s, 0), publisher: colText(s, 1) ?? "Unknown", series: colText(s, 2) ?? "General",
-                    groupKey: colText(s, 3) ?? "", filePath: colText(s, 4) ?? "",
-                    issueNumber: colText(s, 5), comicInfoIssueNumber: colText(s, 6), title: colText(s, 7) ?? "",
-                    year:  sqlite3_column_type(s, 8) != SQLITE_NULL ? colInt(s, 8) : nil,
-                    month: sqlite3_column_type(s, 9) != SQLITE_NULL ? colInt(s, 9) : nil,
-                    day:   sqlite3_column_type(s, 10) != SQLITE_NULL ? colInt(s, 10) : nil,
-                    storyArc: colText(s, 11), gcdCoverDate: colText(s, 12), alternateNumber: colText(s, 13),
-                    format: colText(s, 14))
+                    volume: colText(s, 3), groupKey: colText(s, 4) ?? "", filePath: colText(s, 5) ?? "",
+                    issueNumber: colText(s, 6), comicInfoIssueNumber: colText(s, 7), title: colText(s, 8) ?? "",
+                    year:  sqlite3_column_type(s, 9) != SQLITE_NULL ? colInt(s, 9) : nil,
+                    month: sqlite3_column_type(s, 10) != SQLITE_NULL ? colInt(s, 10) : nil,
+                    day:   sqlite3_column_type(s, 11) != SQLITE_NULL ? colInt(s, 11) : nil,
+                    storyArc: colText(s, 12), gcdCoverDate: colText(s, 13), alternateNumber: colText(s, 14),
+                    format: colText(s, 15), gcdIssueNumber: colText(s, 16))
             }
 
             var positions: [Int64: (position: Int, confidence: Int, reason: String)] = [:]
@@ -619,8 +842,18 @@ final class DatabaseManager: @unchecked Sendable {
                         y = parsed.year; m = parsed.month; d = parsed.day
                         usedGCDDate.insert(row.id)
                     }
-                    let isChild = childSeriesKeys.contains("\(row.publisher):\(row.series)")
+                    let isChild = childSeriesKeys.contains(Self.seriesVolumeKey(publisher: row.publisher, series: row.series, volume: row.volume))
+                    // alternate_number (an explicit ComicInfo.xml <AlternateNumber> tag) is the
+                    // highest-trust signal when present, but it's set on well under 1% of real
+                    // files. gcd_issue_number is recomputeGCDMatches' own verified legacy/
+                    // continuity number for a matched volume restart -- without falling back to
+                    // it here, a correctly-matched legacy renumbering (e.g. Amazing Spider-Man
+                    // Vol. 2 continuing Vol. 1's numbering) would still sort by its bare
+                    // volume-relative issue_number ("1") instead of its real place in the
+                    // continuity, for every comic that doesn't also happen to carry the rare
+                    // ComicInfo tag.
                     let legacyNumber = (isChild ? row.alternateNumber.flatMap(ReadingOrderEngine.parseLegacyNumber) : nil)
+                        ?? (isChild ? row.gcdIssueNumber.flatMap(ReadingOrderEngine.parseLegacyNumber) : nil)
                         ?? ReadingOrderEngine.parseLegacyNumber(row.issueNumber)
                     return ReadingOrderEngine.ReadingOrderInput(
                         id: row.id, groupKey: row.groupKey,
@@ -676,57 +909,65 @@ final class DatabaseManager: @unchecked Sendable {
 
             if !links.isEmpty {
                 var idsBySeriesKey: [String: [Int64]] = [:]
-                for row in allRows { idsBySeriesKey["\(row.publisher):\(row.series)", default: []].append(row.id) }
-                var childrenOf: [String: [String]] = [:]
-                var parentOf: [String: String] = [:]
-                for link in links {
-                    childrenOf[link.parentKey, default: []].append(link.childKey)
-                    parentOf[link.childKey] = link.parentKey
+                for row in allRows {
+                    idsBySeriesKey[Self.seriesVolumeKey(publisher: row.publisher, series: row.series, volume: row.volume), default: []].append(row.id)
                 }
-                let allKeys = Set(parentOf.keys).union(parentOf.values)
-                let roots = allKeys.subtracting(parentOf.keys)
-                var visited: Set<String> = []
-                func walk(_ seriesKey: String, baseOffset: Int) {
-                    guard !visited.contains(seriesKey) else { return }
-                    visited.insert(seriesKey)
-                    var maxPos = baseOffset
-                    for id in idsBySeriesKey[seriesKey] ?? [] where positions[id] != nil {
-                        positions[id]!.position += baseOffset
-                        maxPos = max(maxPos, positions[id]!.position)
-                    }
-                    for child in childrenOf[seriesKey] ?? [] { walk(child, baseOffset: maxPos + 1_000_000) }
+                let offsets = SeriesContinuity.chainOffsets(
+                    links: links, idsBySeriesKey: idsBySeriesKey,
+                    positions: positions.mapValues(\.position)
+                )
+                for (id, offset) in offsets {
+                    positions[id]?.position += offset
                 }
-                for root in roots { walk(root, baseOffset: 0) }
             }
 
             let overrideMap = Dictionary(uniqueKeysWithValues: rows(
                 "SELECT comic_id, position FROM reading_order_overrides", map: { (colInt64($0, 0), colInt($0, 1)) }
             ))
 
-            exec("BEGIN")
+            // Grouped by which UPDATE each row needs instead of interleaving one prepare/step
+            // per row -- this runs over the whole affected set after every scan/reorder, so
+            // reusing one compiled statement per branch instead of re-parsing identical SQL
+            // text on every row matters at real-library scale.
+            var overrideRows: [[Any?]] = []
+            var filenameResetRows: [[Any?]] = []
+            var positionRows: [[Any?]] = []
             for row in allRows {
                 if let overridePos = overrideMap[row.id] {
-                    _ = run("""
-                        UPDATE comics SET reading_order_position = ?, reading_order_confidence = 100,
-                               reading_order_reason = 'Manually placed'
-                        WHERE id = ?
-                        """, args: [overridePos, row.id])
+                    overrideRows.append([overridePos, row.id])
                 } else if mode == .filename {
-                    _ = run("""
-                        UPDATE comics SET reading_order_position = NULL, reading_order_confidence = NULL,
-                               reading_order_reason = NULL
-                        WHERE id = ?
-                        """, args: [row.id])
+                    filenameResetRows.append([row.id])
                 } else if let p = positions[row.id] {
-                    _ = run("""
-                        UPDATE comics SET reading_order_position = ?, reading_order_confidence = ?,
-                               reading_order_reason = ?
-                        WHERE id = ?
-                        """, args: [p.position, p.confidence, p.reason, row.id])
+                    positionRows.append([p.position, p.confidence, p.reason, row.id])
                 }
             }
-            exec("COMMIT")
+            inTransaction {
+                let ok1 = runBatch("""
+                    UPDATE comics SET reading_order_position = ?, reading_order_confidence = 100,
+                           reading_order_reason = 'Manually placed'
+                    WHERE id = ?
+                    """, rows: overrideRows)
+                let ok2 = runBatch("""
+                    UPDATE comics SET reading_order_position = NULL, reading_order_confidence = NULL,
+                           reading_order_reason = NULL
+                    WHERE id = ?
+                    """, rows: filenameResetRows)
+                let ok3 = runBatch("""
+                    UPDATE comics SET reading_order_position = ?, reading_order_confidence = ?,
+                           reading_order_reason = ?
+                    WHERE id = ?
+                    """, rows: positionRows)
+                return ok1 && ok2 && ok3
+            }
         }
+    }
+
+    /// Escapes literal `%`/`_`/`\` in free-text search input so a LIKE '%...%' pattern treats
+    /// them as literal characters instead of wildcards (paired with `ESCAPE '\'` at each call site).
+    private static func likeEscaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "%", with: "\\%")
+         .replacingOccurrences(of: "_", with: "\\_")
     }
 
     private static func parseGCDDate(_ raw: String) -> (year: Int, month: Int?, day: Int?)? {
@@ -737,17 +978,29 @@ final class DatabaseManager: @unchecked Sendable {
         return (year, month, day)
     }
 
-    func recomputeGCDMatches(affectedGroupKeys: Set<String>? = nil) {
-        guard OfflineMetadataStore.shared.isAvailable else { return }
+    func recomputeGCDMatches(affectedGroupKeys: Set<String>? = nil, store: OfflineMetadataStore = .shared) {
+        guard store.isAvailable else { return }
         queue.sync {
+            var effectiveKeys = affectedGroupKeys
+            if let keys = effectiveKeys, !keys.isEmpty {
+                // Mirrors recomputeReadingOrder's bare-key expansion: a caller (LibraryScanner,
+                // most commonly, whether from a freshly-derived series or one just re-derived
+                // after a folder rename) may not know a comic's current volume yet, so its key is
+                // a bare "publisher:series". If a PRIOR pass already backfilled comics.volume for
+                // that row (from a previous GCD match, or an edit), its real composite groupKey
+                // now includes a volume suffix the bare key never had -- without this expansion
+                // the row would be silently excluded and never get rematched.
+                effectiveKeys = expandBareGroupKeys(keys)
+            }
+
             var sql = """
                 SELECT id, series, publisher, issue_number, year, title,
                        publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), '')),
                        format
-                FROM comics WHERE deleted_at IS NULL
+                FROM comics WHERE deleted_at IS NULL AND gcd_match_source != 'manual'
             """
             var args: [Any?] = []
-            if let keys = affectedGroupKeys {
+            if let keys = effectiveKeys {
                 guard !keys.isEmpty else { return }
                 let placeholders = keys.map { _ in "?" }.joined(separator: ",")
                 sql += " AND (publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))) IN (\(placeholders))"
@@ -759,21 +1012,42 @@ final class DatabaseManager: @unchecked Sendable {
                     issueNumber: colText(s, 3), year: sqlite3_column_type(s, 4) != SQLITE_NULL ? colInt(s, 4) : nil,
                     title: colText(s, 5) ?? "", format: colText(s, 7))
             }
-            exec("BEGIN")
+            var updateRows: [[Any?]] = []
             for row in candidates {
                 let comicType = ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series, format: row.format)
-                guard let match = OfflineMetadataStore.shared.lookupIssue(
+                let match = store.lookupIssue(
                     series: row.series, publisher: row.publisher, issueNumber: row.issueNumber, year: row.year,
                     comicType: comicType
-                ) else { continue }
-                _ = run("""
-                    UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = ?, gcd_match_reason = ?,
-                           gcd_series_name = ?, gcd_issue_number = ?
-                    WHERE id = ?
-                    """, args: [match.gcdIssueId, match.coverDate, match.confidence, match.reason,
-                                match.canonicalSeriesName, match.canonicalIssueNumber, row.id])
+                )
+                // Always write a row, even with every gcd_* field nil -- a comic that matched on a
+                // previous pass (e.g. before an ambiguity fix like the ASM-Modern/1965 mismatch)
+                // but no longer matches now must have that stale, possibly-wrong attribution
+                // cleared, not silently left in place because this pass found nothing to replace
+                // it with.
+                updateRows.append([match?.gcdIssueId, match?.coverDate, match?.confidence, match?.reason,
+                                   match?.canonicalSeriesName, match?.canonicalIssueNumber,
+                                   match?.matchedSeriesYearBegan.map(String.init), row.id])
             }
-            exec("COMMIT")
+            inTransaction {
+                // GCD frequently catalogs a same-named restart or legacy-numbering continuation as
+                // an entirely distinct series id sharing one display name (e.g. Amazing Spider-Man
+                // Vol. 1 vs Vol. 2), so backfilling the matched GCD series' own start year here is
+                // what lets the volume-aware series link/reading-order/rename logic tell them
+                // apart. `has_comicinfo` (not a plain "is volume already set" check) decides
+                // whether this pass may touch it: when true, a comic's Volume came from its own
+                // ComicInfo.xml and must never be overwritten by a GCD guess; when false (the
+                // overwhelming majority of real libraries -- ComicInfo.xml is often present on
+                // under 1% of files), the GCD match is the ONLY possible source of truth for this
+                // field, so a corrected/retracted match on a later pass must always be allowed to
+                // correct/clear a previous pass's guess, not leave it permanently stuck the first
+                // time a match happened to exist.
+                runBatch("""
+                    UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = ?, gcd_match_reason = ?,
+                           gcd_series_name = ?, gcd_issue_number = ?,
+                           volume = CASE WHEN has_comicinfo = 1 THEN volume ELSE ? END
+                    WHERE id = ?
+                    """, rows: updateRows)
+            }
         }
     }
 
@@ -781,35 +1055,37 @@ final class DatabaseManager: @unchecked Sendable {
         let bonds = store.allSeriesBonds()
         guard !bonds.isEmpty else { return }
         queue.sync {
-            struct LibSeries { let publisher: String; let series: String }
-            let librarySeries: [LibSeries] = rows(
+            let librarySeries: [SeriesContinuity.LibrarySeries] = rows(
                 "SELECT DISTINCT publisher, series FROM comics WHERE deleted_at IS NULL"
-            ) { s in LibSeries(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General") }
-            guard librarySeries.count > 1 else { return }
+            ) { s in SeriesContinuity.LibrarySeries(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General") }
 
-            func resolve(gcdName: String, gcdPublisher: String) -> LibSeries? {
-                let candidates = librarySeries.filter {
-                    OfflineMetadataStore.seriesNamesMatch(local: $0.series, gcdName: gcdName) &&
-                    OfflineMetadataStore.normalizePublisher($0.publisher) == OfflineMetadataStore.normalizePublisher(gcdPublisher)
-                }
-                return candidates.count == 1 ? candidates.first : nil
+            let proposals = SeriesContinuity.proposeLinks(bonds: bonds, librarySeries: librarySeries)
+            guard !proposals.isEmpty else { return }
+
+            // Precompute the already-linked set and track the next sequence number locally
+            // instead of re-querying COUNT(*)/MAX(sequence_order) once per bond -- both were
+            // constant across the whole loop except for links this same loop just inserted,
+            // which the local Set/counter accounts for directly.
+            var alreadyLinked = Set(rows("SELECT child_publisher, child_series FROM series_links") { s in
+                "\(colText(s, 0) ?? ""):\(colText(s, 1) ?? "")"
+            })
+            var nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
+
+            var insertRows: [[Any?]] = []
+            for proposal in proposals {
+                let key = "\(proposal.child.publisher):\(proposal.child.series)"
+                guard !alreadyLinked.contains(key) else { continue }
+                insertRows.append([proposal.parent.publisher, proposal.parent.series,
+                                    proposal.child.publisher, proposal.child.series, nextSeq])
+                alreadyLinked.insert(key)
+                nextSeq += 1
             }
-
-            for bond in bonds {
-                guard let origin = resolve(gcdName: bond.originName, gcdPublisher: bond.originPublisher),
-                      let target = resolve(gcdName: bond.targetName, gcdPublisher: bond.targetPublisher),
-                      origin.publisher != target.publisher || origin.series != target.series else { continue }
-                let alreadyLinked = scalarInt(
-                    "SELECT COUNT(*) FROM series_links WHERE child_publisher = ? AND child_series = ?",
-                    args: [target.publisher, target.series]
-                ) > 0
-                guard !alreadyLinked else { continue }
-                let nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
-                _ = run("""
+            inTransaction {
+                runBatch("""
                     INSERT OR IGNORE INTO series_links
                         (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source)
                     VALUES (?, ?, ?, ?, ?, 'gcd')
-                    """, args: [origin.publisher, origin.series, target.publisher, target.series, nextSeq])
+                    """, rows: insertRows)
             }
         }
     }
@@ -822,20 +1098,147 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func clearReadingOrderOverride(comicId: Int64) {
-        queue.sync {
-            _ = run("DELETE FROM reading_order_overrides WHERE comic_id = ?", args: [comicId])
-        }
-    }
-
     func clearAllReadingOrderOverrides() {
         queue.sync { _ = run("DELETE FROM reading_order_overrides") }
     }
 
+    struct MetadataConflictInput {
+        let comicId: Int64
+        let field: String   // "series" | "publisher" | "issue_number"
+        let current: String?
+        let proposed: String?
+        let source: String
+    }
+
+    /// Re-detecting the same (comic, field) conflict updates the existing row and resets it to
+    /// 'pending' -- a stale dismissal must not permanently hide a disagreement that's still real
+    /// (and possibly changed) on a later pass.
+    func upsertMetadataConflicts(_ items: [MetadataConflictInput]) {
+        guard !items.isEmpty else { return }
+        _ = queue.sync {
+            inTransaction {
+                runBatch("""
+                    INSERT INTO metadata_conflicts (comic_id, field, current_value, proposed_value, proposed_source)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(comic_id, field) DO UPDATE SET
+                        current_value = excluded.current_value,
+                        proposed_value = excluded.proposed_value,
+                        proposed_source = excluded.proposed_source,
+                        status = 'pending',
+                        resolved_at = NULL
+                    """, rows: items.map { [$0.comicId, $0.field, $0.current, $0.proposed, $0.source] })
+            }
+        }
+    }
+
+    func pendingMetadataConflicts() -> [(conflict: MetadataConflict, comic: Comic)] {
+        queue.sync {
+            struct Raw {
+                let id: Int64; let comicId: Int64; let field: String
+                let current: String?; let proposed: String?; let source: String
+                let detectedAt: String; let status: String
+            }
+            let conflicts: [Raw] = rows("""
+                SELECT mc.id, mc.comic_id, mc.field, mc.current_value, mc.proposed_value,
+                       mc.proposed_source, mc.detected_at, mc.status
+                FROM metadata_conflicts mc
+                JOIN comics c ON c.id = mc.comic_id
+                WHERE mc.status = 'pending' AND c.deleted_at IS NULL
+                ORDER BY mc.detected_at DESC
+                """) { s in
+                Raw(id: colInt64(s, 0), comicId: colInt64(s, 1), field: colText(s, 2) ?? "",
+                    current: colText(s, 3), proposed: colText(s, 4), source: colText(s, 5) ?? "",
+                    detectedAt: colText(s, 6) ?? "", status: colText(s, 7) ?? "pending")
+            }
+            guard !conflicts.isEmpty else { return [] }
+            let comicIds = Set(conflicts.map(\.comicId))
+            let placeholders = comicIds.map { _ in "?" }.joined(separator: ",")
+            let comics: [Comic] = rows("\(comicSelect) WHERE c.id IN (\(placeholders))",
+                                        args: Array(comicIds).map { $0 as Any? }, map: comicRow)
+            let comicsById = Dictionary(uniqueKeysWithValues: comics.map { ($0.id, $0) })
+            return conflicts.compactMap { r in
+                guard let comic = comicsById[r.comicId] else { return nil }
+                return (MetadataConflict(id: r.id, comicId: r.comicId, field: r.field, currentValue: r.current,
+                                          proposedValue: r.proposed, proposedSource: r.source,
+                                          detectedAt: r.detectedAt, status: r.status), comic)
+            }
+        }
+    }
+
+    /// `apply`: writes the proposed value to `comics` and marks `meta_edited = 1` -- applying a
+    /// conflict is itself a deliberate user choice, so it earns the same protection any other
+    /// manual correction gets. `dismiss`: only updates the conflict's own status; `comics` is
+    /// untouched, the current value stands.
+    func resolveMetadataConflict(id: Int64, apply: Bool) {
+        queue.sync {
+            guard let row = rows("SELECT comic_id, field, proposed_value FROM metadata_conflicts WHERE id = ?",
+                                  args: [id], map: { s in
+                (colInt64(s, 0), colText(s, 1) ?? "", colText(s, 2))
+            }).first else { return }
+            let (comicId, field, proposed) = row
+            if apply {
+                let columns = ["series": "series", "publisher": "publisher", "issue_number": "issue_number"]
+                guard let column = columns[field] else { return }
+                _ = run("UPDATE comics SET \(column) = ?, meta_edited = 1 WHERE id = ?", args: [proposed, comicId])
+                _ = run("UPDATE metadata_conflicts SET status = 'applied', resolved_at = CURRENT_TIMESTAMP WHERE id = ?", args: [id])
+            } else {
+                _ = run("UPDATE metadata_conflicts SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP WHERE id = ?", args: [id])
+            }
+        }
+    }
+
+    // MARK: - Existing-library import-priority audit (one-time, post-upgrade)
+
+    private static let importPriorityAuditMigrationName = "importPriorityAuditV1"
+
+    func hasCompletedImportPriorityAudit() -> Bool {
+        queue.sync { scalarInt("SELECT COUNT(*) FROM migrations WHERE name = ?", args: [Self.importPriorityAuditMigrationName]) > 0 }
+    }
+
+    func markImportPriorityAuditComplete() {
+        queue.sync { _ = run("INSERT OR IGNORE INTO migrations (name) VALUES (?)", args: [Self.importPriorityAuditMigrationName]) }
+    }
+
+    /// Rows that predate the raw-fact mirror columns (added well after `has_comicinfo` already
+    /// existed) -- these are exactly the comics whose series/publisher were decided under the old
+    /// folder/filename-first priority, with no record of what their own ComicInfo.xml said.
+    func pendingImportPriorityAuditPaths() -> [(id: Int64, path: String)] {
+        queue.sync {
+            rows("SELECT id, file_path FROM comics WHERE has_comicinfo = 1 AND comicinfo_series IS NULL AND deleted_at IS NULL")
+                { (colInt64($0, 0), colText($0, 1) ?? "") }
+        }
+    }
+
+    struct IdentitySnapshot { let series: String?; let publisher: String?; let metaEdited: Bool }
+
+    func identitySnapshots(for ids: [Int64]) -> [Int64: IdentitySnapshot] {
+        guard !ids.isEmpty else { return [:] }
+        return queue.sync {
+            let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+            let pairs: [(Int64, IdentitySnapshot)] = rows(
+                "SELECT id, series, publisher, meta_edited FROM comics WHERE id IN (\(placeholders))",
+                args: ids.map { $0 as Any? }
+            ) { s in
+                (colInt64(s, 0), IdentitySnapshot(series: colText(s, 1), publisher: colText(s, 2), metaEdited: colInt(s, 3) != 0))
+            }
+            return Dictionary(uniqueKeysWithValues: pairs)
+        }
+    }
+
+    func updateComicInfoMirrors(_ items: [(id: Int64, comicInfoSeries: String?, comicInfoPublisher: String?)]) {
+        guard !items.isEmpty else { return }
+        _ = queue.sync {
+            inTransaction {
+                runBatch("UPDATE comics SET comicinfo_series = ?, comicinfo_publisher = ? WHERE id = ?",
+                         rows: items.map { [$0.comicInfoSeries, $0.comicInfoPublisher, $0.id] })
+            }
+        }
+    }
+
     struct SeriesLink {
         let id: Int64
-        let parentPublisher: String; let parentSeries: String
-        let childPublisher: String; let childSeries: String
+        let parentPublisher: String; let parentSeries: String; let parentVolume: String?
+        let childPublisher: String; let childSeries: String; let childVolume: String?
         let sequenceOrder: Int
         let source: String
     }
@@ -843,49 +1246,65 @@ final class DatabaseManager: @unchecked Sendable {
     func seriesLinks() -> [SeriesLink] {
         queue.sync {
             rows("""
-                SELECT id, parent_publisher, parent_series, child_publisher, child_series, sequence_order, source
+                SELECT id, parent_publisher, parent_series, parent_volume,
+                       child_publisher, child_series, child_volume, sequence_order, source
                 FROM series_links ORDER BY sequence_order
                 """) { s in
                 SeriesLink(id: colInt64(s, 0), parentPublisher: colText(s, 1) ?? "", parentSeries: colText(s, 2) ?? "",
-                           childPublisher: colText(s, 3) ?? "", childSeries: colText(s, 4) ?? "", sequenceOrder: colInt(s, 5),
-                           source: colText(s, 6) ?? "manual")
+                           parentVolume: colText(s, 3), childPublisher: colText(s, 4) ?? "", childSeries: colText(s, 5) ?? "",
+                           childVolume: colText(s, 6), sequenceOrder: colInt(s, 7), source: colText(s, 8) ?? "manual")
             }
         }
     }
 
+    /// Combines publisher+series+volume into one key with volume-aware equality -- NULL and ""
+    /// (no volume tag at all) are treated identically, matching the same COALESCE(...,'')
+    /// convention used for `comics.volume` everywhere else (groupKey, series_group, etc.).
+    private static func seriesVolumeKey(publisher: String, series: String, volume: String?) -> String {
+        "\(publisher):\(series):\(volume?.isEmpty == false ? volume! : "")"
+    }
+
     @discardableResult
-    func addSeriesLink(parentPublisher: String, parentSeries: String, childPublisher: String, childSeries: String,
+    func addSeriesLink(parentPublisher: String, parentSeries: String, parentVolume: String? = nil,
+                       childPublisher: String, childSeries: String, childVolume: String? = nil,
                        source: String = "manual") -> Bool {
         queue.sync {
             let nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
-            let before = scalarInt("SELECT COUNT(*) FROM series_links WHERE child_publisher=? AND child_series=?",
-                                    args: [childPublisher, childSeries])
+            let before = scalarInt("""
+                SELECT COUNT(*) FROM series_links
+                WHERE child_publisher = ? AND child_series = ? AND COALESCE(NULLIF(child_volume,''),'') = COALESCE(NULLIF(?,''),'')
+                """, args: [childPublisher, childSeries, childVolume])
             guard before == 0 else { return false }
 
-            let childKey = "\(childPublisher):\(childSeries)"
-            var ancestor: String? = "\(parentPublisher):\(parentSeries)"
+            let childKey = Self.seriesVolumeKey(publisher: childPublisher, series: childSeries, volume: childVolume)
+            var ancestor: String? = Self.seriesVolumeKey(publisher: parentPublisher, series: parentSeries, volume: parentVolume)
             var hops = 0
             while let current = ancestor, hops < 100 {
                 if current == childKey { return false }
-                ancestor = scalarText(
-                    "SELECT parent_publisher || ':' || parent_series FROM series_links WHERE child_publisher || ':' || child_series = ?",
-                    args: [current]
+                ancestor = scalarText("""
+                    SELECT parent_publisher || ':' || parent_series || ':' || COALESCE(NULLIF(parent_volume,''),'')
+                    FROM series_links
+                    WHERE child_publisher || ':' || child_series || ':' || COALESCE(NULLIF(child_volume,''),'') = ?
+                    """, args: [current]
                 )
                 hops += 1
             }
 
             _ = run("""
-                INSERT INTO series_links (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, args: [parentPublisher, parentSeries, childPublisher, childSeries, nextSeq, source])
+                INSERT INTO series_links (parent_publisher, parent_series, parent_volume,
+                                           child_publisher, child_series, child_volume, sequence_order, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, args: [parentPublisher, parentSeries, parentVolume, childPublisher, childSeries, childVolume, nextSeq, source])
             return true
         }
     }
 
-    func removeSeriesLink(childPublisher: String, childSeries: String) {
+    func removeSeriesLink(childPublisher: String, childSeries: String, childVolume: String? = nil) {
         queue.sync {
-            _ = run("DELETE FROM series_links WHERE child_publisher = ? AND child_series = ?",
-                    args: [childPublisher, childSeries])
+            _ = run("""
+                DELETE FROM series_links
+                WHERE child_publisher = ? AND child_series = ? AND COALESCE(NULLIF(child_volume,''),'') = COALESCE(NULLIF(?,''),'')
+                """, args: [childPublisher, childSeries, childVolume])
         }
     }
 
@@ -898,43 +1317,33 @@ final class DatabaseManager: @unchecked Sendable {
             for cycle in _seriesLinkCyclesUnlocked() {
                 let members = Set(cycle)
                 guard let toBreak: (child: String, seq: Int) = rows(
-                    "SELECT child_publisher || ':' || child_series, sequence_order FROM series_links ORDER BY sequence_order DESC",
+                    """
+                    SELECT child_publisher || ':' || child_series || ':' || COALESCE(NULLIF(child_volume,''),''), sequence_order
+                    FROM series_links ORDER BY sequence_order DESC
+                    """,
                     map: { s in (colText(s, 0) ?? "", colInt(s, 1)) }
                 ).first(where: { members.contains($0.child) }) else { continue }
-                let parts = toBreak.child.split(separator: ":", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else { continue }
-                _ = run("DELETE FROM series_links WHERE child_publisher = ? AND child_series = ?", args: [parts[0], parts[1]])
+                let parts = toBreak.child.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+                guard parts.count == 3 else { continue }
+                _ = run("""
+                    DELETE FROM series_links
+                    WHERE child_publisher = ? AND child_series = ? AND COALESCE(NULLIF(child_volume,''),'') = ?
+                    """, args: [parts[0], parts[1], parts[2]])
             }
         }
     }
 
     private func _seriesLinkCyclesUnlocked() -> [[String]] {
-        let links: [(parentKey: String, childKey: String)] = rows(
-            "SELECT parent_publisher, parent_series, child_publisher, child_series FROM series_links"
+        let links: [(parentKey: String, childKey: String)] = rows("""
+            SELECT parent_publisher, parent_series, COALESCE(NULLIF(parent_volume,''),''),
+                   child_publisher, child_series, COALESCE(NULLIF(child_volume,''),'')
+            FROM series_links
+            """
         ) { s in
-            ("\(colText(s, 0) ?? ""):\(colText(s, 1) ?? "")", "\(colText(s, 2) ?? ""):\(colText(s, 3) ?? "")")
+            ("\(colText(s, 0) ?? ""):\(colText(s, 1) ?? ""):\(colText(s, 2) ?? "")",
+             "\(colText(s, 3) ?? ""):\(colText(s, 4) ?? ""):\(colText(s, 5) ?? "")")
         }
-        var parentOf: [String: String] = [:]
-        for link in links { parentOf[link.childKey] = link.parentKey }
-        var cycles: [[String]] = []
-        var globallySeen: Set<String> = []
-        for start in parentOf.keys where !globallySeen.contains(start) {
-            var path: [String] = []
-            var indexInPath: [String: Int] = [:]
-            var current = start
-            while !globallySeen.contains(current) {
-                if let cycleStart = indexInPath[current] {
-                    cycles.append(Array(path[cycleStart...]))
-                    break
-                }
-                indexInPath[current] = path.count
-                path.append(current)
-                guard let next = parentOf[current] else { break }
-                current = next
-            }
-            globallySeen.formUnion(path)
-        }
-        return cycles
+        return SeriesContinuity.findCycles(links: links)
     }
 
     func allSeriesNames() -> [(publisher: String, series: String)] {
@@ -943,6 +1352,18 @@ final class DatabaseManager: @unchecked Sendable {
                 SELECT DISTINCT publisher, series FROM comics
                 WHERE deleted_at IS NULL ORDER BY series
                 """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General") }
+        }
+    }
+
+    /// Distinct (publisher, series, volume) triples -- unlike `allSeriesNames()`, this tells two
+    /// differently-volumed runs of the same Series name apart (e.g. Amazing Spider-Man Vol. 1 vs
+    /// Vol. 2), which is what the series-link picker needs to offer them as separate candidates.
+    func allSeriesVolumes() -> [(publisher: String, series: String, volume: String?)] {
+        queue.sync {
+            rows("""
+                SELECT DISTINCT publisher, series, volume FROM comics
+                WHERE deleted_at IS NULL ORDER BY series, volume
+                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colText(s, 2)) }
         }
     }
 
@@ -1076,7 +1497,9 @@ final class DatabaseManager: @unchecked Sendable {
 
     enum SortOrder: String, CaseIterable, Identifiable {
         case publisher = "Publisher", title = "Title", dateAdded = "Recently Added",
-             rating = "Top Rated", progress = "Most Read", manual = "Custom"
+             rating = "Top Rated", progress = "Most Read", manual = "Custom",
+             year = "Year", storyArc = "Story Arc", pageCount = "Page Count",
+             dateRead = "Recently Read", writer = "Writer"
         var id: String { rawValue }
         var clause: String {
             switch self {
@@ -1086,7 +1509,12 @@ final class DatabaseManager: @unchecked Sendable {
             case .dateAdded: return "c.added_at DESC"
             case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
             case .progress:  return "COALESCE(rp.current_page, 0) DESC, c.title"
-            case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id)"
+            case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id), c.title"
+            case .year:      return "COALESCE(c.year, 0) DESC, c.title"
+            case .storyArc:  return "COALESCE(c.story_arc, ''), c.title"
+            case .pageCount: return "c.page_count DESC, c.title"
+            case .dateRead:  return "COALESCE(rp.last_read, '') DESC, c.title"
+            case .writer:    return "COALESCE(c.writer, ''), c.title"
             }
         }
     }
@@ -1103,8 +1531,8 @@ final class DatabaseManager: @unchecked Sendable {
             else if let chr = character { conds.append("c.character = ?"); args.append(chr) }
             if let ser = series { conds.append("c.series = ?"); args.append(ser) }
             if let q = search, !q.isEmpty {
-                conds.append("(c.title LIKE ? OR c.series LIKE ? OR c.publisher LIKE ? OR c.writer LIKE ? OR c.penciller LIKE ? OR c.character LIKE ?)")
-                let p = "%\(q)%"
+                conds.append("(c.title LIKE ? ESCAPE '\\' OR c.series LIKE ? ESCAPE '\\' OR c.publisher LIKE ? ESCAPE '\\' OR c.writer LIKE ? ESCAPE '\\' OR c.penciller LIKE ? ESCAPE '\\' OR c.character LIKE ? ESCAPE '\\')")
+                let p = "%\(Self.likeEscaped(q))%"
                 args += [p, p, p, p, p, p]
             }
             if favoritesOnly   { conds.append("f.comic_id IS NOT NULL") }
@@ -1136,6 +1564,7 @@ final class DatabaseManager: @unchecked Sendable {
         let seriesGroup: String?
         let gcdMatchReason: String?
         let hasComicInfo: Bool?
+        let gcdMatchSource: String
         let duplicateMatchCount: Int
     }
 
@@ -1147,18 +1576,19 @@ final class DatabaseManager: @unchecked Sendable {
             struct Extra {
                 let coverMonth: Int?; let coverDay: Int?; let comicInfoIssueNumber: String?
                 let alternateNumber: String?; let storyArcNumber: String?; let seriesGroup: String?
-                let gcdMatchReason: String?; let hasComicInfo: Int?
+                let gcdMatchReason: String?; let hasComicInfo: Int?; let gcdMatchSource: String
             }
             guard let extra = rows("""
                 SELECT cover_month, cover_day, comicinfo_issue_number, alternate_number,
-                       story_arc_number, series_group, gcd_match_reason, has_comicinfo
+                       story_arc_number, series_group, gcd_match_reason, has_comicinfo, gcd_match_source
                 FROM comics WHERE id = ?
                 """, args: [comicId], map: { s in
                 Extra(coverMonth: sqlite3_column_type(s, 0) != SQLITE_NULL ? colInt(s, 0) : nil,
                       coverDay: sqlite3_column_type(s, 1) != SQLITE_NULL ? colInt(s, 1) : nil,
                       comicInfoIssueNumber: colText(s, 2), alternateNumber: colText(s, 3),
                       storyArcNumber: colText(s, 4), seriesGroup: colText(s, 5), gcdMatchReason: colText(s, 6),
-                      hasComicInfo: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil)
+                      hasComicInfo: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil,
+                      gcdMatchSource: colText(s, 8) ?? "auto")
             }).first else { return nil }
 
             let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
@@ -1172,6 +1602,7 @@ final class DatabaseManager: @unchecked Sendable {
                 storyArcNumber: extra.storyArcNumber, seriesGroup: extra.seriesGroup,
                 gcdMatchReason: extra.gcdMatchReason,
                 hasComicInfo: extra.hasComicInfo.map { $0 != 0 },
+                gcdMatchSource: extra.gcdMatchSource,
                 duplicateMatchCount: _duplicateMatchCountUnlocked(for: comicId)
             )
         }
@@ -1181,6 +1612,97 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             rows("SELECT file_path FROM comics WHERE id = ? AND deleted_at IS NULL", args: [id],
                  map: { colText($0, 0) ?? "" }).first
+        }
+    }
+
+    /// Records a user's deliberate pick from the "Fix Match" picker -- the one place in the app
+    /// where a GCD match is set by explicit human choice rather than `recomputeGCDMatches`' own
+    /// automatic scoring. Sets `gcd_match_source = 'manual'` so no future rescan can silently
+    /// revert it (see the guard added to `recomputeGCDMatches`'s own candidate query). Confidence
+    /// is always 100 -- a human pick is definitionally certain, not a scored guess. Volume backfill
+    /// mirrors the automatic path exactly: only touches `volume` when there's no real ComicInfo.xml
+    /// tag to protect (`has_comicinfo = 0`), never overwrites a genuine Volume tag.
+    func setManualGCDMatch(comicId: Int64, gcdIssueId: Int, seriesName: String, issueNumber: String,
+                           coverDate: String?, seriesYearBegan: Int?) {
+        queue.sync {
+            _ = run("""
+                UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = 100,
+                       gcd_match_reason = 'Manually matched', gcd_series_name = ?, gcd_issue_number = ?,
+                       gcd_match_source = 'manual',
+                       volume = CASE WHEN has_comicinfo = 1 THEN volume ELSE ? END
+                WHERE id = ?
+                """, args: [gcdIssueId, coverDate, seriesName, issueNumber,
+                            seriesYearBegan.map(String.init), comicId])
+        }
+    }
+
+    /// `BackupService`'s restore path for a manual match -- deliberately does NOT touch `volume`
+    /// the way `setManualGCDMatch` does, since a backup doesn't carry the matched series' own
+    /// start year and blindly writing `NULL` here would silently clear a volume value the comic
+    /// may have picked up from an unrelated automatic match since the backup was taken.
+    func restoreManualGCDMatch(comicId: Int64, gcdIssueId: Int, seriesName: String?, issueNumber: String?, coverDate: String?) {
+        queue.sync {
+            _ = run("""
+                UPDATE comics SET gcd_issue_id = ?, gcd_cover_date = ?, gcd_match_confidence = 100,
+                       gcd_match_reason = 'Manually matched', gcd_series_name = ?, gcd_issue_number = ?,
+                       gcd_match_source = 'manual'
+                WHERE id = ?
+                """, args: [gcdIssueId, coverDate, seriesName, issueNumber, comicId])
+        }
+    }
+
+    /// Reverts a manual match back to automatic control -- clears the match entirely (rather than
+    /// leaving the stale manual values in place) so the row honestly shows "unmatched" until the
+    /// next `recomputeGCDMatches` pass re-evaluates it on its own.
+    func clearManualGCDMatch(comicId: Int64) {
+        queue.sync {
+            _ = run("""
+                UPDATE comics SET gcd_issue_id = NULL, gcd_cover_date = NULL, gcd_match_confidence = NULL,
+                       gcd_match_reason = NULL, gcd_series_name = NULL, gcd_issue_number = NULL,
+                       gcd_match_source = 'auto'
+                WHERE id = ?
+                """, args: [comicId])
+        }
+    }
+
+    struct GCDManualMatchDetail {
+        let comicId: Int64
+        let gcdIssueId: Int
+        let seriesName: String?
+        let issueNumber: String?
+        let coverDate: String?
+    }
+
+    /// Every comic whose current GCD match is a deliberate manual pick, not `recomputeGCDMatches`'
+    /// own automatic guess -- used by `BackupService` to decide which comics need their match
+    /// exported, since a manual pick is a user choice worth preserving across a restore while an
+    /// automatic match is disposable derived data the next scan regenerates on its own.
+    func manualGCDMatchDetails() -> [GCDManualMatchDetail] {
+        queue.sync {
+            rows("""
+                SELECT id, gcd_issue_id, gcd_series_name, gcd_issue_number, gcd_cover_date
+                FROM comics
+                WHERE gcd_match_source = 'manual' AND deleted_at IS NULL AND gcd_issue_id IS NOT NULL
+                """) { s in
+                GCDManualMatchDetail(comicId: colInt64(s, 0), gcdIssueId: colInt(s, 1),
+                                      seriesName: colText(s, 2), issueNumber: colText(s, 3), coverDate: colText(s, 4))
+            }
+        }
+    }
+
+    /// The ideal filename for one comic, computed with the exact same canonical-name/volume/title
+    /// disambiguation logic the bulk Rename Files tool uses (`ComicFileNaming`), scoped to just
+    /// this comic's (publisher, series) siblings rather than the whole library. Returns nil when
+    /// the file's current name already matches -- i.e. nothing to fix.
+    func proposedFilename(comicId: Int64) -> String? {
+        queue.sync {
+            guard let target = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL",
+                                     args: [comicId], map: comicRow).first else { return nil }
+            let siblings = rows("\(comicSelect) WHERE c.publisher = ? AND c.series = ? AND c.deleted_at IS NULL",
+                                 args: [target.publisher, target.series], map: comicRow)
+            guard let ideal = ComicFileNaming.idealFilenames(for: siblings)[comicId] else { return nil }
+            let currentName = URL(fileURLWithPath: target.filePath).lastPathComponent
+            return currentName == ideal ? nil : ideal
         }
     }
 
@@ -1219,8 +1741,12 @@ final class DatabaseManager: @unchecked Sendable {
     }
 
     struct ComicInsert {
-        let title: String, filePath: String, publisher: String, character: String?
-        let series: String, issueNumber: String?, pageCount: Int, writer: String?
+        let title: String, filePath: String
+        var publisher: String
+        let character: String?
+        var series: String
+        var issueNumber: String?
+        let pageCount: Int, writer: String?
         let penciller: String?, year: Int?, storyArc: String?, languageIso: String?, fileHash: String?
         var coverMonth: Int? = nil
         var coverDay: Int? = nil
@@ -1231,52 +1757,154 @@ final class DatabaseManager: @unchecked Sendable {
         var volume: String? = nil
         var format: String? = nil
         var hasComicInfo: Bool? = nil
+        /// Raw-fact mirrors: what ComicInfo.xml/the folder actually said, independent of which one
+        /// won for the primary series/publisher columns above -- lets a priority decision made at
+        /// import time be revisited later instead of being permanently lost. See
+        /// `ComicIdentityResolver`.
+        var comicInfoSeries: String? = nil
+        var comicInfoPublisher: String? = nil
+        var folderSeries: String? = nil
+        var folderPublisher: String? = nil
+        /// Which raw-fact source actually won for series/publisher/issueNumber above -- used to
+        /// label a metadata conflict with where the proposed value came from (e.g. "ComicInfo.xml"
+        /// vs "folder"), not persisted on `comics` itself.
+        var seriesSource: String = ComicIdentityResolver.defaultSource
+        var publisherSource: String = ComicIdentityResolver.defaultSource
+        var issueNumberSource: String = ComicIdentityResolver.defaultSource
     }
 
-    func insert(comic: (title: String, filePath: String, publisher: String, character: String?,
-                        series: String, issueNumber: String?, pageCount: Int, writer: String?,
-                        penciller: String?, year: Int?, storyArc: String?, languageIso: String?,
-                        fileHash: String?)) {
-        queue.sync { _insertRow(comic.title, comic.filePath, comic.publisher, comic.character,
-                                comic.series, comic.issueNumber, comic.pageCount, comic.writer,
-                                comic.penciller, comic.year, comic.storyArc, comic.languageIso, comic.fileHash) }
+    /// The placeholder values the scanner itself writes when a source has nothing real to offer --
+    /// never worth protecting as if they were a genuine prior value.
+    private static let identityPlaceholders: Set<String> = ["general", "unknown"]
+
+    /// Nil if `current` is empty/a placeholder, or if it doesn't actually disagree with
+    /// `proposed` (after case/whitespace-insensitive comparison) -- i.e. nil means "safe to
+    /// auto-apply `proposed`, nothing worth flagging." Shared with `LibraryScanner`'s existing-
+    /// library audit migration, so both use exactly the same disagreement rule.
+    static func detectMetadataConflict(
+        field: String, current: String?, proposed: String?, source: String, comicId: Int64
+    ) -> MetadataConflictInput? {
+        guard let current else { return nil }
+        let normalizedCurrent = current.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedCurrent.isEmpty, !identityPlaceholders.contains(normalizedCurrent) else { return nil }
+        let normalizedProposed = (proposed ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedCurrent != normalizedProposed else { return nil }
+        return MetadataConflictInput(comicId: comicId, field: field, current: current, proposed: proposed, source: source)
     }
 
     func batchInsert(_ comics: [ComicInsert]) {
         guard !comics.isEmpty else { return }
-        queue.sync {
-            exec("BEGIN")
-            for c in comics {
-                _insertRow(c.title, c.filePath, c.publisher, c.character,
-                           c.series, c.issueNumber, c.pageCount, c.writer,
-                           c.penciller, c.year, c.storyArc, c.languageIso, c.fileHash, c.coverMonth,
-                           c.coverDay, c.alternateNumber, c.storyArcNumber, c.seriesGroup, c.comicInfoIssueNumber,
-                           c.volume, c.format, c.hasComicInfo)
-            }
-            exec("COMMIT")
-        }
-    }
+        // `upsertMetadataConflicts` takes `queue` itself -- collected here and applied AFTER this
+        // function's own `queue.sync` block returns, never from inside it, or a nested `queue.sync`
+        // on this serial queue would deadlock.
+        let conflicts: [MetadataConflictInput] = queue.sync {
+            // If any of this batch's paths already have a row with meta_edited = 0, compare the
+            // newly-resolved series/publisher/issue_number against what's already there instead of
+            // blindly overwriting it -- a real disagreement (not a placeholder being filled in for
+            // the first time) gets flagged for review instead of silently applied in either
+            // direction. Empty/cheap on a normal new-files-only scan, where none of these paths
+            // exist yet.
+            struct Existing { let id: Int64; let series: String?; let publisher: String?; let issueNumber: String?; let metaEdited: Bool }
+            let paths = comics.map(\.filePath)
+            let placeholders = paths.map { _ in "?" }.joined(separator: ",")
+            let existingByPath: [String: Existing] = Dictionary(uniqueKeysWithValues: rows(
+                "SELECT file_path, id, series, publisher, issue_number, meta_edited FROM comics WHERE file_path IN (\(placeholders))",
+                args: paths.map { $0 as Any? }
+            ) { s in
+                (colText(s, 0) ?? "", Existing(id: colInt64(s, 1), series: colText(s, 2), publisher: colText(s, 3),
+                                                issueNumber: colText(s, 4), metaEdited: colInt(s, 5) != 0))
+            })
 
-    private func _insertRow(_ title: String, _ filePath: String, _ publisher: String, _ character: String?,
-                             _ series: String, _ issueNumber: String?, _ pageCount: Int, _ writer: String?,
-                             _ penciller: String?, _ year: Int?, _ storyArc: String?, _ languageIso: String?,
-                             _ fileHash: String?, _ coverMonth: Int? = nil, _ coverDay: Int? = nil,
-                             _ alternateNumber: String? = nil, _ storyArcNumber: String? = nil,
-                             _ seriesGroup: String? = nil, _ comicInfoIssueNumber: String? = nil,
-                             _ volume: String? = nil, _ format: String? = nil, _ hasComicInfo: Bool? = nil) {
-        _ = run("""
-        INSERT OR IGNORE INTO comics
-            (title, file_path, publisher, character, series, issue_number,
-             page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
-             cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number, volume,
-             format, has_comicinfo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, args: [title, filePath, publisher, character,
-                    series, issueNumber, pageCount, writer,
-                    penciller, year.map { Int64($0) }, storyArc,
-                    languageIso, fileHash, coverMonth.map { Int64($0) },
-                    coverDay.map { Int64($0) }, alternateNumber, storyArcNumber, seriesGroup, comicInfoIssueNumber,
-                    volume, format, hasComicInfo.map { $0 ? Int64(1) : Int64(0) }])
+            var conflicts: [MetadataConflictInput] = []
+            let resolvedComics: [ComicInsert] = comics.map { c in
+                guard let existing = existingByPath[c.filePath], !existing.metaEdited else { return c }
+                var adjusted = c
+                if let conflict = Self.detectMetadataConflict(field: "series", current: existing.series, proposed: c.series,
+                                                                source: c.seriesSource, comicId: existing.id) {
+                    conflicts.append(conflict)
+                    adjusted.series = existing.series ?? c.series
+                }
+                if let conflict = Self.detectMetadataConflict(field: "publisher", current: existing.publisher, proposed: c.publisher,
+                                                                source: c.publisherSource, comicId: existing.id) {
+                    conflicts.append(conflict)
+                    adjusted.publisher = existing.publisher ?? c.publisher
+                }
+                if let conflict = Self.detectMetadataConflict(field: "issue_number", current: existing.issueNumber, proposed: c.issueNumber,
+                                                                source: c.issueNumberSource, comicId: existing.id) {
+                    conflicts.append(conflict)
+                    adjusted.issueNumber = existing.issueNumber
+                }
+                return adjusted
+            }
+
+            _ = inTransaction {
+                // Each of these two statements is identical text across every comic in the
+                // batch -- prepared once and reused across all rows instead of `_insertRow`'s
+                // former per-comic prepare/finalize, which mattered for first-time imports of
+                // large libraries (chunks of up to 100 comics per flush, potentially many chunks).
+                let insertRows: [[Any?]] = resolvedComics.map { c in
+                    [c.title, c.filePath, c.publisher, c.character,
+                     c.series, c.issueNumber, c.pageCount, c.writer,
+                     c.penciller, c.year.map { Int64($0) }, c.storyArc,
+                     c.languageIso, c.fileHash, c.coverMonth.map { Int64($0) },
+                     c.coverDay.map { Int64($0) }, c.alternateNumber, c.storyArcNumber, c.seriesGroup, c.comicInfoIssueNumber,
+                     c.volume, c.format, c.hasComicInfo.map { $0 ? Int64(1) : Int64(0) },
+                     c.comicInfoSeries, c.comicInfoPublisher, c.folderSeries, c.folderPublisher]
+                }
+                // ON CONFLICT (not OR IGNORE): file_path is UNIQUE, and a soft-deleted comic keeps
+                // its row (deleted_at set, never removed) forever at that same path. If the file
+                // later reappears after being wrongly marked stale (e.g. a flaky/waking external
+                // drive during a scan), INSERT OR IGNORE would silently no-op on the UNIQUE
+                // conflict -- the comic would never come back, permanently orphaned. Reviving the
+                // SAME row on conflict instead means its reading_progress/ratings/tags/list-
+                // memberships (all keyed by this comic_id) are still correctly attached -- a plain
+                // "delete and re-insert" would have orphaned all of that. added_at and position
+                // are deliberately left untouched: a revival isn't a new addition. The folder-
+                // derived identity columns (matching `folderDerivedColumns`, plus issue_number)
+                // are gated behind meta_edited like every other write path touches them -- without
+                // this, a user's manual correction survives right up until the file goes briefly
+                // missing (e.g. a flaky external drive) and reappears, at which point the revival
+                // would have silently reset it back to the raw filename/folder-parsed guess.
+                let ok1 = runBatch("""
+                    INSERT INTO comics
+                        (title, file_path, publisher, character, series, issue_number,
+                         page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
+                         cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number, volume,
+                         format, has_comicinfo, comicinfo_series, comicinfo_publisher, folder_series, folder_publisher)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(file_path) DO UPDATE SET
+                        deleted_at = NULL, scan_retry_count = 0,
+                        title = CASE WHEN comics.meta_edited = 0 THEN excluded.title ELSE comics.title END,
+                        publisher = CASE WHEN comics.meta_edited = 0 THEN excluded.publisher ELSE comics.publisher END,
+                        character = CASE WHEN comics.meta_edited = 0 THEN excluded.character ELSE comics.character END,
+                        series = CASE WHEN comics.meta_edited = 0 THEN excluded.series ELSE comics.series END,
+                        issue_number = CASE WHEN comics.meta_edited = 0 THEN excluded.issue_number ELSE comics.issue_number END,
+                        page_count = excluded.page_count,
+                        writer = excluded.writer, penciller = excluded.penciller, year = excluded.year,
+                        story_arc = excluded.story_arc, language_iso = excluded.language_iso, file_hash = excluded.file_hash,
+                        cover_month = excluded.cover_month, cover_day = excluded.cover_day,
+                        alternate_number = excluded.alternate_number, story_arc_number = excluded.story_arc_number,
+                        series_group = excluded.series_group, comicinfo_issue_number = excluded.comicinfo_issue_number,
+                        volume = excluded.volume, format = excluded.format, has_comicinfo = excluded.has_comicinfo,
+                        comicinfo_series = excluded.comicinfo_series, comicinfo_publisher = excluded.comicinfo_publisher,
+                        folder_series = excluded.folder_series, folder_publisher = excluded.folder_publisher
+                    """, rows: insertRows)
+
+                // A revival (or a metadata refresh) can leave a comic's page_count smaller than
+                // whatever page reading_progress last saved -- clamp it down so Stats/Continue
+                // Reading stop treating stale out-of-range progress as "finished", and the reader
+                // doesn't need to be the only place enforcing this.
+                let clampRows: [[Any?]] = comics.map { [$0.filePath, $0.filePath, $0.filePath] }
+                let ok2 = runBatch("""
+                    UPDATE reading_progress SET current_page = MAX(0, (SELECT page_count FROM comics WHERE file_path = ?) - 1)
+                    WHERE comic_id = (SELECT id FROM comics WHERE file_path = ?)
+                      AND current_page > MAX(0, (SELECT page_count FROM comics WHERE file_path = ?) - 1)
+                    """, rows: clampRows)
+                return ok1 && ok2
+            }
+            return conflicts
+        }
+        if !conflicts.isEmpty { upsertMetadataConflicts(conflicts) }
     }
 
     func zeroPageCountPaths() -> [(id: Int64, path: String)] {
@@ -1287,7 +1915,15 @@ final class DatabaseManager: @unchecked Sendable {
     }
 
     func updatePageCount(comicId: Int64, count: Int) {
-        queue.sync { _ = run("UPDATE comics SET page_count = ? WHERE id = ?", args: [count, comicId]) }
+        queue.sync {
+            _ = run("UPDATE comics SET page_count = ? WHERE id = ?", args: [count, comicId])
+            // See _insertRow's matching comment -- a corrected page count can leave saved
+            // progress out of range.
+            _ = run("""
+                UPDATE reading_progress SET current_page = MAX(0, ? - 1)
+                WHERE comic_id = ? AND current_page > MAX(0, ? - 1)
+                """, args: [count, comicId, count])
+        }
     }
 
     func incrementScanRetryCount(comicId: Int64) {
@@ -1300,6 +1936,15 @@ final class DatabaseManager: @unchecked Sendable {
 
     func knownPaths() -> Set<String> {
         queue.sync { Set(rows("SELECT file_path FROM comics WHERE deleted_at IS NULL", map: { colText($0, 0) ?? "" })) }
+    }
+
+    /// Returns the id of a soft-deleted comic at this exact path, if one exists -- used to evict its
+    /// (possibly stale/wrong) cached cover before the row is revived by a rescan.
+    func softDeletedComicId(atPath path: String) -> Int64? {
+        queue.sync {
+            let id = scalarInt("SELECT id FROM comics WHERE file_path = ? AND deleted_at IS NOT NULL", args: [path])
+            return id > 0 ? Int64(id) : nil
+        }
     }
 
     func knownHashes() -> Set<String> {
@@ -1355,6 +2000,41 @@ final class DatabaseManager: @unchecked Sendable {
                 INSERT INTO ratings (comic_id, rating) VALUES (?,?)
                 ON CONFLICT(comic_id) DO UPDATE SET rating = excluded.rating
             """, args: [comicId, rating])
+            _logDiaryEntryUnlocked(comicId: comicId)
+        }
+    }
+
+    /// Snapshots the current rating/review into `diary_entries`, called after every
+    /// `setRating`/`setComicReview` write. Same-day edits collapse into the existing
+    /// entry (rapid star-taps in one sitting shouldn't spam the diary); a genuinely new
+    /// day always starts a new entry, marked `is_reread` if any prior entry exists.
+    /// Must run already inside `queue.sync` — not itself queue-wrapped.
+    private func _logDiaryEntryUnlocked(comicId: Int64) {
+        guard let current: (rating: Int, review: String?) = rows(
+            "SELECT rating, review FROM ratings WHERE comic_id = ?", args: [comicId],
+            map: { s in (colInt(s, 0), colText(s, 1)) }
+        ).first, current.rating > 0 else { return }
+
+        // logged_at is stored as CURRENT_TIMESTAMP (UTC). Comparing raw date(...) without a
+        // 'localtime' conversion collapses/splits entries on a UTC midnight boundary that has
+        // nothing to do with the user's actual calendar day -- e.g. for US timezones, UTC
+        // midnight falls in the late afternoon/evening local time, a common reading window,
+        // so two ratings minutes apart could get split into two entries; conversely, in
+        // timezones ahead of UTC, two ratings on different local days could collapse into one,
+        // silently overwriting the earlier day's rating/review.
+        let todayId: Int64? = rows(
+            "SELECT id FROM diary_entries WHERE comic_id = ? AND date(logged_at, 'localtime') = date('now', 'localtime') ORDER BY id DESC LIMIT 1",
+            args: [comicId], map: { colInt64($0, 0) }
+        ).first
+
+        if let todayId {
+            _ = run("UPDATE diary_entries SET rating = ?, review = ? WHERE id = ?",
+                    args: [current.rating, current.review, todayId])
+        } else {
+            let hasPriorEntry = scalarInt("SELECT COUNT(*) FROM diary_entries WHERE comic_id = ?", args: [comicId]) > 0
+            _ = run("""
+                INSERT INTO diary_entries (comic_id, rating, review, is_reread) VALUES (?,?,?,?)
+            """, args: [comicId, current.rating, current.review, hasPriorEntry ? 1 : 0])
         }
     }
 
@@ -1373,6 +2053,63 @@ final class DatabaseManager: @unchecked Sendable {
                 INSERT INTO ratings (comic_id, rating, review) VALUES (?,COALESCE((SELECT rating FROM ratings WHERE comic_id=?),0),?)
                 ON CONFLICT(comic_id) DO UPDATE SET review = excluded.review
             """, args: [comicId, comicId, (text?.isEmpty == false) ? text : nil])
+            _logDiaryEntryUnlocked(comicId: comicId)
+        }
+    }
+
+    func diaryEntries(limit: Int = 500) -> [DiaryEntry] {
+        queue.sync {
+            struct RawEntry { let id: Int64; let comicId: Int64; let rating: Int; let review: String?; let loggedAt: String; let isReread: Bool }
+            let raw: [RawEntry] = rows("""
+                SELECT id, comic_id, rating, review, logged_at, is_reread
+                FROM diary_entries
+                ORDER BY logged_at DESC, id DESC
+                LIMIT ?
+                """, args: [limit], map: { s in
+                    RawEntry(id: colInt64(s, 0), comicId: colInt64(s, 1), rating: colInt(s, 2), review: colText(s, 3),
+                             loggedAt: colText(s, 4) ?? "", isReread: colInt(s, 5) != 0)
+                })
+            guard !raw.isEmpty else { return [] }
+
+            let comicIds = raw.map { $0.comicId }
+            let placeholders = comicIds.map { _ in "?" }.joined(separator: ",")
+            let comicsById: [Int64: Comic] = Dictionary(uniqueKeysWithValues:
+                rows("\(comicSelect) WHERE c.id IN (\(placeholders)) AND c.deleted_at IS NULL",
+                     args: comicIds, map: comicRow).map { ($0.id, $0) }
+            )
+            return raw.compactMap { entry in
+                guard let comic = comicsById[entry.comicId] else { return nil }
+                return DiaryEntry(id: entry.id, comic: comic, rating: entry.rating, review: entry.review,
+                                   loggedAt: entry.loggedAt, isReread: entry.isReread)
+            }
+        }
+    }
+
+    func deleteDiaryEntry(id: Int64) {
+        queue.sync { _ = run("DELETE FROM diary_entries WHERE id = ?", args: [id]) }
+    }
+
+    /// Restores a diary entry with an explicit historical `logged_at` -- distinct from
+    /// `_logDiaryEntryUnlocked`, which always stamps the current time and collapses same-day
+    /// edits together (the right behavior for a live rating change, wrong for replaying a
+    /// backup's exact original entries).
+    func restoreDiaryEntry(comicId: Int64, rating: Int, review: String?, isReread: Bool, loggedAt: String) {
+        queue.sync {
+            _ = run("""
+                INSERT INTO diary_entries (comic_id, rating, review, is_reread, logged_at) VALUES (?,?,?,?,?)
+                """, args: [comicId, rating, review, isReread ? 1 : 0, loggedAt])
+        }
+    }
+
+    func allReadingOrderOverrides() -> [(filePath: String, position: Int, reason: String)] {
+        queue.sync {
+            rows("""
+                SELECT c.file_path, o.position, o.reason
+                FROM reading_order_overrides o JOIN comics c ON c.id = o.comic_id
+                WHERE c.deleted_at IS NULL
+                """) { s in
+                (colText(s, 0) ?? "", colInt(s, 1), colText(s, 2) ?? "Manually placed")
+            }
         }
     }
 
@@ -1400,6 +2137,35 @@ final class DatabaseManager: @unchecked Sendable {
     func comicIdsInRun(runId: Int64) -> Set<Int64> {
         queue.sync {
             Set(rows("SELECT comic_id FROM run_items WHERE run_id = ?", args: [runId]) { colInt64($0, 0) })
+        }
+    }
+
+    func tierListsContaining(comicId: Int64) -> [TierList] {
+        queue.sync {
+            rows("""
+                SELECT tl.id, tl.title, COALESCE(tl.description,''), tl.created_at,
+                       COALESCE(tl.rating,0), tl.review, tl.cover_image_path
+                FROM tier_lists tl JOIN tier_list_items tli ON tli.tier_list_id = tl.id
+                WHERE tli.comic_id = ? ORDER BY tl.created_at
+            """, args: [comicId]) { r in
+                TierList(id: colInt64(r, 0), title: colText(r, 1) ?? "", description: colText(r, 2) ?? "",
+                          createdAt: colText(r, 3) ?? "",
+                          rating: colInt(r, 4) > 0 ? colInt(r, 4) : nil,
+                          review: colText(r, 5), coverImagePath: colText(r, 6))
+            }
+        }
+    }
+
+    func updateTierList(id: Int64, title: String, description: String) {
+        queue.sync {
+            _ = run("UPDATE tier_lists SET title = ?, description = ? WHERE id = ?",
+                    args: [title, description, id])
+        }
+    }
+
+    func comicIdsInTierList(tierListId: Int64) -> Set<Int64> {
+        queue.sync {
+            Set(rows("SELECT comic_id FROM tier_list_items WHERE tier_list_id = ?", args: [tierListId]) { colInt64($0, 0) })
         }
     }
 
@@ -1448,15 +2214,15 @@ final class DatabaseManager: @unchecked Sendable {
 
     func tags(for comicId: Int64) -> [Tag] {
         queue.sync {
-            rows("SELECT t.id, t.name FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id WHERE ct.comic_id = ? ORDER BY t.name",
-                 args: [comicId]) { Tag(id: colInt64($0, 0), name: colText($0, 1) ?? "") }
+            rows("SELECT t.id, t.name, t.category FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id WHERE ct.comic_id = ? ORDER BY t.name",
+                 args: [comicId]) { Tag(id: colInt64($0, 0), name: colText($0, 1) ?? "", category: colText($0, 2)) }
         }
     }
 
-    func addTag(name: String, to comicId: Int64) {
+    func addTag(name: String, to comicId: Int64, category: TagCategory = .custom) {
         queue.sync {
 
-            _ = run("INSERT OR IGNORE INTO tags (name) VALUES (?)", args: [name])
+            _ = run("INSERT OR IGNORE INTO tags (name, category) VALUES (?,?)", args: [name, category.rawValue])
             let resolvedId = scalarInt("SELECT id FROM tags WHERE name = ?", args: [name])
             guard resolvedId > 0 else { return }
             _ = run("INSERT OR IGNORE INTO comic_tags (comic_id, tag_id) VALUES (?,?)",
@@ -1491,12 +2257,27 @@ final class DatabaseManager: @unchecked Sendable {
 
     func renameSeries(oldName: String, publisher: String?, newName: String) {
         queue.sync {
-            if let pub = publisher, !pub.isEmpty, pub != "All" {
-                _ = run("UPDATE comics SET series = ? WHERE series = ? AND publisher = ?",
-                        args: [newName, oldName, pub])
-            } else {
-                _ = run("UPDATE comics SET series = ? WHERE series = ?",
-                        args: [newName, oldName])
+            // Keep any series_links row pointing at this series in sync too -- otherwise renaming
+            // a series orphans its link (the stored name no longer matches anything in `comics`),
+            // silently breaking whatever volume-aware reading-order chaining it was providing.
+            // Wrapped in a transaction so a crash between the `comics` update and the
+            // `series_links` updates can't leave them pointing at different series names.
+            _ = inTransaction {
+                if let pub = publisher, !pub.isEmpty, pub != "All" {
+                    let ok1 = run("UPDATE comics SET series = ? WHERE series = ? AND publisher = ?",
+                                   args: [newName, oldName, pub]) != -1
+                    let ok2 = run("UPDATE series_links SET parent_series = ? WHERE parent_series = ? AND parent_publisher = ?",
+                                   args: [newName, oldName, pub]) != -1
+                    let ok3 = run("UPDATE series_links SET child_series = ? WHERE child_series = ? AND child_publisher = ?",
+                                   args: [newName, oldName, pub]) != -1
+                    return ok1 && ok2 && ok3
+                } else {
+                    let ok1 = run("UPDATE comics SET series = ? WHERE series = ?",
+                                   args: [newName, oldName]) != -1
+                    let ok2 = run("UPDATE series_links SET parent_series = ? WHERE parent_series = ?", args: [newName, oldName]) != -1
+                    let ok3 = run("UPDATE series_links SET child_series = ? WHERE child_series = ?", args: [newName, oldName]) != -1
+                    return ok1 && ok2 && ok3
+                }
             }
         }
     }
@@ -1514,17 +2295,19 @@ final class DatabaseManager: @unchecked Sendable {
 
     func bulkReassign(ids: [Int64], series: String?, publisher: String?) {
         guard !ids.isEmpty, series != nil || publisher != nil else { return }
-        queue.sync {
-            exec("BEGIN")
-            for id in ids {
+        _ = queue.sync {
+            inTransaction {
+                var ok = true
                 if let ser = series {
-                    _ = run("UPDATE comics SET series = ?, meta_edited = 1 WHERE id = ?", args: [ser, id])
+                    ok = runBatch("UPDATE comics SET series = ?, meta_edited = 1 WHERE id = ?",
+                                   rows: ids.map { [ser, $0] })
                 }
-                if let pub = publisher {
-                    _ = run("UPDATE comics SET publisher = ?, meta_edited = 1 WHERE id = ?", args: [pub, id])
+                if ok, let pub = publisher {
+                    ok = runBatch("UPDATE comics SET publisher = ?, meta_edited = 1 WHERE id = ?",
+                                   rows: ids.map { [pub, $0] })
                 }
+                return ok
             }
-            exec("COMMIT")
         }
     }
 
@@ -1641,27 +2424,24 @@ final class DatabaseManager: @unchecked Sendable {
                 WHERE c.deleted_at IS NULL
                       AND c.reading_order_confidence IS NOT NULL
                       AND c.reading_order_confidence BETWEEN 1 AND 99
-                ORDER BY c.publisher, c.series, c.reading_order_position
+                ORDER BY c.publisher, c.series, c.reading_order_position, c.title
             """, map: comicRow)
         }
     }
 
     func reorderComics(orderedIds: [Int64]) {
-        queue.sync {
-            exec("BEGIN")
-            for (idx, id) in orderedIds.enumerated() {
-
-                _ = run("""
+        _ = queue.sync {
+            inTransaction {
+                let ok1 = runBatch("""
                     UPDATE comics SET position = ?, reading_order_position = ?,
                            reading_order_confidence = 100, reading_order_reason = 'Manually placed'
                     WHERE id = ?
-                    """, args: [idx, idx, id])
-
-                _ = run("""
+                    """, rows: orderedIds.enumerated().map { [$0.offset, $0.offset, $0.element] })
+                let ok2 = runBatch("""
                     INSERT OR REPLACE INTO reading_order_overrides (comic_id, position, reason) VALUES (?, ?, 'Manually placed')
-                    """, args: [id, idx])
+                    """, rows: orderedIds.enumerated().map { [$0.element, $0.offset] })
+                return ok1 && ok2
             }
-            exec("COMMIT")
         }
     }
 
@@ -1702,12 +2482,11 @@ final class DatabaseManager: @unchecked Sendable {
     }
 
     func reorderRuns(orderedIds: [Int64]) {
-        queue.sync {
-            exec("BEGIN")
-            for (idx, id) in orderedIds.enumerated() {
-                _ = run("UPDATE runs SET position = ? WHERE id = ?", args: [idx, id])
+        _ = queue.sync {
+            inTransaction {
+                runBatch("UPDATE runs SET position = ? WHERE id = ?",
+                         rows: orderedIds.enumerated().map { [$0.offset, $0.element] })
             }
-            exec("COMMIT")
         }
     }
 
@@ -1761,44 +2540,153 @@ final class DatabaseManager: @unchecked Sendable {
     func addToRun(runId: Int64, comicIds: [Int64]) {
         guard !comicIds.isEmpty else { return }
         queue.sync {
-            var pos = scalarInt("SELECT COALESCE(MAX(position), -1) + 1 FROM run_items WHERE run_id = ?",
-                                args: [runId])
-            exec("BEGIN")
-            for comicId in comicIds {
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO run_items (run_id, comic_id, position) VALUES (?,?,?)", -1, &stmt, nil) == SQLITE_OK else { continue }
-                sqlite3_bind_int64(stmt, 1, runId); sqlite3_bind_int64(stmt, 2, comicId); sqlite3_bind_int(stmt, 3, Int32(pos))
-                sqlite3_step(stmt); sqlite3_finalize(stmt)
-                pos += 1
+            let startPos = scalarInt("SELECT COALESCE(MAX(position), -1) + 1 FROM run_items WHERE run_id = ?",
+                                     args: [runId])
+            inTransaction {
+                runBatch("INSERT OR IGNORE INTO run_items (run_id, comic_id, position) VALUES (?,?,?)",
+                         rows: comicIds.enumerated().map { [runId, $0.element, Int64(startPos + $0.offset)] })
             }
-            exec("COMMIT")
         }
     }
 
     func removeFromRun(runId: Int64, comicIds: [Int64]) {
         guard !comicIds.isEmpty else { return }
-        queue.sync {
-            exec("BEGIN")
-            for comicId in comicIds {
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, "DELETE FROM run_items WHERE run_id = ? AND comic_id = ?", -1, &stmt, nil) == SQLITE_OK else { continue }
-                sqlite3_bind_int64(stmt, 1, runId); sqlite3_bind_int64(stmt, 2, comicId)
-                sqlite3_step(stmt); sqlite3_finalize(stmt)
+        _ = queue.sync {
+            inTransaction {
+                runBatch("DELETE FROM run_items WHERE run_id = ? AND comic_id = ?",
+                         rows: comicIds.map { [runId, $0] })
             }
-            exec("COMMIT")
         }
     }
 
     func reorderRun(runId: Int64, orderedIds: [Int64]) {
-        queue.sync {
-            exec("BEGIN")
-            for (pos, id) in orderedIds.enumerated() {
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, "UPDATE run_items SET position = ? WHERE id = ? AND run_id = ?", -1, &stmt, nil) == SQLITE_OK else { continue }
-                sqlite3_bind_int(stmt, 1, Int32(pos)); sqlite3_bind_int64(stmt, 2, id); sqlite3_bind_int64(stmt, 3, runId)
-                sqlite3_step(stmt); sqlite3_finalize(stmt)
+        _ = queue.sync {
+            inTransaction {
+                runBatch("UPDATE run_items SET position = ? WHERE id = ? AND run_id = ?",
+                         rows: orderedIds.enumerated().map { [$0.offset, $0.element, runId] })
             }
-            exec("COMMIT")
+        }
+    }
+
+    func allTierLists() -> [TierList] {
+        queue.sync {
+            let sql = """
+                SELECT tl.id, tl.title, COALESCE(tl.description,''), tl.created_at, COUNT(tli.id) as total,
+                       COALESCE(tl.rating,0), tl.review, tl.cover_image_path
+                FROM tier_lists tl
+                LEFT JOIN tier_list_items tli ON tli.tier_list_id = tl.id
+                GROUP BY tl.id
+                ORDER BY COALESCE(tl.position, tl.id * -1)
+            """
+            return rows(sql, map: { s in
+                TierList(id: colInt64(s, 0), title: colText(s, 1) ?? "", description: colText(s, 2) ?? "",
+                          createdAt: colText(s, 3) ?? "", comicCount: colInt(s, 4),
+                          rating: colInt(s, 5) > 0 ? colInt(s, 5) : nil,
+                          review: colText(s, 6), coverImagePath: colText(s, 7))
+            })
+        }
+    }
+
+    @discardableResult
+    func createTierList(title: String, description: String) -> Int64 {
+        queue.sync { run("INSERT INTO tier_lists (title, description) VALUES (?,?)", args: [title, description]) }
+    }
+
+    func setTierListCover(tierListId: Int64, imagePath: String) {
+        queue.sync { _ = run("UPDATE tier_lists SET cover_image_path = ? WHERE id = ?", args: [imagePath, tierListId]) }
+    }
+
+    func clearTierListCover(tierListId: Int64) {
+        queue.sync { _ = run("UPDATE tier_lists SET cover_image_path = NULL WHERE id = ?", args: [tierListId]) }
+    }
+
+    func reorderTierLists(orderedIds: [Int64]) {
+        _ = queue.sync {
+            inTransaction {
+                runBatch("UPDATE tier_lists SET position = ? WHERE id = ?",
+                         rows: orderedIds.enumerated().map { [$0.offset, $0.element] })
+            }
+        }
+    }
+
+    func tierListId(withTitle title: String) -> Int64? {
+        queue.sync {
+            let id = scalarInt("SELECT id FROM tier_lists WHERE title = ? LIMIT 1", args: [title])
+            return id > 0 ? Int64(id) : nil
+        }
+    }
+
+    func deleteTierList(_ tierListId: Int64) {
+        queue.sync { _ = run("DELETE FROM tier_lists WHERE id=?", args: [tierListId]) }
+    }
+
+    func tierListItems(tierListId: Int64) -> [TierListItem] {
+        queue.sync {
+            let sql = """
+            SELECT tli.id, tli.tier, tli.position,
+                   c.id, c.title, c.file_path, c.publisher, c.character, c.series,
+                   c.issue_number, c.page_count, c.writer, c.penciller, c.year,
+                   c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
+                   COALESCE(c.position, c.id), c.file_hash,
+                   COALESCE(rp.current_page, 0), rp.last_read,
+                   COALESCE(r.rating, 0), (f.comic_id IS NOT NULL), (rl.comic_id IS NOT NULL)
+            FROM tier_list_items tli
+            JOIN comics c ON tli.comic_id = c.id AND c.deleted_at IS NULL
+            LEFT JOIN reading_progress rp ON c.id = rp.comic_id
+            LEFT JOIN ratings r           ON c.id = r.comic_id
+            LEFT JOIN favorites f         ON c.id = f.comic_id
+            LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+            WHERE tli.tier_list_id = ? ORDER BY tli.position
+            """
+            return rows(sql, args: [tierListId]) { s -> TierListItem in
+                let comic = Comic(
+                    id: colInt64(s, 3), title: colText(s, 4) ?? "", filePath: colText(s, 5) ?? "",
+                    publisher: colText(s, 6) ?? "Unknown", character: colText(s, 7), series: colText(s, 8) ?? "General",
+                    issueNumber: colText(s, 9), pageCount: colInt(s, 10), writer: colText(s, 11),
+                    penciller: colText(s, 12), year: sqlite3_column_type(s, 13) != SQLITE_NULL ? colInt(s, 13) : nil,
+                    storyArc: colText(s, 14), languageIso: colText(s, 15), notes: colText(s, 16),
+                    addedAt: colText(s, 17) ?? "", deletedAt: colText(s, 18),
+                    position: colInt(s, 19), fileHash: colText(s, 20),
+                    progress: colInt(s, 21), lastRead: colText(s, 22),
+                    rating: colInt(s, 23), isFavorite: colBool(s, 24), inReadingList: colBool(s, 25)
+                )
+                return TierListItem(id: colInt64(s, 0), comic: comic,
+                                     tier: colText(s, 1) ?? "B", position: colInt(s, 2))
+            }
+        }
+    }
+
+    func addToTierList(tierListId: Int64, comicIds: [Int64], tier: String = "B") {
+        guard !comicIds.isEmpty else { return }
+        queue.sync {
+            let startPos = scalarInt("SELECT COALESCE(MAX(position), -1) + 1 FROM tier_list_items WHERE tier_list_id = ? AND tier = ?",
+                                     args: [tierListId, tier])
+            inTransaction {
+                runBatch("INSERT OR IGNORE INTO tier_list_items (tier_list_id, comic_id, tier, position) VALUES (?,?,?,?)",
+                         rows: comicIds.enumerated().map { [tierListId, $0.element, tier, Int64(startPos + $0.offset)] })
+            }
+        }
+    }
+
+    func removeFromTierList(tierListId: Int64, comicIds: [Int64]) {
+        guard !comicIds.isEmpty else { return }
+        _ = queue.sync {
+            inTransaction {
+                runBatch("DELETE FROM tier_list_items WHERE tier_list_id = ? AND comic_id = ?",
+                         rows: comicIds.map { [tierListId, $0] })
+            }
+        }
+    }
+
+    /// Moves an item to a (possibly different) tier, appended at the end of that tier's own
+    /// ordering -- fine-grained drag-to-a-specific-slot within a tier isn't supported, only
+    /// which tier an item belongs to and its append order within it.
+    func setTierListItemTier(itemId: Int64, tierListId: Int64, tier: String) {
+        queue.sync {
+            let startPos = scalarInt("SELECT COALESCE(MAX(position), -1) + 1 FROM tier_list_items WHERE tier_list_id = ? AND tier = ?",
+                                     args: [tierListId, tier])
+            _ = run("UPDATE tier_list_items SET tier = ?, position = ? WHERE id = ?",
+                    args: [tier, startPos, itemId])
         }
     }
 
@@ -1911,6 +2799,11 @@ final class DatabaseManager: @unchecked Sendable {
 
     func clearAll() {
         queue.sync {
+            // Unlike every other multi-statement mutator in this file, these deletes ran as
+            // separate auto-commit transactions -- a force-quit/crash mid-sequence (this is a
+            // user-triggered destructive "reset library" action) could leave some tables wiped
+            // and others not, an inconsistent state with no recovery path.
+            exec("BEGIN")
             exec("DELETE FROM reading_history")
             exec("DELETE FROM reading_progress")
             exec("DELETE FROM reading_goals")
@@ -1920,16 +2813,52 @@ final class DatabaseManager: @unchecked Sendable {
             exec("DELETE FROM reading_list")
             exec("DELETE FROM comic_tags")
             exec("DELETE FROM series_covers")
-            exec("DELETE FROM comic_shelves")
             exec("DELETE FROM run_items")
             exec("DELETE FROM runs")
             exec("DELETE FROM tags")
+            // "Clear All" is a full factory reset, not just a comics wipe -- these have no
+            // foreign key to comics (keyed by series/publisher name, or independent user-created
+            // collections) so they'd otherwise silently survive a reset untouched.
+            exec("DELETE FROM tier_list_items")
+            exec("DELETE FROM tier_lists")
+            exec("DELETE FROM diary_entries")
+            exec("DELETE FROM series_links")
+            exec("DELETE FROM reading_order_overrides")
+            exec("DELETE FROM metadata_conflicts")
+            exec("DELETE FROM series_reader_prefs")
+            exec("DELETE FROM character_covers")
+            exec("DELETE FROM series_order")
+            exec("DELETE FROM character_order")
+            exec("DELETE FROM publisher_order")
             exec("DELETE FROM comics")
+            exec("COMMIT")
         }
     }
 
-    func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?)]) {
+    func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?)]) {
         queue.sync {
+            // Captured before the update -- a folder rename that changes a comic's (publisher,
+            // series) would otherwise silently orphan any series_links row still pointing at the
+            // old name (it no longer matches anything in `comics`), breaking whatever
+            // volume-aware reading-order chaining that link was providing. Only rows this update
+            // will actually touch (meta_edited=0) count, matching the same guard the update
+            // itself uses below.
+            var renameMappings: Set<[String]> = []
+            let idsWithNewSeries = items.compactMap { $0.ser != nil ? $0.id : nil }
+            if !idsWithNewSeries.isEmpty {
+                let placeholders = idsWithNewSeries.map { _ in "?" }.joined(separator: ",")
+                let current = Dictionary(uniqueKeysWithValues: rows(
+                    "SELECT id, publisher, series FROM comics WHERE id IN (\(placeholders)) AND meta_edited = 0",
+                    args: idsWithNewSeries.map { $0 as Any? }
+                ) { s in (colInt64(s, 0), (pub: colText(s, 1) ?? "", ser: colText(s, 2) ?? "")) })
+                for item in items {
+                    guard let newSer = item.ser, let old = current[item.id] else { continue }
+                    let newPub = item.pub ?? old.pub
+                    guard old.ser != newSer || old.pub != newPub else { continue }
+                    renameMappings.insert([old.pub, old.ser, newPub, newSer])
+                }
+            }
+
             exec("BEGIN")
             for item in items {
                 if let pub = item.pub {
@@ -1952,8 +2881,30 @@ final class DatabaseManager: @unchecked Sendable {
                         AND (issue_number IS NULL OR issue_number != ?)
                         """, args: [num, item.id, num])
                 }
+                if let year = item.year {
+                    // Only ever fills a genuinely empty year -- a real ComicInfo.xml <Year> tag
+                    // (on the rare file that has one) is always a better source than a filename
+                    // guess and must never be overwritten by it.
+                    _ = run("UPDATE comics SET year=? WHERE id=? AND meta_edited=0 AND year IS NULL", args: [year, item.id])
+                }
             }
             exec("COMMIT")
+
+            // Wrapped in its own transaction: a crash between the parent-side and child-side
+            // update for one mapping, or between mappings when several series are renamed in the
+            // same batch, would otherwise leave series_links partially resynced against comics
+            // rows that have already committed their new names.
+            if !renameMappings.isEmpty {
+                exec("BEGIN")
+                for mapping in renameMappings {
+                    let (oldPub, oldSer, newPub, newSer) = (mapping[0], mapping[1], mapping[2], mapping[3])
+                    _ = run("UPDATE series_links SET parent_publisher = ?, parent_series = ? WHERE parent_publisher = ? AND parent_series = ?",
+                            args: [newPub, newSer, oldPub, oldSer])
+                    _ = run("UPDATE series_links SET child_publisher = ?, child_series = ? WHERE child_publisher = ? AND child_series = ?",
+                            args: [newPub, newSer, oldPub, oldSer])
+                }
+                exec("COMMIT")
+            }
 
             exec("""
                 UPDATE comics SET position =
@@ -1984,30 +2935,67 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    func idForHash(_ hash: String) -> Int64? {
+        queue.sync {
+            rows("SELECT id FROM comics WHERE file_hash = ? AND deleted_at IS NULL", args: [hash], map: { colInt64($0, 0) }).first
+        }
+    }
+
     func updateFilePath(id: Int64, newPath: String) {
         queue.sync {
             _ = run("UPDATE comics SET file_path = ? WHERE id = ?", args: [newPath, id])
         }
     }
 
-    func stalePaths() -> [(id: Int64, path: String)] {
-        queue.sync {
-            rows("SELECT id, file_path FROM comics WHERE deleted_at IS NULL") {
-                (colInt64($0, 0), colText($0, 1) ?? "")
-            }
-        }
-    }
+    /// Same query as `allComicPaths()` under a name that reads better at its "which of these
+    /// are still on disk" call sites; kept as a single query so the two never drift apart.
+    func stalePaths() -> [(id: Int64, path: String)] { allComicPaths() }
 
     func allTags() -> [(tag: Tag, count: Int)] {
         queue.sync {
             rows("""
-                SELECT t.id, t.name, COUNT(ct.comic_id) as cnt
+                SELECT t.id, t.name, t.category, COUNT(ct.comic_id) as cnt
                 FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id
                 JOIN comics c ON ct.comic_id = c.id
                 WHERE c.deleted_at IS NULL
                 GROUP BY t.id ORDER BY cnt DESC, t.name
-            """) { (Tag(id: colInt64($0, 0), name: colText($0, 1) ?? ""), colInt($0, 2)) }
+            """) { (Tag(id: colInt64($0, 0), name: colText($0, 1) ?? "", category: colText($0, 2)), colInt($0, 3)) }
         }
+    }
+
+    /// Renames a tag across the whole library. `tags.name` is UNIQUE, so if `newName` already
+    /// belongs to a different tag, this merges into it instead of erroring: every comic tagged
+    /// with either ends up tagged with just the target, and the old tag row is removed.
+    func renameTag(id: Int64, newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        queue.sync {
+            let existingId = scalarInt("SELECT id FROM tags WHERE name = ? AND id != ?", args: [trimmed, id])
+            if existingId > 0 {
+                inTransaction {
+                    // Repoint every comic_tags row from the old tag to the target tag; a row
+                    // that would collide with the target's own PRIMARY KEY (comic_id, tag_id) --
+                    // i.e. a comic already wearing both tags -- is left alone here and cleaned
+                    // up by the cascade below instead of erroring the whole rename.
+                    guard run("UPDATE OR IGNORE comic_tags SET tag_id = ? WHERE tag_id = ?",
+                              args: [Int64(existingId), id]) != -1 else { return false }
+                    guard run("DELETE FROM tags WHERE id = ?", args: [id]) != -1 else { return false }
+                    return true
+                }
+            } else {
+                _ = run("UPDATE tags SET name = ? WHERE id = ?", args: [trimmed, id])
+            }
+        }
+    }
+
+    /// Removes a tag from the entire library (every comic that had it), not just one comic --
+    /// `comic_tags.tag_id` cascades, so this is the one statement that needs to run.
+    func deleteTagGlobally(id: Int64) {
+        queue.sync { _ = run("DELETE FROM tags WHERE id = ?", args: [id]) }
+    }
+
+    func setTagCategory(id: Int64, category: TagCategory) {
+        queue.sync { _ = run("UPDATE tags SET category = ? WHERE id = ?", args: [category.rawValue, id]) }
     }
 
     func setRunRating(_ runId: Int64, rating: Int, review: String?) {
@@ -2021,6 +3009,13 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             _ = run("UPDATE run_items SET notes = ? WHERE id = ?",
                     args: [notes.isEmpty ? nil : notes, itemId])
+        }
+    }
+
+    func setTierListRating(_ tierListId: Int64, rating: Int, review: String?) {
+        queue.sync {
+            _ = run("UPDATE tier_lists SET rating = ?, review = ? WHERE id = ?",
+                    args: [rating > 0 ? rating : nil, review, tierListId])
         }
     }
 
@@ -2053,8 +3048,8 @@ final class DatabaseManager: @unchecked Sendable {
             var args: [Any?] = []
             if let pub = publisher, pub != "All" { conds.append("c.publisher = ?"); args.append(pub) }
             if let q = search, !q.isEmpty {
-                conds.append("(c.series LIKE ? OR (c.character NOT LIKE '%,%' AND c.character NOT LIKE '%[%' AND LENGTH(COALESCE(c.character,'')) <= 60 AND c.character LIKE ?))")
-                let p = "%\(q)%"
+                conds.append("(c.series LIKE ? ESCAPE '\\' OR (c.character NOT LIKE '%,%' AND c.character NOT LIKE '%[%' AND LENGTH(COALESCE(c.character,'')) <= 60 AND c.character LIKE ? ESCAPE '\\'))")
+                let p = "%\(Self.likeEscaped(q))%"
                 args += [p, p]
             }
 
@@ -2258,11 +3253,40 @@ final class DatabaseManager: @unchecked Sendable {
 
     func bookmarks(comicId: Int64) -> [Bookmark] {
         queue.sync {
-            rows("SELECT id, comic_id, page, label, created_at FROM bookmarks WHERE comic_id = ? ORDER BY page",
+            rows("SELECT id, comic_id, page, label, created_at, is_favorite FROM bookmarks WHERE comic_id = ? ORDER BY page",
                  args: [comicId]) { s in
                 Bookmark(id: colInt64(s, 0), comicId: colInt64(s, 1),
                          page: colInt(s, 2), label: colText(s, 3) ?? "",
-                         createdAt: colText(s, 4) ?? "")
+                         createdAt: colText(s, 4) ?? "", isFavorite: colInt(s, 5) != 0)
+            }
+        }
+    }
+
+    /// Every bookmark flagged as a favorite moment, across the whole library, newest first --
+    /// backing the standalone "Favorite Moments" browsing screen. Same two-step shape as
+    /// `diaryEntries`: fetch the child rows, then batch-resolve their comics via one IN query.
+    func favoriteMoments() -> [FavoriteMoment] {
+        queue.sync {
+            let raw: [Bookmark] = rows("""
+                SELECT id, comic_id, page, label, created_at, is_favorite
+                FROM bookmarks WHERE is_favorite = 1
+                ORDER BY created_at DESC
+                """) { s in
+                Bookmark(id: colInt64(s, 0), comicId: colInt64(s, 1),
+                          page: colInt(s, 2), label: colText(s, 3) ?? "",
+                          createdAt: colText(s, 4) ?? "", isFavorite: colInt(s, 5) != 0)
+            }
+            guard !raw.isEmpty else { return [] }
+
+            let comicIds = Array(Set(raw.map(\.comicId)))
+            let placeholders = comicIds.map { _ in "?" }.joined(separator: ",")
+            let comicsById: [Int64: Comic] = Dictionary(uniqueKeysWithValues:
+                rows("\(comicSelect) WHERE c.id IN (\(placeholders)) AND c.deleted_at IS NULL",
+                     args: comicIds, map: comicRow).map { ($0.id, $0) }
+            )
+            return raw.compactMap { bookmark in
+                guard let comic = comicsById[bookmark.comicId] else { return nil }
+                return FavoriteMoment(bookmark: bookmark, comic: comic)
             }
         }
     }
@@ -2286,6 +3310,16 @@ final class DatabaseManager: @unchecked Sendable {
         queue.async {
             _ = self.run("UPDATE bookmarks SET label=? WHERE comic_id=? AND page=?",
                          args: [label, comicId, page])
+        }
+    }
+
+    /// Favoriting a page that isn't already bookmarked creates the bookmark -- a favorite moment
+    /// IS a bookmark, just one flagged as worth revisiting on its own.
+    func setBookmarkFavorite(comicId: Int64, page: Int, isFavorite: Bool) {
+        queue.sync {
+            _ = run("INSERT OR IGNORE INTO bookmarks (comic_id, page) VALUES (?,?)", args: [comicId, page])
+            _ = run("UPDATE bookmarks SET is_favorite=? WHERE comic_id=? AND page=?",
+                    args: [isFavorite ? 1 : 0, comicId, page])
         }
     }
 
@@ -2345,6 +3379,123 @@ final class DatabaseManager: @unchecked Sendable {
         queue.async {
             _ = self.run("INSERT OR REPLACE INTO reading_goals (year, goal_count) VALUES (?,?)", args: [year, count])
         }
+    }
+
+    /// Every calendar year that has at least one real reading session -- backs the year picker on
+    /// the Year in Review screen, most recent first, so a user isn't stuck looking at a hardcoded
+    /// "this year" that might be empty in their first days using the app.
+    func availableReadingYears() -> [Int] {
+        queue.sync {
+            rows("SELECT DISTINCT strftime('%Y', read_at) FROM reading_history ORDER BY 1 DESC") { colText($0, 0) }
+                .compactMap { Int($0 ?? "") }
+        }
+    }
+
+    struct YearInReviewStats {
+        let year: Int
+        let issuesRead: Int
+        let pagesRead: Int
+        let topSeries: (name: String, count: Int)?
+        let topPublisher: (name: String, count: Int)?
+        let ratedCount: Int
+        let averageRating: Double?
+        let topRated: [(title: String, rating: Int)]
+        let rereadCount: Int
+        let longestStreakDays: Int
+        let busiestMonthLabel: String?
+    }
+
+    /// A "wrapped"-style recap for one calendar year, built entirely from data the app already
+    /// tracks day-to-day (reading sessions, diary entries) -- no new instrumentation needed, just
+    /// year-scoped aggregation over what's already there.
+    func yearInReview(year: Int) -> YearInReviewStats {
+        queue.sync {
+            let yearStr = String(year)
+
+            let issuesRead = scalarInt(
+                "SELECT COUNT(DISTINCT comic_id) FROM reading_history WHERE strftime('%Y', read_at) = ?", args: [yearStr])
+            let pagesRead = scalarInt(
+                "SELECT COALESCE(SUM(page_end - page_start + 1), 0) FROM reading_history WHERE strftime('%Y', read_at) = ?",
+                args: [yearStr])
+
+            let topSeries = rows("""
+                SELECT c.series, COUNT(DISTINCT h.comic_id) as n
+                FROM reading_history h JOIN comics c ON c.id = h.comic_id
+                WHERE strftime('%Y', h.read_at) = ?
+                GROUP BY c.publisher, c.series ORDER BY n DESC LIMIT 1
+                """, args: [yearStr]) { (name: colText($0, 0) ?? "", count: colInt($0, 1)) }.first
+
+            let topPublisher = rows("""
+                SELECT c.publisher, COUNT(DISTINCT h.comic_id) as n
+                FROM reading_history h JOIN comics c ON c.id = h.comic_id
+                WHERE strftime('%Y', h.read_at) = ?
+                GROUP BY c.publisher ORDER BY n DESC LIMIT 1
+                """, args: [yearStr]) { (name: colText($0, 0) ?? "", count: colInt($0, 1)) }.first
+
+            let topRated = rows("""
+                SELECT c.title, d.rating FROM diary_entries d JOIN comics c ON c.id = d.comic_id
+                WHERE strftime('%Y', d.logged_at) = ? AND d.rating >= 4
+                ORDER BY d.rating DESC, d.logged_at DESC LIMIT 5
+                """, args: [yearStr]) { (title: colText($0, 0) ?? "", rating: colInt($0, 1)) }
+
+            let ratedCount = scalarInt(
+                "SELECT COUNT(*) FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND rating > 0", args: [yearStr])
+            let ratings: [Int] = rows(
+                "SELECT rating FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND rating > 0", args: [yearStr]) { colInt($0, 0) }
+            let averageRating = ratings.isEmpty ? nil : Double(ratings.reduce(0, +)) / Double(ratings.count)
+
+            let rereadCount = scalarInt(
+                "SELECT COUNT(*) FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND is_reread = 1", args: [yearStr])
+
+            let distinctDays: [String] = rows(
+                "SELECT DISTINCT date(read_at) as d FROM reading_history WHERE strftime('%Y', read_at) = ?", args: [yearStr]) { colText($0, 0) ?? "" }
+            let longestStreakDays = longestStreak(dates: distinctDays)
+
+            let busiestMonthNum = rows("""
+                SELECT strftime('%m', read_at) as m, COUNT(DISTINCT comic_id) as n
+                FROM reading_history WHERE strftime('%Y', read_at) = ?
+                GROUP BY m ORDER BY n DESC LIMIT 1
+                """, args: [yearStr]) { colText($0, 0) ?? "" }.first
+            let busiestMonthLabel = busiestMonthNum.flatMap { $0.isEmpty ? nil : Self.monthName(from: $0) }
+
+            return YearInReviewStats(
+                year: year, issuesRead: issuesRead, pagesRead: pagesRead,
+                topSeries: topSeries, topPublisher: topPublisher,
+                ratedCount: ratedCount, averageRating: averageRating, topRated: topRated,
+                rereadCount: rereadCount, longestStreakDays: longestStreakDays,
+                busiestMonthLabel: busiestMonthLabel
+            )
+        }
+    }
+
+    private static func monthName(from monthNumber: String) -> String? {
+        guard let n = Int(monthNumber), (1...12).contains(n) else { return nil }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt.monthSymbols[n - 1]
+    }
+
+    /// Longest run of consecutive calendar days with at least one reading session, within an
+    /// arbitrary (not necessarily today-anchored) set of dates -- distinct from `computeStreak`,
+    /// which only ever counts backward from today/yesterday for the *current* streak. This finds
+    /// the best run anywhere in a bounded year, which could be months in the past.
+    private func longestStreak(dates: [String]) -> Int {
+        let cal = Calendar.current
+        let days = dates.compactMap { Self.yyyyMMddFormatter.date(from: $0) }
+            .map { cal.startOfDay(for: $0) }
+            .sorted()
+        guard !days.isEmpty else { return 0 }
+        var longest = 1
+        var current = 1
+        for i in 1..<days.count {
+            if let expected = cal.date(byAdding: .day, value: 1, to: days[i - 1]), expected == days[i] {
+                current += 1
+                longest = max(longest, current)
+            } else if days[i] != days[i - 1] {
+                current = 1
+            }
+        }
+        return longest
     }
 
     func missingIssueNumbers(series: String, publisher: String) -> [String] {

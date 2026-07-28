@@ -96,11 +96,16 @@ struct ReaderView: View {
                height: panOffset.height + dragOffset.height)
     }
 
-    init(comic: Comic, onClose: @escaping () -> Void) {
+    init(comic: Comic, initialPage: Int? = nil, onClose: @escaping () -> Void) {
         self.comic        = comic
         self.onClose      = onClose
-        _currentPage      = State(initialValue: max(0, comic.progress))
-        _sessionStartPage = State(initialValue: max(0, comic.progress))
+        // Clamp both bounds: page_count can change after progress was saved (a metadata refresh
+        // correcting a bad initial page count, or a revival at the same path with a different
+        // file) and a stale out-of-range progress would otherwise land the reader on a blank
+        // page with "Next" already disabled and the page slider out of its own bounds.
+        let clampedPage = min(max(0, initialPage ?? comic.progress), max(0, comic.pageCount - 1))
+        _currentPage      = State(initialValue: clampedPage)
+        _sessionStartPage = State(initialValue: clampedPage)
         _comicRating      = State(initialValue: comic.rating)
 
         let defaults = UserDefaults.standard
@@ -199,11 +204,22 @@ struct ReaderView: View {
         .onKeyPress(KeyEquivalent("+")) { zoomIn(); return .handled }
         .onKeyPress(KeyEquivalent("-")) { zoomOut(); return .handled }
         .onKeyPress(KeyEquivalent("0")) { resetZoom(); return .handled }
-        .onChange(of: currentPage)     { _, _ in resetZoom(); loadBookmarks() }
+        .onChange(of: currentPage)     { _, _ in
+            resetZoom()
+            // Recompute locally instead of re-querying the DB on every single page turn --
+            // the bookmarks list itself only changes via toggleBookmark()/loadBookmarks(),
+            // never as a side effect of simply turning pages.
+            isBookmarked = bookmarks.contains { $0.page == currentPage }
+        }
         .onChange(of: fitModeRaw)      { _, _ in saveSeriesPrefs() }
         .onChange(of: rtl)             { _, _ in saveSeriesPrefs() }
         .onChange(of: doublePage)      { _, _ in saveSeriesPrefs() }
-        .onChange(of: scrollMode)      { _, _ in saveSeriesPrefs() }
+        .onChange(of: scrollMode)      { _, newValue in
+            saveSeriesPrefs()
+            // Autoplay's page-by-page advance is meaningless once scrolling continuously;
+            // stop it rather than leaving a stuck "playing" icon with a frozen countdown.
+            if newValue, autoplay { autoplay = false; countdownProgress = 0 }
+        }
         .onKeyPress(KeyEquivalent("w"), action: { onClose(); return .handled })
         .onKeyPress(KeyEquivalent("f")) {
             windowService.toggleFullScreen()
@@ -230,6 +246,12 @@ struct ReaderView: View {
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
         .sheet(isPresented: $showShortcuts) { shortcutsSheet }
         .sheet(isPresented: $showBookmarks) { bookmarksPanel }
+        // Always dark, regardless of the user's app theme: the reader chrome (topBar/bottomBar)
+        // uses hardcoded white icons/text over .ultraThinMaterial. Materials pick up a lighter
+        // tint under a .light color scheme, which ContentView applies app-wide for the Sepia
+        // theme -- that would wash the toolbar toward white-on-white right where the fixed
+        // white controls need the darkest, highest-contrast variant of the material.
+        .preferredColorScheme(.dark)
     }
 
     private func scheduleHide() {
@@ -423,6 +445,12 @@ struct ReaderView: View {
                         .font(.title2).foregroundStyle(autoplay ? Design.brandGold : .white.opacity(0.85))
                 }
                 .buttonStyle(.plain)
+                // runAutoplay() no-ops entirely in scroll mode (page-by-page advancing doesn't
+                // apply to a continuous scroll), so without this the button/key shortcut can
+                // flip autoplay to visually "on" (gold icon, static countdown bar) with nothing
+                // actually advancing -- disable it here to match iPadReaderView's guard.
+                .disabled(scrollMode)
+                .opacity(scrollMode ? 0.35 : 1)
                 .accessibilityLabel(autoplay ? "Stop slideshow" : "Start slideshow")
                 .help(autoplay ? "Stop Autoplay (A)" : "Start Autoplay (A)")
 
@@ -553,6 +581,7 @@ struct ReaderView: View {
                             FilmstripThumb(comic: comic, index: idx, isCurrent: idx == currentPage)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Page \(idx + 1)")
                         .id(idx)
                     }
                 }
@@ -601,6 +630,17 @@ struct ReaderView: View {
                                 }
                             }
                             Spacer()
+                            Button {
+                                ReadingSessionService.shared.setBookmarkFavorite(
+                                    comicId: comic.id, page: bm.page, isFavorite: !bm.isFavorite)
+                                loadBookmarks()
+                            } label: {
+                                Image(systemName: bm.isFavorite ? "star.fill" : "star")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(bm.isFavorite ? Design.brandGold : .secondary)
+                            .help(bm.isFavorite ? "Remove from Favorite Moments" : "Add to Favorite Moments")
+                            .accessibilityLabel(bm.isFavorite ? "Remove from favorite moments" : "Add to favorite moments")
                             Button("Go") {
                                 currentPage = bm.page
                                 showBookmarks = false
@@ -662,8 +702,9 @@ struct ReaderView: View {
     }
 
     private func nextPage() {
+        guard comic.pageCount > 0 else { return }
         let advance = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
-        let target  = min(currentPage + advance, comic.pageCount - 1)
+        let target  = max(0, min(currentPage + advance, comic.pageCount - 1))
         guard target != currentPage else { return }
         currentPage = target
         saveProgress()
@@ -676,6 +717,7 @@ struct ReaderView: View {
     }
 
     private func toggleAutoplay() {
+        guard !scrollMode else { return }
         autoplay.toggle()
         if !autoplay { countdownProgress = 0 }
     }
@@ -709,17 +751,16 @@ struct ReaderView: View {
         guard autoplay, !scrollMode else { return }
         let steps = 60
         for i in 0..<steps {
-            guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
+            guard autoplay, !Task.isCancelled else { await MainActor.run { countdownProgress = 0 }; return }
             await MainActor.run { countdownProgress = Double(i) / Double(steps) }
             do {
                 try await Task.sleep(for: .milliseconds(Int(autoplayInterval * 1000) / steps))
             } catch {
-
-                countdownProgress = 0
+                await MainActor.run { countdownProgress = 0 }
                 return
             }
         }
-        guard autoplay, !Task.isCancelled else { countdownProgress = 0; return }
+        guard autoplay, !Task.isCancelled else { await MainActor.run { countdownProgress = 0 }; return }
         await MainActor.run {
             countdownProgress = 0
             if currentPage < comic.pageCount - 1 { nextPage() }
@@ -795,15 +836,21 @@ struct PagedModeView: View {
 
         .gesture(
             DragGesture(minimumDistance: 40).onEnded { val in
-                guard !isZoomed else { return }
+                guard !isZoomed, comic.pageCount > 0 else { return }
                 let forward  = val.translation.width < -40
                 let backward = val.translation.width >  40
+                // Clamp with max/min rather than a plain `currentPage > 0`/`< pageCount - 1` guard --
+                // with pageAdvance == 2 (double-page mode), landing on an odd page index (reachable
+                // via the filmstrip, slider, page-jump popover, or a bookmark, none of which are
+                // restricted to even pages) let a backward drag compute currentPage - 2 = -1, a
+                // negative index that traps as a fatal array-out-of-range error once it reaches the
+                // raw `images[index]` subscript in cbzPage/cbrPage.
                 if rtl {
-                    if forward  && currentPage > 0                   { currentPage -= pageAdvance }
-                    if backward && currentPage < comic.pageCount - 1 { currentPage += pageAdvance }
+                    if forward  { currentPage = max(0, currentPage - pageAdvance) }
+                    if backward { currentPage = min(comic.pageCount - 1, currentPage + pageAdvance) }
                 } else {
-                    if forward  && currentPage < comic.pageCount - 1 { currentPage += pageAdvance }
-                    if backward && currentPage > 0                   { currentPage -= pageAdvance }
+                    if forward  { currentPage = min(comic.pageCount - 1, currentPage + pageAdvance) }
+                    if backward { currentPage = max(0, currentPage - pageAdvance) }
                 }
             }
         )
@@ -884,7 +931,7 @@ private struct FilmstripThumb: View {
                 .padding(2)
         }
         .task(id: index) {
-            PageCache.shared.load(comic: comic, page: index) { image = $0 }
+            PageThumbnailCache.shared.thumbnail(comic: comic, page: index) { image = $0 }
         }
     }
 }
@@ -911,16 +958,24 @@ struct ScrollPageView: View {
     let comic: Comic
     let index: Int
     @State private var image: PlatformImage?
+    @State private var loadFailed = false
 
     var body: some View {
         Group {
             if let img = image {
                 Image(platformImage: img).resizable().aspectRatio(contentMode: .fit).frame(maxWidth: .infinity)
+            } else if loadFailed {
+                Color.black.frame(height: 600)
+                    .overlay(Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.secondary))
             } else {
                 Color.black.frame(height: 600)
                     .overlay(ProgressView().tint(.white))
             }
         }
-        .task { PageCache.shared.load(comic: comic, page: index) { image = $0 } }
+        .task {
+            PageCache.shared.load(comic: comic, page: index) { img in
+                if let img { image = img } else { loadFailed = true }
+            }
+        }
     }
 }

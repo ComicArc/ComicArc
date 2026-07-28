@@ -2,17 +2,57 @@ import SwiftUI
 
 struct DuplicatesView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @State private var showResolveSafeConfirm = false
+
+    private var filteredGroups: [[Comic]] {
+        guard !vm.searchText.isEmpty else { return vm.duplicateGroups }
+        let q = vm.searchText.lowercased()
+        return vm.duplicateGroups.filter { group in
+            group.contains {
+                $0.series.lowercased().contains(q) ||
+                $0.title.lowercased().contains(q) ||
+                $0.publisher.lowercased().contains(q)
+            }
+        }
+    }
+
+    /// The unambiguous case: every member is byte-for-byte the same file (shared, non-nil hash),
+    /// not just the same series/issue/type -- safe to auto-resolve without per-group review,
+    /// unlike the general groups above which can legitimately be different printings/variants.
+    private var hashIdenticalGroups: [[Comic]] {
+        vm.duplicateGroups.filter { group in
+            guard group.count > 1, let hash = group.first?.fileHash, !hash.isEmpty else { return false }
+            return group.allSatisfy { $0.fileHash == hash }
+        }
+    }
+
+    private var safeResolveDeleteCount: Int {
+        hashIdenticalGroups.reduce(0) { $0 + $1.count - 1 }
+    }
 
     var body: some View {
         Group {
             if vm.duplicateGroups.isEmpty {
                 emptyState
+            } else if filteredGroups.isEmpty {
+                noMatchesState
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(Array(vm.duplicateGroups.enumerated()), id: \.offset) { _, group in
+                        if !hashIdenticalGroups.isEmpty {
+                            safeResolveHeader
+                        }
+                        // Keyed by the group's own content (comic ids), not positional offset --
+                        // if a group resolves/rescans while this view is visible, an offset-keyed
+                        // ForEach would match the wrong data onto an already-initialized row's
+                        // @State, leaving it showing the previous group's now-stale content.
+                        ForEach(filteredGroups, id: \.self) { group in
                             if let first = group.first {
-                                DuplicateGroupCard(publisher: first.publisher, series: first.series,
+                                // The GCD-verified canonical name, not just whichever comic in the
+                                // group happens to be first -- a duplicate group is by definition
+                                // one identity, so it should never display under two different
+                                // names depending on which member's own match happened to succeed.
+                                DuplicateGroupCard(publisher: first.publisher, series: ComicFileNaming.displaySeriesName(for: group),
                                                     issueNumber: first.issueNumber ?? "", comics: group)
                             }
                         }
@@ -23,6 +63,48 @@ struct DuplicatesView: View {
         }
         .background(Design.appBackground)
         .navigationTitle("Possible Duplicates")
+        .confirmationDialog(
+            "Resolve \(hashIdenticalGroups.count) safe duplicate group\(hashIdenticalGroups.count == 1 ? "" : "s")?",
+            isPresented: $showResolveSafeConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(safeResolveDeleteCount) File\(safeResolveDeleteCount == 1 ? "" : "s")", role: .destructive) {
+                let toDelete = hashIdenticalGroups.flatMap { group -> [Comic] in
+                    guard let keeper = recommendedKeeper(in: group) else { return [] }
+                    return group.filter { $0.id != keeper.id }
+                }
+                vm.delete(toDelete)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("These groups are byte-for-byte identical copies of the same file. One copy of each will be kept; the rest move to Trash and can be restored from Settings.")
+        }
+    }
+
+    private var safeResolveHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill").foregroundStyle(Design.brandGold)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(hashIdenticalGroups.count) group\(hashIdenticalGroups.count == 1 ? "" : "s") are exact duplicate files")
+                    .font(.subheadline.bold())
+                Text("Same file, byte-for-byte -- safe to auto-resolve, keeping one copy of each.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Resolve All Safe Duplicates") { showResolveSafeConfirm = true }
+                .buttonStyle(.borderedProminent).tint(Design.brandGold)
+        }
+        .padding(16)
+        .background(Design.cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+    }
+
+    private var noMatchesState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "magnifyingglass").font(.system(size: 52)).foregroundStyle(.quaternary)
+            Text("No Matching Duplicates").font(.title3.bold()).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
@@ -37,6 +119,18 @@ struct DuplicatesView: View {
     }
 }
 
+/// Byte size on disk, used to break ties between otherwise-equal copies when picking a keeper.
+private func fileSize(_ comic: Comic) -> Int64 {
+    (try? FileManager.default.attributesOfItem(atPath: comic.filePath)[.size] as? Int64) ?? 0
+}
+
+/// The single "which copy should we keep" heuristic, shared between the per-group manual picker
+/// (`DuplicateGroupCard`) and the batch "Resolve All Safe Duplicates" action above -- more pages,
+/// then larger file size, wins.
+private func recommendedKeeper(in comics: [Comic]) -> Comic? {
+    comics.max { a, b in (a.pageCount, fileSize(a)) < (b.pageCount, fileSize(b)) }
+}
+
 private struct DuplicateGroupCard: View {
     let publisher: String
     let series: String
@@ -44,13 +138,16 @@ private struct DuplicateGroupCard: View {
     @State var comics: [Comic]
     @EnvironmentObject var vm: LibraryViewModel
 
-    private func fileSize(_ comic: Comic) -> Int64 {
-        (try? FileManager.default.attributesOfItem(atPath: comic.filePath)[.size] as? Int64) ?? 0
-    }
-    private var recommendedId: Int64? {
-        comics.max { a, b in
-            (a.pageCount, fileSize(a)) < (b.pageCount, fileSize(b))
-        }?.id
+    // Computed once (on appear / whenever `comics` actually changes) instead of as a computed
+    // property re-evaluated on every access -- `recommendedId` used to be read once per row
+    // inside the ForEach below, and each read did its own O(n) file-size stat() sweep over the
+    // whole group, turning a single render into O(n^2) blocking main-thread file I/O.
+    @State private var recommendedId: Int64?
+    @State private var pendingKeepOnly: Comic?
+    @State private var pendingDeleteSingle: Comic?
+
+    private func recomputeRecommendedId() {
+        recommendedId = recommendedKeeper(in: comics)?.id
     }
 
     var body: some View {
@@ -80,17 +177,14 @@ private struct DuplicateGroupCard: View {
 
                         if isRecommended && comics.count > 1 {
                             Button {
-                                let others = comics.filter { $0.id != comic.id }
-                                vm.delete(others)
-                                comics = [comic]
+                                pendingKeepOnly = comic
                             } label: {
                                 Label("Keep This, Delete Others", systemImage: "checkmark.circle")
                             }
                             .buttonStyle(.borderedProminent).controlSize(.small).tint(Design.brandGold)
                         }
                         Button(role: .destructive) {
-                            vm.delete([comic])
-                            comics.removeAll { $0.id == comic.id }
+                            pendingDeleteSingle = comic
                         } label: {
                             Label("Delete This One", systemImage: "trash")
                         }
@@ -103,5 +197,38 @@ private struct DuplicateGroupCard: View {
         .padding(16)
         .background(Design.cardBg)
         .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+        .onAppear { recomputeRecommendedId() }
+        .onChange(of: comics) { _, _ in recomputeRecommendedId() }
+        .confirmationDialog(
+            "Delete the other \(comics.count - 1) cop\(comics.count - 1 == 1 ? "y" : "ies")?",
+            isPresented: Binding(get: { pendingKeepOnly != nil }, set: { if !$0 { pendingKeepOnly = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Others", role: .destructive) {
+                guard let keeper = pendingKeepOnly else { return }
+                let others = comics.filter { $0.id != keeper.id }
+                vm.delete(others)
+                comics = [keeper]
+                pendingKeepOnly = nil
+            }
+            Button("Cancel", role: .cancel) { pendingKeepOnly = nil }
+        } message: {
+            Text("Deleted comics move to Trash and can be restored from Settings.")
+        }
+        .confirmationDialog(
+            "Delete this comic?",
+            isPresented: Binding(get: { pendingDeleteSingle != nil }, set: { if !$0 { pendingDeleteSingle = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                guard let target = pendingDeleteSingle else { return }
+                vm.delete([target])
+                comics.removeAll { $0.id == target.id }
+                pendingDeleteSingle = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteSingle = nil }
+        } message: {
+            Text("Deleted comics move to Trash and can be restored from Settings.")
+        }
     }
 }

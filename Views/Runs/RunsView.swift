@@ -1,10 +1,13 @@
 extension Notification.Name {
     static let runDeleted = Notification.Name("runDeleted")
+    static let runUpdated = Notification.Name("runUpdated")
 }
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RunsListView: View {
+    @EnvironmentObject var vm: LibraryViewModel
     @Binding var selectedRun: Run?
     @State private var runs:          [Run]   = []
     @State private var isLoading      = true
@@ -14,10 +17,19 @@ struct RunsListView: View {
     @State private var draggedRunId:  Int64?
     @State private var dropTargetRunId: Int64?
 
+    // Filters the rendered list only -- reordering (drag-and-drop, Move Up/Down/Top/Bottom)
+    // still looks rows up by id in the full `runs` array below, so a search doesn't corrupt
+    // the real underlying order, it just narrows what's currently visible.
+    private var filteredRuns: [Run] {
+        guard !vm.searchText.isEmpty else { return runs }
+        let q = vm.searchText.lowercased()
+        return runs.filter { $0.title.lowercased().contains(q) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("RUNS")
+                Text("READING PATHS")
                     .font(.system(size: 20, weight: .black))
                     .foregroundStyle(Design.textPrimary)
                     .kerning(1)
@@ -28,6 +40,7 @@ struct RunsListView: View {
                         .foregroundStyle(Design.brandGold)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Create Reading Path")
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
             .background(Design.navBackground)
@@ -51,10 +64,17 @@ struct RunsListView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(20)
+            } else if filteredRuns.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 42)).foregroundStyle(.quaternary)
+                    Text("No matching reading paths.").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(runs) { run in
+                        ForEach(filteredRuns) { run in
                             let isTarget = dropTargetRunId == run.id && draggedRunId != run.id
                             RunListCard(
                                 run: run,
@@ -82,6 +102,26 @@ struct RunsListView: View {
                                 draggedRunId = nil; dropTargetRunId = nil
                                 return true
                             }
+                            // Drag-and-drop is the only way to reorder Reading Paths, which is
+                            // both a hard accessibility gap (no keyboard/VoiceOver path at all)
+                            // and slow for a long list (dragging across many rows). These give a
+                            // faster, non-drag alternative for everyone.
+                            .contextMenu {
+                                Button("Move to Top") { moveRun(run, to: 0) }
+                                    .disabled(runs.first?.id == run.id)
+                                Button("Move Up") { moveRun(run, by: -1) }
+                                    .disabled(runs.first?.id == run.id)
+                                Button("Move Down") { moveRun(run, by: 1) }
+                                    .disabled(runs.last?.id == run.id)
+                                Button("Move to Bottom") { moveRun(run, to: runs.count - 1) }
+                                    .disabled(runs.last?.id == run.id)
+                            }
+                            .accessibilityActions {
+                                Button("Move Up") { moveRun(run, by: -1) }
+                                Button("Move Down") { moveRun(run, by: 1) }
+                                Button("Move to Top") { moveRun(run, to: 0) }
+                                Button("Move to Bottom") { moveRun(run, to: runs.count - 1) }
+                            }
                             Rectangle().fill(Design.borderColor).frame(height: 1)
                         }
                     }
@@ -94,12 +134,18 @@ struct RunsListView: View {
                 if let sel = selectedRun, !runs.contains(sel) { selectedRun = nil }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in
+            // Renaming/re-rating a Run in its detail view only updates that view's own local
+            // @State copy and the DB -- without this, this sidebar list's row keeps showing the
+            // pre-edit title/rating until an unrelated reload happens.
+            Task { await loadRuns() }
+        }
         .sheet(isPresented: $showingCreate) { createSheet }
     }
 
     private var createSheet: some View {
         VStack(spacing: 20) {
-            Text("New Run").font(.title2.bold())
+            Text("New Reading Path").font(.title2.bold())
             TextField("Title", text: $newRunTitle).textFieldStyle(.roundedBorder)
             TextField("Description (optional)", text: $newRunDesc).textFieldStyle(.roundedBorder)
             HStack {
@@ -128,6 +174,22 @@ struct RunsListView: View {
             DatabaseManager.shared.allRuns()
         }.value
         runs = r; isLoading = false
+    }
+
+    private func moveRun(_ run: Run, by delta: Int) {
+        guard let idx = runs.firstIndex(where: { $0.id == run.id }) else { return }
+        moveRun(run, to: idx + delta)
+    }
+
+    private func moveRun(_ run: Run, to newIndex: Int) {
+        guard let fromIdx = runs.firstIndex(where: { $0.id == run.id }) else { return }
+        let clamped = max(0, min(newIndex, runs.count - 1))
+        guard clamped != fromIdx else { return }
+        var list = runs
+        let moved = list.remove(at: fromIdx)
+        list.insert(moved, at: clamped)
+        runs = list
+        DatabaseManager.shared.reorderRuns(orderedIds: list.map(\.id))
     }
 }
 
@@ -230,7 +292,8 @@ struct RunListCard: View {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(run.title)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             if let url = urls.first {
                 LibraryViewModel.shared.setRunCover(runId: run.id, imageURL: url)
@@ -337,6 +400,12 @@ struct RunDetailView: View {
             reviewText = r.review ?? ""
             loadItems()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
+            // The reader is a ZStack overlay, not a navigation push, so this view is never
+            // told a comic in it was just read -- refresh progress/"first unfinished" (Resume
+            // target) so they don't point at the issue the user just finished.
+            loadItems()
+        }
         .sheet(isPresented: $showingAddComics) {
             AddComicsToRunView(run: run) { loadItems() }
         }
@@ -367,7 +436,7 @@ struct RunDetailView: View {
 
                 if let link = currentRun.buyLink, !link.isEmpty,
                    let url = URL(string: link) {
-                    Link("Find / Buy This Run", destination: url)
+                    Link("Find / Buy This Reading Path", destination: url)
                         .font(.caption)
                         .foregroundStyle(Design.brandGold.opacity(0.8))
                 }
@@ -409,10 +478,10 @@ struct RunDetailView: View {
                     .help("Rate & Review")
 
                     Button(role: .destructive) {
-                        LibraryViewModel.shared.deleteRunWithUndo(run)
+                        LibraryViewModel.shared.deleteRunWithUndo(currentRun)
                         onDelete()
                     } label: {
-                        Text("Delete Run")
+                        Text("Delete Reading Path")
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.bordered)
@@ -425,7 +494,11 @@ struct RunDetailView: View {
 
     private var reviewSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Rate & Review: \(run.title)")
+            // Reads `currentRun` (the synced @State copy), not the immutable `run` init
+            // parameter -- otherwise this sheet keeps showing the pre-edit title/buy link after
+            // EditRunView updates currentRun, since `run` itself never changes for this view's
+            // lifetime.
+            Text("Rate & Review: \(currentRun.title)")
                 .font(.title2.bold())
 
             Text("Rating").font(.headline)
@@ -439,7 +512,7 @@ struct RunDetailView: View {
                 .frame(minHeight: 120)
                 .border(Design.borderColor)
 
-            if let link = run.buyLink {
+            if let link = currentRun.buyLink {
                 HStack {
                     Text("Buy Link:").foregroundStyle(.secondary).font(.caption)
                     Text(link).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -450,7 +523,7 @@ struct RunDetailView: View {
                 Button("Cancel") { showReviewSheet = false }.keyboardShortcut(.escape)
                 Spacer()
                 Button("Save") {
-                    LibraryViewModel.shared.setRunRating(run.id,
+                    LibraryViewModel.shared.setRunRating(currentRun.id,
                                                         rating: runRating,
                                                         review: reviewText.isEmpty ? nil : reviewText)
                     showReviewSheet = false
@@ -648,7 +721,7 @@ struct EditRunView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Edit Run")
+            Text("Edit Reading Path")
                 .font(.title2.bold())
                 .padding(24)
 
@@ -711,7 +784,11 @@ struct AddComicsToRunView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Add \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: Array(selected))
+                    // Order by the picker's own list order, not Set iteration order (which is
+                    // unspecified) -- otherwise multi-selecting several comics lands them in the
+                    // run in an arbitrary order unrelated to anything the user saw or chose.
+                    let orderedIds = allComics.map(\.comic.id).filter { selected.contains($0) }
+                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: orderedIds)
                     onAdd(); dismiss()
                 }
                 .buttonStyle(.borderedProminent)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct IssueDetailPage: View {
     let comic:  Comic
@@ -10,13 +11,16 @@ struct IssueDetailPage: View {
     @State private var current:        Comic
     @State private var tags:           [Tag]    = []
     @State private var newTagText:     String   = ""
+    @State private var newTagCategory: TagCategory = .custom
     @State private var thumbnail:      PlatformImage? = nil
     @State private var showingEdit:    Bool     = false
     @State private var showMetadataInspector: Bool = false
     @State private var reviewDraft:    String   = ""
     @State private var appearsInRuns:  [Run]    = []
+    @State private var appearsInTierLists: [TierList] = []
     @State private var missingIssues:  [String] = []
     @State private var showPagePicker: Bool     = false
+    @State private var coverChangeError: String?
 
     init(comic: Comic, onBack: @escaping () -> Void) {
         self.comic  = comic
@@ -60,6 +64,14 @@ struct IssueDetailPage: View {
                 thumbnail = nil
                 ThumbnailCache.shared.thumbnail(for: current) { thumbnail = $0 }
             }
+        }
+        .alert("Couldn't Set Cover", isPresented: Binding(
+            get: { coverChangeError != nil },
+            set: { if !$0 { coverChangeError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(coverChangeError ?? "")
         }
     }
 
@@ -291,6 +303,13 @@ struct IssueDetailPage: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 220)
                             .onSubmit { addTag() }
+                        Picker("", selection: $newTagCategory) {
+                            ForEach(TagCategory.allCases, id: \.self) { cat in
+                                Text(cat.rawValue).tag(cat)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 110)
                         Button("Add") { addTag() }
                             .disabled(newTagText.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
@@ -326,7 +345,7 @@ struct IssueDetailPage: View {
 
     @ViewBuilder
     private var supplementarySection: some View {
-        if !missingIssues.isEmpty || !appearsInRuns.isEmpty || current.notes != nil {
+        if !missingIssues.isEmpty || !appearsInRuns.isEmpty || !appearsInTierLists.isEmpty || current.notes != nil {
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             HStack(alignment: .top, spacing: 0) {
@@ -339,6 +358,13 @@ struct IssueDetailPage: View {
                 if !appearsInRuns.isEmpty {
                     Rectangle().fill(Design.borderColor).frame(width: 1)
                     runsSection
+                        .frame(maxWidth: .infinity)
+                        .padding(32)
+                }
+
+                if !appearsInTierLists.isEmpty {
+                    Rectangle().fill(Design.borderColor).frame(width: 1)
+                    tierListsSection
                         .frame(maxWidth: .infinity)
                         .padding(32)
                 }
@@ -373,7 +399,7 @@ struct IssueDetailPage: View {
 
     private var runsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Appears in Runs")
+            Text("Appears in Reading Paths")
                 .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
             ForEach(appearsInRuns) { run in
                 HStack(spacing: 8) {
@@ -383,6 +409,27 @@ struct IssueDetailPage: View {
                         Text(run.title).font(.subheadline)
                         if !run.description.isEmpty {
                             Text(run.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var tierListsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Appears in Tier Lists")
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
+            ForEach(appearsInTierLists) { tierList in
+                HStack(spacing: 8) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .foregroundStyle(Design.brandGold).font(.subheadline)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(tierList.title).font(.subheadline)
+                        if !tierList.description.isEmpty {
+                            Text(tierList.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                     Spacer()
@@ -436,7 +483,7 @@ struct IssueDetailPage: View {
     }
 
     private func tagChip(_ tag: Tag) -> some View {
-        TagChip(name: tag.name) { removeTag(tag) }
+        TagChip(name: tag.name, category: tag.category) { removeTag(tag) }
     }
 
     private var progressLabel: String {
@@ -458,9 +505,10 @@ struct IssueDetailPage: View {
         Task.detached(priority: .userInitiated) {
             let t   = DatabaseManager.shared.tags(for: comicId)
             let r   = DatabaseManager.shared.runsContaining(comicId: comicId)
+            let tl  = DatabaseManager.shared.tierListsContaining(comicId: comicId)
             let mi  = DatabaseManager.shared.missingIssueNumbers(series: series, publisher: pub)
             await MainActor.run {
-                tags = t; appearsInRuns = r; missingIssues = mi
+                tags = t; appearsInRuns = r; appearsInTierLists = tl; missingIssues = mi
             }
         }
     }
@@ -468,33 +516,46 @@ struct IssueDetailPage: View {
     private func addTag() {
         let name = newTagText.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        vm.addTag(name: name, to: current)
+        vm.addTag(name: name, to: current, category: newTagCategory)
         newTagText = ""
         let comicId = current.id
-        Task.detached(priority: .userInitiated) {
-            let t = DatabaseManager.shared.tags(for: comicId)
-            await MainActor.run { tags = t }
+        // Await the comic-specific tag refetch before triggering vm.reload() (which separately
+        // refreshes the sidebar's library-wide tag list) instead of firing both concurrently --
+        // sequencing them removes any ambiguity about which finishes last for no real cost, since
+        // neither depends on the other's timing to be correct on its own.
+        Task {
+            let t = await Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.tags(for: comicId)
+            }.value
+            tags = t
+            vm.reload()
         }
-        vm.reload()
     }
 
     private func removeTag(_ tag: Tag) {
         vm.removeTag(tagId: tag.id, from: current)
         let comicId = current.id
-        Task.detached(priority: .userInitiated) {
-            let t = DatabaseManager.shared.tags(for: comicId)
-            await MainActor.run { tags = t }
+        Task {
+            let t = await Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.tags(for: comicId)
+            }.value
+            tags = t
+            vm.reload()
         }
-        vm.reload()
     }
 
     private func changeCover() {
         fileService.pickFiles(
             allowsMultiple: false,
             message: "Choose a cover image for \(current.title)",
-            prompt: "Set Cover"
+            prompt: "Set Cover",
+            contentTypes: [.image]
         ) { urls in
             guard let url = urls.first else { return }
+            guard PlatformImage.fromURL(url) != nil else {
+                coverChangeError = "Couldn't read that image file. Try a different image."
+                return
+            }
             ThumbnailCache.shared.setCustomCover(comicId: self.current.id, imageURL: url)
             self.thumbnail = nil
             ThumbnailCache.shared.thumbnail(for: self.current) { self.thumbnail = $0 }

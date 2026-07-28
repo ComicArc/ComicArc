@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum TStep: Int, CaseIterable {
-    case welcome, library, browse, openComic, reader, runs, readingOrder, customize, settings, done
+    case welcome, sidebar, library, openComic, reader, readingPaths, diaryTierListsAndMoments, readingOrder, renameAndCovers, toolbar, done
 }
 
 private struct TStepInfo {
@@ -12,83 +12,98 @@ private struct TStepInfo {
     let above:    Bool
 }
 
-private let navH: CGFloat = 48
+private extension TStep {
+    // An exhaustive switch instead of a positional array indexed by `rawValue` -- a plain
+    // `[TStepInfo]` literal has no compiler-enforced link to TStep's cases, so adding or
+    // removing a case without updating the array in lockstep would silently show mismatched
+    // content for a step (or index out of range). A `switch` with no `default` forces every
+    // case to be handled here whenever TStep itself changes.
+    var info: TStepInfo {
+        switch self {
+        case .welcome:
+            return TStepInfo(icon: "diamond.fill",
+                title: "Welcome to ComicArc",
+                body: "Let's take a quick tour of the major features. You can skip this at any time and return to it from Settings → Show Tutorial.",
+                spot: nil, above: true)
 
-private let steps: [TStepInfo] = [
-    TStepInfo(icon: "diamond.fill",
-              title: "Welcome to ComicArc",
-              body: "Let's take a quick tour of the major features. You can skip this at any time and return to it from Settings → Show Tutorial.",
-              spot: nil, above: true),
+        case .sidebar:
+            return TStepInfo(icon: "sidebar.left",
+                title: "The Sidebar",
+                body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Statistics, and History under Discover. Tap More for the deeper tracking tools — Diary, Tier Lists, Favorite Moments — plus anything that shows up automatically when there's something to review, like a possible duplicate.",
+                spot: .sidebar, above: false)
 
-    TStepInfo(icon: "books.vertical.fill",
-              title: "Your Library",
-              body: "Comics are organized by Publisher → Character → Series. Click any group card to drill in. Double-click an issue to open it in the reader.",
-              spot: .content, above: false),
+        case .library:
+            return TStepInfo(icon: "books.vertical.fill",
+                title: "Your Library",
+                body: "Comics are organized by Publisher → Character → Series. Click any group card to drill in. Double-click an issue to open it in the reader.",
+                spot: .content, above: false)
 
-    TStepInfo(icon: "filemenu.and.selection",
-              title: "Navigation Tabs",
-              body: "Switch between Library, Reading Runs, Stats, History, and Settings using the tabs in the top bar.",
-              spot: .navCenter, above: false),
+        case .openComic:
+            return TStepInfo(icon: "rectangle.stack.fill",
+                title: "Issue Detail",
+                body: "Click any comic to open its detail panel. Edit metadata, add tags, write a review, rate it, or tap Open in Reader to start reading. If the comics database matched it wrong (or not at all), use Fix Match to search and set the correct match yourself.",
+                spot: .content, above: false)
 
-    TStepInfo(icon: "sidebar.right",
-              title: "Issue Detail",
-              body: "Click any comic to open its detail panel. Edit metadata, add tags, write a review, rate it, or tap Open in Reader to start reading.",
-              spot: .content, above: false),
+        case .reader:
+            return TStepInfo(icon: "book.fill",
+                title: "The Reader",
+                body: "The reader lives inside the app — no separate window. Move your mouse to the top or bottom edge to reveal controls. Use ← → or swipe to turn pages.",
+                spot: .content, above: false)
 
-    TStepInfo(icon: "book.fill",
-              title: "The Reader",
-              body: "The reader lives inside the app — no separate window. Move your mouse to the top or bottom edge to reveal controls. Use ← → or swipe to turn pages.",
-              spot: .content, above: false),
+        case .readingPaths:
+            return TStepInfo(icon: "list.bullet.rectangle.portrait.fill",
+                title: "Reading Paths",
+                body: "A Reading Path is an ordered list that can span multiple series — like a crossover event or a character's entire history. Build one from Reading Paths in the sidebar.",
+                spot: .sidebar, above: false)
 
-    TStepInfo(icon: "list.bullet.rectangle.portrait.fill",
-              title: "Reading Runs",
-              body: "A Run is an ordered reading list that can span multiple series — like a crossover event or a character's entire history. Build one from the Runs tab.",
-              spot: .navRuns, above: false),
+        case .diaryTierListsAndMoments:
+            return TStepInfo(icon: "text.book.closed.fill",
+                title: "Diary, Tier Lists & Favorite Moments",
+                body: "Rate or review any comic and it's automatically logged in your Diary, rereads included. Tier Lists let you rank comics into S/A/B/C/D/F tiers — think \"Best Vertigo Runs.\" Star a bookmark in the reader to save it as a Favorite Moment, browsable later as its own gallery. And Statistics includes a Year in Review recap once you've been reading a while.",
+                spot: .sidebar, above: false)
 
-    TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
-              title: "Fixing Reading Order",
-              body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place — no editing files required.",
-              spot: nil, above: true),
+        case .readingOrder:
+            return TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
+                title: "Fixing Reading Order",
+                body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place — no editing files required.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "photo.on.rectangle.angled",
-              title: "Renaming Files & Covers",
-              body: "Settings → Rename Files can tidy up messy filenames automatically. And you're never stuck with the wrong cover — pick any page from the issue itself, or a custom image, right from its detail view.",
-              spot: nil, above: true),
+        case .renameAndCovers:
+            return TStepInfo(icon: "photo.on.rectangle.angled",
+                title: "Renaming Files & Covers",
+                body: "Settings → Fix Filenames can tidy up messy filenames automatically. And you're never stuck with the wrong cover — pick any page from the issue itself, or a custom image, right from its detail view.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "gearshape.fill",
-              title: "Settings",
-              body: "Change your library folder, adjust reading modes, pick a progress format, export a backup, or re-run this tutorial at any time.",
-              spot: .navSettings, above: false),
+        case .toolbar:
+            return TStepInfo(icon: "wrench.and.screwdriver.fill",
+                title: "The Toolbar",
+                body: "At the top of the window: Scan checks your library folders for new comics, Resync re-scans everything, Import adds files directly, the grid icon changes card size, the arrows sort your library, and the gear opens Settings.",
+                spot: nil, above: true)
 
-    TStepInfo(icon: "checkmark.circle.fill",
-              title: "You're All Set",
-              body: "Press ? anytime in the reader to see all keyboard shortcuts. Enjoy your library!",
-              spot: nil, above: true),
-]
+        case .done:
+            return TStepInfo(icon: "checkmark.circle.fill",
+                title: "You're All Set",
+                body: "Press ? anytime in the reader to see all keyboard shortcuts. Enjoy your library!",
+                spot: nil, above: true)
+        }
+    }
+}
 
 private enum SpotRegion {
     case content
-    case navCenter
-    case navRuns
-    case navSettings
+    case sidebar
 
+    /// Only the sidebar and content areas are spotlight-able: both are real SwiftUI view
+    /// bounds this GeometryReader can measure. The actual toolbar buttons live in macOS's
+    /// native title bar, which sits outside the view hierarchy entirely — there's no rect to
+    /// draw here that would land on them correctly, so that step describes them in text only.
     func rect(in size: CGSize) -> CGRect {
+        let sidebarWidth = min(280, size.width * 0.24)
         switch self {
+        case .sidebar:
+            return CGRect(x: 0, y: 0, width: sidebarWidth, height: size.height)
         case .content:
-            return CGRect(x: 0, y: navH, width: size.width, height: size.height - navH)
-        case .navCenter:
-            let w = size.width * 0.56
-            return CGRect(x: (size.width - w) / 2, y: 0, width: w, height: navH)
-        case .navRuns:
-
-            let tabW: CGFloat = size.width * 0.10
-            let startX = size.width * 0.335
-            return CGRect(x: startX, y: 0, width: tabW, height: navH)
-        case .navSettings:
-
-            let tabW: CGFloat = size.width * 0.10
-            let startX = size.width * 0.62
-            return CGRect(x: startX, y: 0, width: tabW, height: navH)
+            return CGRect(x: sidebarWidth, y: 0, width: size.width - sidebarWidth, height: size.height)
         }
     }
 }
@@ -99,7 +114,7 @@ struct TutorialView: View {
     @State private var currentStep: TStep = .welcome
     @State private var transitioning = false
 
-    private var info: TStepInfo { steps[currentStep.rawValue] }
+    private var info: TStepInfo { currentStep.info }
     private var isFirst: Bool { currentStep == .welcome }
     private var isLast:  Bool { currentStep == .done }
 
@@ -129,7 +144,11 @@ struct TutorialView: View {
                 }
             }
         }
-        .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
+        // Always dark, regardless of the user's app theme: every color in this overlay (the
+        // black scrim, white text, gold accents) is fixed, not theme-derived. Following the
+        // user's Sepia (light) theme here would put hardcoded white text on a light-tinted
+        // .ultraThinMaterial card -- a real contrast/readability bug, not a nice-to-have.
+        .preferredColorScheme(.dark)
         .onKeyPress(.escape) { onDismiss(); return .handled }
     }
 
@@ -158,16 +177,25 @@ struct TutorialView: View {
         let cardH: CGFloat = 220.0
         let padding: CGFloat = 16
 
-        let yPos: CGFloat = info.above
-            ? spotRect.minY - cardH - padding
-            : spotRect.maxY + padding
+        // For the sidebar spot, the card reads better alongside it than above/below a tall
+        // narrow strip, so anchor horizontally next to the spot instead of vertically relative
+        // to it.
+        let xPos: CGFloat
+        let yPos: CGFloat
+        if case .sidebar = region {
+            xPos = spotRect.maxX + padding
+            yPos = max(8, min(size.height - cardH - 8, (size.height - cardH) / 2))
+        } else {
+            yPos = info.above ? spotRect.minY - cardH - padding : spotRect.maxY + padding
+            xPos = max(8, min(size.width - cardW - 8, (size.width - cardW) / 2))
+        }
         let clampedY = max(8, min(size.height - cardH - 8, yPos))
-        let xPos = max(8, min(size.width - cardW - 8, (size.width - cardW) / 2))
+        let clampedX = max(8, min(size.width - cardW - 8, xPos))
 
         return AnyView(
             calloutCard
                 .frame(width: cardW)
-                .position(x: xPos + cardW / 2, y: clampedY + cardH / 2)
+                .position(x: clampedX + cardW / 2, y: clampedY + cardH / 2)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 .animation(.spring(response: 0.4, dampingFraction: 0.82), value: currentStep.rawValue)
         )

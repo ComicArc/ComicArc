@@ -15,14 +15,26 @@ enum GCDDatabaseDownloader {
         let destination = OfflineMetadataStore.fileURL
         let tmpDestination = destination.appendingPathExtension("download")
 
+        // Holds this download's own observation so `finish` can invalidate and remove exactly
+        // it -- without this, `progressObservations` only ever grows across the process
+        // lifetime (every retry after a failed download leaks another one).
+        var observation: NSKeyValueObservation?
+        func finish(_ state: State) {
+            if let observation {
+                observation.invalidate()
+                progressObservations.removeAll { $0 === observation }
+            }
+            onProgress(state)
+        }
+
         let task = URLSession.shared.downloadTask(with: hostedURL) { tempURL, response, error in
             Task { @MainActor in
                 if let error {
-                    onProgress(.failure(error.localizedDescription))
+                    finish(.failure(error.localizedDescription))
                     return
                 }
                 guard let tempURL, let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                    onProgress(.failure("The comics database couldn't be downloaded. Check your internet connection and try again later."))
+                    finish(.failure("The comics database couldn't be downloaded. Check your internet connection and try again later."))
                     return
                 }
                 do {
@@ -33,17 +45,17 @@ enum GCDDatabaseDownloader {
                     try? FileManager.default.removeItem(at: destination)
                     try FileManager.default.moveItem(at: tmpDestination, to: destination)
                     OfflineMetadataStore.shared.reopen()
-                    onProgress(.success)
+                    finish(.success)
                 } catch {
-                    onProgress(.failure("Couldn't save the downloaded database: \(error.localizedDescription)"))
+                    finish(.failure("Couldn't save the downloaded database: \(error.localizedDescription)"))
                 }
             }
         }
 
-        let observation = task.progress.observe(\.fractionCompleted) { progress, _ in
+        observation = task.progress.observe(\.fractionCompleted) { progress, _ in
             Task { @MainActor in onProgress(.downloading(progress: progress.fractionCompleted)) }
         }
-        progressObservations.append(observation)
+        if let observation { progressObservations.append(observation) }
         task.resume()
     }
 

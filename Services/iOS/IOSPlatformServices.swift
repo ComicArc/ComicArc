@@ -2,18 +2,48 @@
 import UIKit
 import UniformTypeIdentifiers
 
-private let libraryFolderBookmarkKey = "libraryFolderBookmark"
+private let libraryFolderBookmarksKey = "libraryFolderBookmarks"
 
+/// Resolves every configured library folder's security-scoped bookmark, granting access to each
+/// (never explicitly balanced with `stopAccessingSecurityScopedResource` -- access is opened once
+/// per app-launch-or-pick and held for the process lifetime, same as the original single-folder
+/// version). Any bookmark that fails to resolve is silently dropped rather than blocking the rest.
 @discardableResult
-func resolveLibraryFolderBookmark() -> URL? {
-    guard let data = UserDefaults.standard.data(forKey: libraryFolderBookmarkKey) else { return nil }
-    var stale = false
-    guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale),
-          url.startAccessingSecurityScopedResource() else { return nil }
-    if stale, let fresh = try? url.bookmarkData() {
-        UserDefaults.standard.set(fresh, forKey: libraryFolderBookmarkKey)
+func resolveLibraryFolderBookmarks() -> [URL] {
+    guard let bookmarks = UserDefaults.standard.array(forKey: libraryFolderBookmarksKey) as? [Data] else { return [] }
+    var resolved: [URL] = []
+    var refreshed: [Data] = []
+    for data in bookmarks {
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale),
+              url.startAccessingSecurityScopedResource() else { continue }
+        resolved.append(url)
+        if stale, let fresh = try? url.bookmarkData() {
+            refreshed.append(fresh)
+        } else {
+            refreshed.append(data)
+        }
     }
-    return url
+    if refreshed != bookmarks {
+        UserDefaults.standard.set(refreshed, forKey: libraryFolderBookmarksKey)
+    }
+    return resolved
+}
+
+/// Removes one folder's bookmark from the configured array (by resolved path, not by raw bookmark
+/// bytes, since those can be refreshed/rewritten independently of which folder they point to) --
+/// without this, `LibraryViewModel.removeLibraryFolder` removing a path from the cached
+/// `libraryPaths` list would be silently undone on the next launch, when
+/// `resolveLibraryFolderBookmarks()` re-resolves every bookmark still in this array and rebuilds
+/// `libraryPaths` from scratch.
+func removeLibraryFolderBookmark(path: String) {
+    guard let bookmarks = UserDefaults.standard.array(forKey: libraryFolderBookmarksKey) as? [Data] else { return }
+    let remaining = bookmarks.filter { data in
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) else { return false }
+        return url.path != path
+    }
+    UserDefaults.standard.set(remaining, forKey: libraryFolderBookmarksKey)
 }
 
 private final class DocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
@@ -50,13 +80,17 @@ struct IOSFileService: FileServiceProtocol {
         DispatchQueue.main.async { self.topViewController()?.present(picker, animated: true) }
     }
 
-    func pickFiles(allowsMultiple: Bool, message: String, prompt: String,
+    func pickFiles(allowsMultiple: Bool, message: String, prompt: String, contentTypes: [UTType],
                    completion: @escaping ([URL]) -> Void) {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.json], asCopy: true)
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: contentTypes.isEmpty ? [.item] : contentTypes, asCopy: true)
         picker.allowsMultipleSelection = allowsMultiple
         present(picker, delegate: DocumentPickerDelegate(onPick: completion, onCancel: { completion([]) }))
     }
 
+    /// Adds a newly-picked folder to the configured library folders -- appends its bookmark to
+    /// the existing array rather than overwriting it, so picking a second/third folder doesn't
+    /// silently drop access to the ones already configured.
     func pickFolder(completion: @escaping (URL?) -> Void) {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
         let delegate = DocumentPickerDelegate(onPick: { urls in
@@ -64,7 +98,9 @@ struct IOSFileService: FileServiceProtocol {
                 completion(nil); return
             }
             if let bookmark = try? folder.bookmarkData() {
-                UserDefaults.standard.set(bookmark, forKey: libraryFolderBookmarkKey)
+                var existing = UserDefaults.standard.array(forKey: libraryFolderBookmarksKey) as? [Data] ?? []
+                existing.append(bookmark)
+                UserDefaults.standard.set(existing, forKey: libraryFolderBookmarksKey)
             }
             completion(folder)
         }, onCancel: { completion(nil) })
