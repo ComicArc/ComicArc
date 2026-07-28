@@ -28,6 +28,16 @@ Library/
 There's nothing to fix here if you're not using the Character level —
 `Publisher/Series/` is a completely normal 2-level layout.
 
+**One volume per folder.** If a series has more than one volume — a
+legacy relaunch, a new #1, a different creative run — give each volume
+its own folder instead of merging them into one, e.g. `Batman (2016)/`
+and `Batman (2011)/` as siblings, not both inside a single `Batman/`
+folder. A lot of what ComicArc infers (series identity, edition,
+issue ordering) comes from the folder a file sits in, so two unrelated
+volumes sharing one folder is the most common cause of issues sorting
+strangely or a rename producing an unexpected name. `Series (Year)` is
+a well-supported convention for this.
+
 ## Filenames → Series name + issue number
 
 Inside a series folder, name each file:

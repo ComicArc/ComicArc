@@ -151,6 +151,8 @@ ComicInfo.xml fills in whatever the folder structure alone can't tell it. Once y
 
 **Give each volume its own folder.** If a series has more than one volume (a legacy relaunch, a new #1, a different creative run), put each volume in its own folder — e.g. `Robin (1993)/` and `Robin (2021)/` side by side, not both dumped into a single `Robin/` folder. ComicArc derives a lot from the folder a file sits in, and two unrelated volumes sharing one folder is the single most common cause of issues sorting strangely or a rename producing an unexpected name. A folder named `Series (Year)` is a great, well-supported convention for this.
 
+See [FILE_NAMING.md](FILE_NAMING.md) for the full folder and filename naming guide.
+
 ---
 
 ## Supported formats
