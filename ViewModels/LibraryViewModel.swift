@@ -268,7 +268,10 @@ final class LibraryViewModel: ObservableObject {
 
     func reparseMetaIfNeeded() {
 
-        let key = "folderMetaReparseV3"
+        // V4: backfills folder_group (the folder between Character and Series, e.g. "Batman
+        // (Modern)") for every existing comic -- that column didn't exist before this version, so
+        // a real one-time reparse is needed for it to ever show up for libraries scanned earlier.
+        let key = "folderMetaReparseV4"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         let paths = libraryPaths
         guard !paths.isEmpty else { return }
@@ -867,8 +870,6 @@ final class LibraryViewModel: ObservableObject {
     func setTagCategory(id: Int64, category: TagCategory) { db.setTagCategory(id: id, category: category); reload() }
 
 
-    func restoreComic(id: Int64) { db.restoreComic(id: id); reload() }
-
     func setReadingGoal(year: Int, count: Int) { db.setReadingGoal(year: year, count: count) }
 
     func setSeriesCoverById(series: String, publisher: String, comicId: Int64) {
@@ -1088,18 +1089,48 @@ final class LibraryViewModel: ObservableObject {
         db.clearManualGCDMatch(comicId: comicId)
     }
 
-    func delete(_ toDelete: [Comic]) {
+    /// Deletes comics from the library AND moves their underlying files to the system Trash
+    /// (not a permanent delete) -- previously "Delete" only hid the row from the library while
+    /// silently leaving the file untouched on disk, which meant there was never an in-app way to
+    /// actually reclaim space or clear out a bad/duplicate file. `fileService` is optional so
+    /// call sites without one (or platforms where trashing isn't supported) still get the
+    /// existing library-only removal, just without the file being touched.
+    func delete(_ toDelete: [Comic], fileService: (any FileServiceProtocol)? = nil) {
         let ids = toDelete.map(\.id)
+        if let fileService {
+            for c in toDelete {
+                if let trashedURL = fileService.moveToTrash(URL(fileURLWithPath: c.filePath)) {
+                    // Persisted (not just held in this closure) so a restore from the Settings ->
+                    // Trash screen -- which can happen long after this toast expires, even after
+                    // an app relaunch -- still knows where to move the file back from.
+                    db.setTrashedFilePath(id: c.id, path: trashedURL.path)
+                }
+            }
+        }
         db.softDelete(ids)
         for c in toDelete { ThumbnailCache.shared.evict(c.id) }
         removeFromSpotlight(ids)
         reload()
         refreshDuplicates()
         offerUndo(toDelete.count == 1 ? "\"\(toDelete[0].title)\" deleted" : "\(toDelete.count) comics deleted") { [weak self] in
-            self?.db.restore(ids)
-            self?.reload()
-            self?.indexSpotlight()
+            guard let self else { return }
+            for id in ids { self.restoreFromTrash(id: id) }
+            self.indexSpotlight()
         }
+    }
+
+    /// Moves a comic's file back from the system Trash (if it was moved there by `delete`) to its
+    /// original path, then restores the database row -- the single restore path shared by the
+    /// delete undo toast above and the Settings -> Trash screen's "Restore" button, so both
+    /// actually un-trash the file instead of just bringing the row back and leaving the file
+    /// stranded in Trash.
+    func restoreFromTrash(id: Int64) {
+        if let trashedPath = db.trashedFilePath(id: id), let originalPath = db.filePath(forComicId: id) {
+            try? FileManager.default.moveItem(at: URL(fileURLWithPath: trashedPath), to: URL(fileURLWithPath: originalPath))
+            db.setTrashedFilePath(id: id, path: nil)
+        }
+        db.restore([id])
+        reload()
     }
 
     // indexSpotlight()'s indexSearchableItems is additive/overwriting only -- it never removes

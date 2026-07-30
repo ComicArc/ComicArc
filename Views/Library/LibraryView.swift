@@ -401,37 +401,77 @@ struct SeriesGroupGridView: View {
         ScrollView {
             if vm.seriesGroups.isEmpty {
                 emptyState
-            } else {
+            } else if folderGroupBuckets.count <= 1 {
+                // The common case (1-3 level folder layout, no in-between grouping folder) --
+                // render exactly as before, no header.
                 LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
-                    ForEach(vm.seriesGroups) { sg in
-                        let isTarget = dropTargetSeries == sg.series && draggedSeries != sg.series
-                        SeriesGroupCard(group: sg)
-                            .onTapGesture { vm.drillIntoSeries(sg) }
-                            .onDrag {
-                                draggedSeries = sg.series
-                                return NSItemProvider(object: NSString(string: sg.series))
-                            }
-                            .onDrop(of: [.plainText],
-                                    isTargeted: Binding(
-                                        get: { isTarget },
-                                        set: { active in dropTargetSeries = active ? sg.series : nil }
-                                    )) { _, _ in
-                                guard let from = draggedSeries else { return false }
-                                vm.moveSeriesGroup(fromSeries: from, toSeries: sg.series)
-                                draggedSeries = nil; dropTargetSeries = nil
-                                return true
-                            }
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Design.cardCorner + 2)
-                                    .stroke(Design.brandGold, lineWidth: 2.5)
-                                    .opacity(isTarget ? 1 : 0)
-                                    .allowsHitTesting(false)
-                            )
-                    }
+                    ForEach(vm.seriesGroups) { sg in seriesCard(sg) }
                 }
                 .padding(Design.gridSpacing)
+            } else {
+                // A real on-disk folder sits between this Character and some of its series (e.g.
+                // "Batman (Modern)") -- surface it as a section header instead of silently
+                // discarding it, so that grouping the user built on disk actually shows up here.
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    ForEach(folderGroupBuckets, id: \.label) { bucket in
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(bucket.label)
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, Design.gridSpacing)
+                            LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
+                                ForEach(bucket.groups) { sg in seriesCard(sg) }
+                            }
+                            .padding(.horizontal, Design.gridSpacing)
+                        }
+                    }
+                }
+                .padding(.vertical, Design.gridSpacing)
             }
         }
+    }
+
+    @ViewBuilder
+    private func seriesCard(_ sg: DatabaseManager.SeriesGroup) -> some View {
+        let isTarget = dropTargetSeries == sg.series && draggedSeries != sg.series
+        SeriesGroupCard(group: sg)
+            .onTapGesture { vm.drillIntoSeries(sg) }
+            .onDrag {
+                draggedSeries = sg.series
+                return NSItemProvider(object: NSString(string: sg.series))
+            }
+            .onDrop(of: [.plainText],
+                    isTargeted: Binding(
+                        get: { isTarget },
+                        set: { active in dropTargetSeries = active ? sg.series : nil }
+                    )) { _, _ in
+                guard let from = draggedSeries else { return false }
+                vm.moveSeriesGroup(fromSeries: from, toSeries: sg.series)
+                draggedSeries = nil; dropTargetSeries = nil
+                return true
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: Design.cardCorner + 2)
+                    .stroke(Design.brandGold, lineWidth: 2.5)
+                    .opacity(isTarget ? 1 : 0)
+                    .allowsHitTesting(false)
+            )
+    }
+
+    /// Buckets `vm.seriesGroups` by their on-disk folder group, preserving each series' existing
+    /// relative order (manual reorder / series_order) both within and across buckets. A single
+    /// bucket means no meaningful in-between folder exists anywhere in this character -- callers
+    /// should render flat with no header in that case, matching every library that's just 1-3
+    /// folder levels deep.
+    private var folderGroupBuckets: [(label: String, groups: [DatabaseManager.SeriesGroup])] {
+        var order: [String] = []
+        var buckets: [String: [DatabaseManager.SeriesGroup]] = [:]
+        for sg in vm.seriesGroups {
+            let label = (sg.folderGroup?.isEmpty == false) ? sg.folderGroup! : "Other"
+            if buckets[label] == nil { order.append(label) }
+            buckets[label, default: []].append(sg)
+        }
+        return order.map { (label: $0, groups: buckets[$0] ?? []) }
     }
 
     private var emptyState: some View {

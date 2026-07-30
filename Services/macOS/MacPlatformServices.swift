@@ -38,6 +38,16 @@ struct MacFileService: FileServiceProtocol {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    func moveToTrash(_ url: URL) -> URL? {
+        var resultingURL: NSURL?
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+            return resultingURL as URL?
+        } catch {
+            return nil
+        }
+    }
+
     func shareFile(_ url: URL) {}
 }
 

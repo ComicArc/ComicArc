@@ -18,6 +18,11 @@ protocol FileServiceProtocol {
     func pickSaveDestination(filename: String, completion: @escaping (URL?) -> Void)
     func revealInFinder(_ url: URL)
 
+    /// Moves a file to the system Trash (not a permanent delete) and returns the resulting
+    /// location within the Trash, if it succeeded -- callers can use that URL to move the file
+    /// back as part of an undo. Returns nil if trashing isn't supported or failed.
+    func moveToTrash(_ url: URL) -> URL?
+
     func shareFile(_ url: URL)
 }
 
@@ -42,6 +47,7 @@ struct NoOpFileService: FileServiceProtocol {
     func pickFolder(completion: @escaping (URL?) -> Void) { completion(nil) }
     func pickSaveDestination(filename: String, completion: @escaping (URL?) -> Void) { completion(nil) }
     func revealInFinder(_ url: URL) {}
+    func moveToTrash(_ url: URL) -> URL? { nil }
     func shareFile(_ url: URL) {}
 }
 
