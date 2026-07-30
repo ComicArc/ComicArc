@@ -956,7 +956,7 @@ final class ReadingOrderEngineDatabaseTests {
                           childPublisher: "Marvel", childSeries: "ASM (Modern)", childVolume: "1999")
 
         let renamed = try #require(db.allComics(series: "ASM (1963)", sortOrder: .manual).first)
-        db.batchUpdateFolderMeta([(id: renamed.id, pub: nil, char: nil, ser: "ASM (Classic)", title: renamed.title, issueNumber: nil, year: nil)])
+        db.batchUpdateFolderMeta([(id: renamed.id, pub: nil, char: nil, ser: "ASM (Classic)", title: renamed.title, issueNumber: nil, year: nil, group: nil)])
 
         let link = try #require(db.seriesLinks().first)
         #expect(link.parentSeries == "ASM (Classic)", "a folder-rename-driven metadata update must keep series_links in sync, not orphan it")
@@ -968,7 +968,7 @@ final class ReadingOrderEngineDatabaseTests {
         let comic = try #require(db.allComics(series: "ASM (Modern)", sortOrder: .manual).first)
         #expect(comic.year == nil)
 
-        db.batchUpdateFolderMeta([(id: comic.id, pub: nil, char: nil, ser: nil, title: comic.title, issueNumber: nil, year: 2014)])
+        db.batchUpdateFolderMeta([(id: comic.id, pub: nil, char: nil, ser: nil, title: comic.title, issueNumber: nil, year: 2014, group: nil)])
 
         let updated = try #require(db.allComics(series: "ASM (Modern)", sortOrder: .manual).first)
         #expect(updated.year == 2014)
@@ -978,7 +978,7 @@ final class ReadingOrderEngineDatabaseTests {
         try insertComic(series: "ASM (Modern)", issue: "1", title: "ASM (Modern) #1", year: 1998)
         let comic = try #require(db.allComics(series: "ASM (Modern)", sortOrder: .manual).first)
 
-        db.batchUpdateFolderMeta([(id: comic.id, pub: nil, char: nil, ser: nil, title: comic.title, issueNumber: nil, year: 2014)])
+        db.batchUpdateFolderMeta([(id: comic.id, pub: nil, char: nil, ser: nil, title: comic.title, issueNumber: nil, year: 2014, group: nil)])
 
         let updated = try #require(db.allComics(series: "ASM (Modern)", sortOrder: .manual).first)
         #expect(updated.year == 1998, "a real existing year (e.g. from ComicInfo.xml) must never be overwritten by a filename guess")

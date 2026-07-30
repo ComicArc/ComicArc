@@ -549,6 +549,21 @@ final class DatabaseManager: @unchecked Sendable {
         exec("ALTER TABLE comics ADD COLUMN folder_series TEXT")
         exec("ALTER TABLE comics ADD COLUMN folder_publisher TEXT")
 
+        // Whatever folder(s) sit between the Character folder and the Series folder itself (e.g.
+        // "Batman (Modern)" in DC/Batman/Batman (Modern)/Batman (2016)/) -- folderComponents used
+        // to silently discard everything except the first, second, and last folder, so a 4th
+        // level a user built to group volumes/eras existed on disk but was invisible everywhere
+        // in the app. Nil for the (very common) 1-3 level layout, where there's no such folder.
+        exec("ALTER TABLE comics ADD COLUMN folder_group TEXT")
+
+        // Where a deleted comic's file currently sits in the system Trash, if it was moved there
+        // (nil if trashing wasn't supported/failed, in which case the file was simply left alone).
+        // Needed so restoring from the in-app Trash screen (Settings -> View Trash), which can
+        // happen long after the delete's own undo toast has expired or the app's been relaunched,
+        // still knows where to move the file back from -- without this, that restore path would
+        // bring the database row back while the file stayed stranded in the system Trash.
+        exec("ALTER TABLE comics ADD COLUMN trashed_file_path TEXT")
+
         // A "favorite moment" is just a bookmark the user has flagged as worth revisiting on its
         // own -- not a new table, since every favorite moment is already a page-position bookmark
         // (with its own label). Distinct from the resume-reading position, which lives on `comics`.
@@ -1765,6 +1780,7 @@ final class DatabaseManager: @unchecked Sendable {
         var comicInfoPublisher: String? = nil
         var folderSeries: String? = nil
         var folderPublisher: String? = nil
+        var folderGroup: String? = nil
         /// Which raw-fact source actually won for series/publisher/issueNumber above -- used to
         /// label a metadata conflict with where the proposed value came from (e.g. "ComicInfo.xml"
         /// vs "folder"), not persisted on `comics` itself.
@@ -1849,7 +1865,7 @@ final class DatabaseManager: @unchecked Sendable {
                      c.languageIso, c.fileHash, c.coverMonth.map { Int64($0) },
                      c.coverDay.map { Int64($0) }, c.alternateNumber, c.storyArcNumber, c.seriesGroup, c.comicInfoIssueNumber,
                      c.volume, c.format, c.hasComicInfo.map { $0 ? Int64(1) : Int64(0) },
-                     c.comicInfoSeries, c.comicInfoPublisher, c.folderSeries, c.folderPublisher]
+                     c.comicInfoSeries, c.comicInfoPublisher, c.folderSeries, c.folderPublisher, c.folderGroup]
                 }
                 // ON CONFLICT (not OR IGNORE): file_path is UNIQUE, and a soft-deleted comic keeps
                 // its row (deleted_at set, never removed) forever at that same path. If the file
@@ -1870,8 +1886,9 @@ final class DatabaseManager: @unchecked Sendable {
                         (title, file_path, publisher, character, series, issue_number,
                          page_count, writer, penciller, year, story_arc, language_iso, file_hash, cover_month,
                          cover_day, alternate_number, story_arc_number, series_group, comicinfo_issue_number, volume,
-                         format, has_comicinfo, comicinfo_series, comicinfo_publisher, folder_series, folder_publisher)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         format, has_comicinfo, comicinfo_series, comicinfo_publisher, folder_series, folder_publisher,
+                         folder_group)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(file_path) DO UPDATE SET
                         deleted_at = NULL, scan_retry_count = 0,
                         title = CASE WHEN comics.meta_edited = 0 THEN excluded.title ELSE comics.title END,
@@ -1887,7 +1904,8 @@ final class DatabaseManager: @unchecked Sendable {
                         series_group = excluded.series_group, comicinfo_issue_number = excluded.comicinfo_issue_number,
                         volume = excluded.volume, format = excluded.format, has_comicinfo = excluded.has_comicinfo,
                         comicinfo_series = excluded.comicinfo_series, comicinfo_publisher = excluded.comicinfo_publisher,
-                        folder_series = excluded.folder_series, folder_publisher = excluded.folder_publisher
+                        folder_series = excluded.folder_series, folder_publisher = excluded.folder_publisher,
+                        folder_group = excluded.folder_group
                     """, rows: insertRows)
 
                 // A revival (or a metadata refresh) can leave a comic's page_count smaller than
@@ -2835,7 +2853,7 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?)]) {
+    func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?, group: String?)]) {
         queue.sync {
             // Captured before the update -- a folder rename that changes a comic's (publisher,
             // series) would otherwise silently orphan any series_links row still pointing at the
@@ -2873,6 +2891,11 @@ final class DatabaseManager: @unchecked Sendable {
                 if let ser = item.ser {
                     _ = run("UPDATE comics SET series=? WHERE id=? AND meta_edited=0", args: [ser, item.id])
                 }
+                // Purely structural (which folder a file sits in), not user-editable content, but
+                // still gated by meta_edited like every other folder-derived column -- unconditional
+                // so a folder-group that's been removed (file moved up a level) correctly clears
+                // back to NULL instead of keeping a stale value forever.
+                _ = run("UPDATE comics SET folder_group=? WHERE id=? AND meta_edited=0", args: [item.group, item.id])
                 _ = run("UPDATE comics SET title=? WHERE id=? AND meta_edited=0", args: [item.title, item.id])
 
                 if let num = item.issueNumber {
@@ -3040,6 +3063,9 @@ final class DatabaseManager: @unchecked Sendable {
         let started: Int
         let finished: Int
         var coverImagePath: String? = nil
+        /// The folder between the Character folder and this series' own folder, if the library's
+        /// on-disk layout has one (e.g. "Batman (Modern)") -- nil for the common 1-3 level layout.
+        var folderGroup: String? = nil
     }
 
     func characterGroups(publisher: String? = nil, search: String? = nil) -> [CharacterGroup] {
@@ -3121,7 +3147,8 @@ final class DatabaseManager: @unchecked Sendable {
                        COALESCE(sc.comic_id, MIN(c.id)) as cover_id,
                        SUM(CASE WHEN rp.current_page > 0 THEN 1 ELSE 0 END) as started,
                        SUM(CASE WHEN c.page_count > 1 AND rp.current_page >= c.page_count - 1 THEN 1 ELSE 0 END) as finished,
-                       sc.image_path
+                       sc.image_path,
+                       MAX(c.folder_group) as folder_group
                 FROM comics c
                 LEFT JOIN reading_progress rp ON c.id = rp.comic_id
                 LEFT JOIN series_covers sc ON sc.series = c.series AND sc.publisher = c.publisher
@@ -3141,7 +3168,7 @@ final class DatabaseManager: @unchecked Sendable {
                 return SeriesGroup(id: "\(pub):\(ser)", series: ser, publisher: pub,
                                    count: colInt(s, 2), coverId: colInt64(s, 3),
                                    started: colInt(s, 4), finished: colInt(s, 5),
-                                   coverImagePath: colText(s, 6))
+                                   coverImagePath: colText(s, 6), folderGroup: colText(s, 7))
             }
         }
     }
@@ -3248,6 +3275,43 @@ final class DatabaseManager: @unchecked Sendable {
                         args: [groupName, publisher, idx])
             }
             exec("COMMIT")
+        }
+    }
+
+    /// Every manual series/character/publisher reorder and every series' custom cover assignment
+    /// (comic-based only -- a custom *uploaded image* cover isn't included here, since restoring
+    /// one would mean embedding actual image bytes in the backup, not just a reference). All four
+    /// are deliberate user customizations with no automatic way to regenerate them, exactly like
+    /// the manual GCD match above -- previously silently absent from backup/restore.
+    func allSeriesOrderPositions() -> [(groupName: String, publisher: String, series: String, position: Int)] {
+        queue.sync {
+            rows("SELECT group_name, publisher, series, position FROM series_order") { s in
+                (colText(s, 0) ?? "", colText(s, 1) ?? "", colText(s, 2) ?? "", colInt(s, 3))
+            }
+        }
+    }
+
+    func allCharacterOrderPositions() -> [(groupName: String, publisher: String, position: Int)] {
+        queue.sync {
+            rows("SELECT group_name, publisher, position FROM character_order") { s in
+                (colText(s, 0) ?? "", colText(s, 1) ?? "", colInt(s, 2))
+            }
+        }
+    }
+
+    func allPublisherOrderPositions() -> [(publisher: String, position: Int)] {
+        queue.sync {
+            rows("SELECT publisher, position FROM publisher_order") { s in
+                (colText(s, 0) ?? "", colInt(s, 1))
+            }
+        }
+    }
+
+    func allSeriesCoverComicAssignments() -> [(series: String, publisher: String, comicId: Int64)] {
+        queue.sync {
+            rows("SELECT series, publisher, comic_id FROM series_covers WHERE comic_id IS NOT NULL") { s in
+                (colText(s, 0) ?? "", colText(s, 1) ?? "", colInt64(s, 2))
+            }
         }
     }
 
@@ -3526,8 +3590,20 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func restoreComic(id: Int64) {
-        queue.async { _ = self.run("UPDATE comics SET deleted_at = NULL WHERE id = ?", args: [id]) }
+    func setTrashedFilePath(id: Int64, path: String?) {
+        queue.sync { _ = run("UPDATE comics SET trashed_file_path = ? WHERE id = ?", args: [path, id]) }
+    }
+
+    func trashedFilePath(id: Int64) -> String? {
+        queue.sync {
+            let sql = "SELECT trashed_file_path FROM comics WHERE id = ?"
+            var raw: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            bindArgs(stmt, args: [id])
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+            return colText(stmt, 0)
+        }
     }
 
     func restore(_ ids: [Int64]) {

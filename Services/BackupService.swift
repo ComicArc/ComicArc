@@ -83,10 +83,30 @@ enum BackupService {
                         ["file_path": o.filePath, "position": o.position, "reason": o.reason]
                     }
 
+                    // Manual sidebar/grid reordering and a series' custom "use this issue's cover"
+                    // pick -- deliberate user customizations with no automatic way to regenerate
+                    // them, same reasoning as the manual GCD match above. Previously silently
+                    // dropped by both export and import.
+                    let seriesOrderJSON: [[String: Any]] = db.allSeriesOrderPositions().map {
+                        ["group_name": $0.groupName, "publisher": $0.publisher, "series": $0.series, "position": $0.position]
+                    }
+                    let characterOrderJSON: [[String: Any]] = db.allCharacterOrderPositions().map {
+                        ["group_name": $0.groupName, "publisher": $0.publisher, "position": $0.position]
+                    }
+                    let publisherOrderJSON: [String] = db.allPublisherOrderPositions()
+                        .sorted { $0.position < $1.position }
+                        .map { $0.publisher }
+                    let seriesCoversJSON: [[String: Any]] = db.allSeriesCoverComicAssignments().compactMap { assignment in
+                        guard let path = pathById[assignment.comicId] else { return nil }
+                        return ["series": assignment.series, "publisher": assignment.publisher, "file_path": path]
+                    }
+
                     return ["comics": comicsJSON, "runs": runsJSON,
                             "tier_lists": tierListsJSON,
                             "diary": diaryJSON, "series_links": seriesLinksJSON,
-                            "reading_order_overrides": overridesJSON]
+                            "reading_order_overrides": overridesJSON,
+                            "series_order": seriesOrderJSON, "character_order": characterOrderJSON,
+                            "publisher_order": publisherOrderJSON, "series_covers": seriesCoversJSON]
                 }.value
                 do {
                     let data = try JSONSerialization.data(withJSONObject: backup, options: .prettyPrinted)
@@ -244,6 +264,41 @@ enum BackupService {
                                   let position = o["position"] as? Int else { continue }
                             db.setReadingOrderOverride(comicId: comicId, position: position,
                                                         reason: o["reason"] as? String ?? "Manually placed")
+                        }
+                    }
+
+                    if let seriesOrderArr = root?["series_order"] as? [[String: Any]] {
+                        for (groupName, publisher) in Set(seriesOrderArr.compactMap { item -> [String]? in
+                            guard let g = item["group_name"] as? String, let p = item["publisher"] as? String else { return nil }
+                            return [g, p]
+                        }).map({ (groupName: $0[0], publisher: $0[1]) }) {
+                            let ordered = seriesOrderArr
+                                .filter { ($0["group_name"] as? String) == groupName && ($0["publisher"] as? String) == publisher }
+                                .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
+                                .compactMap { $0["series"] as? String }
+                            db.reorderSeriesGroups(groupName: groupName, publisher: publisher, orderedSeries: ordered)
+                        }
+                    }
+
+                    if let characterOrderArr = root?["character_order"] as? [[String: Any]] {
+                        for publisher in Set(characterOrderArr.compactMap { $0["publisher"] as? String }) {
+                            let ordered = characterOrderArr
+                                .filter { ($0["publisher"] as? String) == publisher }
+                                .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
+                                .compactMap { $0["group_name"] as? String }
+                            db.reorderCharacterGroups(publisher: publisher, orderedGroupNames: ordered)
+                        }
+                    }
+
+                    if let publisherOrderArr = root?["publisher_order"] as? [String], !publisherOrderArr.isEmpty {
+                        db.reorderPublishers(orderedPublishers: publisherOrderArr)
+                    }
+
+                    if let seriesCoversArr = root?["series_covers"] as? [[String: Any]] {
+                        for sc in seriesCoversArr {
+                            guard let series = sc["series"] as? String, let publisher = sc["publisher"] as? String,
+                                  let path = sc["file_path"] as? String, let comicId = currentIdByPath[path] else { continue }
+                            db.setSeriesCover(series: series, publisher: publisher, comicId: comicId)
                         }
                     }
                     return nil

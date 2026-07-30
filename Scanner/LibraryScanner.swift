@@ -125,7 +125,7 @@ final class LibraryScanner: @unchecked Sendable {
                 seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
                 volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo,
                 comicInfoSeries: meta.comicInfoSeries, comicInfoPublisher: meta.comicInfoPublisher,
-                folderSeries: meta.folderSeries, folderPublisher: meta.folderPublisher,
+                folderSeries: meta.folderSeries, folderPublisher: meta.folderPublisher, folderGroup: meta.folderGroup,
                 seriesSource: meta.seriesSource, publisherSource: meta.publisherSource,
                 issueNumberSource: meta.issueNumberSource
             ))
@@ -175,12 +175,12 @@ final class LibraryScanner: @unchecked Sendable {
             // the same folder-metadata derivation `reparseAllMeta` uses for a full manual
             // resync, respecting meta_edited the same way, just scoped to only the files that
             // actually moved this scan instead of the whole library.
-            var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?)] = []
+            var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?, group: String?)] = []
             for (id, url) in movedComics {
                 let root = matchingRoot(for: url.path, in: libraryPaths) ?? ""
-                let (pub, char, ser) = folderComponents(url: url, libraryPath: root)
+                let (pub, char, group, ser) = folderComponents(url: url, libraryPath: root)
                 let filename = url.deletingPathExtension().lastPathComponent
-                updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename)))
+                updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename), group))
                 if let ser {
                     let key = "\(pub ?? "Unknown"):\(ser)"
                     touchedRawKeys.insert(key)
@@ -297,7 +297,7 @@ final class LibraryScanner: @unchecked Sendable {
                 seriesGroup: meta.seriesGroup, comicInfoIssueNumber: meta.comicInfoIssueNumber,
                 volume: meta.volume, format: meta.format, hasComicInfo: meta.hasComicInfo,
                 comicInfoSeries: meta.comicInfoSeries, comicInfoPublisher: meta.comicInfoPublisher,
-                folderSeries: meta.folderSeries, folderPublisher: meta.folderPublisher,
+                folderSeries: meta.folderSeries, folderPublisher: meta.folderPublisher, folderGroup: meta.folderGroup,
                 seriesSource: meta.seriesSource, publisherSource: meta.publisherSource,
                 issueNumberSource: meta.issueNumberSource
             )])
@@ -403,6 +403,7 @@ final class LibraryScanner: @unchecked Sendable {
         var comicInfoPublisher: String?
         var folderSeries: String?
         var folderPublisher: String?
+        var folderGroup: String?
         var seriesSource: String
         var publisherSource: String
         var issueNumberSource: String
@@ -460,7 +461,7 @@ final class LibraryScanner: @unchecked Sendable {
     private func parseMeta(url: URL, libraryPath: String) -> ComicMeta {
         let ci = comicInfoXML(url: url)
         let filename = url.deletingPathExtension().lastPathComponent
-        let (folderPublisher, folderCharacter, folderSeries) = folderComponents(url: url, libraryPath: libraryPath)
+        let (folderPublisher, folderCharacter, folderGroup, folderSeries) = folderComponents(url: url, libraryPath: libraryPath)
         let comicInfoSeries = ci["Series"].map(normalizeSeriesName)
         let comicInfoPublisher = ci["Publisher"].map(normalizePublisher)
 
@@ -492,12 +493,18 @@ final class LibraryScanner: @unchecked Sendable {
                          volume: ci["Volume"], format: ci["Format"],
                          hasComicInfo: !ci.isEmpty,
                          comicInfoSeries: comicInfoSeries, comicInfoPublisher: comicInfoPublisher,
-                         folderSeries: folderSeries, folderPublisher: folderPublisher,
+                         folderSeries: folderSeries, folderPublisher: folderPublisher, folderGroup: folderGroup,
                          seriesSource: resolved.seriesSource, publisherSource: resolved.publisherSource,
                          issueNumberSource: resolved.issueNumberSource)
     }
 
-    func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, series: String?) {
+    /// `group` is whatever folder(s) sit between the Character folder and the Series folder
+    /// itself -- e.g. "Batman (Modern)" in `DC/Batman/Batman (Modern)/Batman (2016)/file.cbz`.
+    /// Previously silently discarded (only the first, second, and last folder mattered), so a
+    /// 4th level a user built to group volumes/eras existed on disk but was invisible everywhere
+    /// in the app. Multiple in-between folders (5+ levels deep) are joined with " / ", though
+    /// that's a rare, unusual layout -- nil for the much more common 1-3 level case.
+    func folderComponents(url: URL, libraryPath: String) -> (publisher: String?, character: String?, group: String?, series: String?) {
         let libURL = URL(fileURLWithPath: libraryPath).standardized
 
         let libPrefix = libURL.path.hasSuffix("/") ? libURL.path : libURL.path + "/"
@@ -509,11 +516,14 @@ final class LibraryScanner: @unchecked Sendable {
             cur = cur.deletingLastPathComponent()
         }
         switch folders.count {
-        case 0: return (nil, nil, nil)
-        case 1: return (nil, nil, folders[0])
-        case 2: return (normalizePublisher(folders[0]), nil, folders[1])
+        case 0: return (nil, nil, nil, nil)
+        case 1: return (nil, nil, nil, folders[0])
+        case 2: return (normalizePublisher(folders[0]), nil, nil, folders[1])
+        case 3:
+            return (normalizePublisher(folders[0]), folders[1], nil, folders[2])
         default:
-            return (normalizePublisher(folders[0]), folders[1], folders[folders.count - 1])
+            let group = folders[2..<(folders.count - 1)].joined(separator: " / ")
+            return (normalizePublisher(folders[0]), folders[1], group, folders[folders.count - 1])
         }
     }
 
@@ -531,13 +541,13 @@ final class LibraryScanner: @unchecked Sendable {
 
     func reparseAllMeta(libraryRoots: [String]) {
         let comics = DatabaseManager.shared.allComicPaths()
-        var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?)] = []
+        var updates: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?, group: String?)] = []
         for (id, path) in comics {
             let url = URL(fileURLWithPath: path)
             let root = matchingRoot(for: path, in: libraryRoots) ?? ""
-            let (pub, char, ser) = folderComponents(url: url, libraryPath: root)
+            let (pub, char, group, ser) = folderComponents(url: url, libraryPath: root)
             let filename = url.deletingPathExtension().lastPathComponent
-            updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename)))
+            updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename), group))
         }
         DatabaseManager.shared.batchUpdateFolderMeta(updates)
         DatabaseManager.shared.resetScanRetryCounts()

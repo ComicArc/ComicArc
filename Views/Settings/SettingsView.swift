@@ -537,7 +537,7 @@ struct TrashView: View {
                         }
                         Spacer()
                         Button("Restore") {
-                            vm.restoreComic(id: comic.id)
+                            vm.restoreFromTrash(id: comic.id)
                             trashed.removeAll { $0.id == comic.id }
                         }
                         .buttonStyle(.bordered).controlSize(.small)

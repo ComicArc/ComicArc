@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DuplicatesView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.fileService) private var fileService
     @State private var showResolveSafeConfirm = false
 
     private var filteredGroups: [[Comic]] {
@@ -73,7 +74,7 @@ struct DuplicatesView: View {
                     guard let keeper = recommendedKeeper(in: group) else { return [] }
                     return group.filter { $0.id != keeper.id }
                 }
-                vm.delete(toDelete)
+                vm.delete(toDelete, fileService: fileService)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -137,6 +138,7 @@ private struct DuplicateGroupCard: View {
     let issueNumber: String
     @State var comics: [Comic]
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.fileService) private var fileService
 
     // Computed once (on appear / whenever `comics` actually changes) instead of as a computed
     // property re-evaluated on every access -- `recommendedId` used to be read once per row
@@ -207,7 +209,7 @@ private struct DuplicateGroupCard: View {
             Button("Delete Others", role: .destructive) {
                 guard let keeper = pendingKeepOnly else { return }
                 let others = comics.filter { $0.id != keeper.id }
-                vm.delete(others)
+                vm.delete(others, fileService: fileService)
                 comics = [keeper]
                 pendingKeepOnly = nil
             }

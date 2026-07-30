@@ -183,7 +183,7 @@ struct ComicCard: View {
 
             Divider()
 
-            Button("Delete", role: .destructive) { vm.delete([comic]) }
+            Button("Delete", role: .destructive) { vm.delete([comic], fileService: fileService) }
         }
     }
 

@@ -206,9 +206,10 @@ struct RenameFilesView: View {
             // depend on arbitrary processing order -- whichever file happens to move out of the
             // way first. Moving everything to a unique temp name first guarantees every source
             // path is vacated before any final name is claimed, so ordering can't cause a failure.
-            struct Staged { let comicId: Int64; let tempURL: URL; let finalURL: URL; let oldName: String }
+            struct Staged { let comicId: Int64; let tempURL: URL; let finalURL: URL; let oldName: String; let oldURL: URL }
             var staged: [Staged] = []
             var failedStaging: [RenameFailure] = []
+            var succeededMoves: [RenameMove] = []
 
             for candidate in toRename {
                 let oldURL = URL(fileURLWithPath: candidate.oldPath)
@@ -218,7 +219,7 @@ struct RenameFilesView: View {
                     try fm.moveItem(at: oldURL, to: tempURL)
                     staged.append(Staged(comicId: candidate.comicId, tempURL: tempURL,
                                           finalURL: URL(fileURLWithPath: candidate.newPath),
-                                          oldName: candidate.oldName))
+                                          oldName: candidate.oldName, oldURL: oldURL))
                 } catch {
                     failedStaging.append(RenameFailure(name: candidate.oldName,
                                                         reason: "Couldn't move the file: \(error.localizedDescription)"))
@@ -241,6 +242,8 @@ struct RenameFilesView: View {
                     }
                     try fm.moveItem(at: item.tempURL, to: item.finalURL)
                     DatabaseManager.shared.updateFilePath(id: item.comicId, newPath: item.finalURL.path)
+                    succeededMoves.append(RenameMove(comicId: item.comicId, oldPath: item.oldURL.path,
+                                                      newPath: item.finalURL.path))
                     succeeded += 1
                 } catch {
                     // The final move itself failed (e.g. the computed name is too long for the
@@ -256,7 +259,7 @@ struct RenameFilesView: View {
 
             let finalReport = RenameReport.summarize(
                 succeeded: succeeded, unchanged: unchangedSnapshot, skipped: skippedCount,
-                failedStaging: failedStaging, failedFinal: failedFinal
+                failedStaging: failedStaging, failedFinal: failedFinal, succeededMoves: succeededMoves
             )
             await MainActor.run {
                 isApplying = false
@@ -271,6 +274,11 @@ private struct RenameResultsView: View {
     let report: RenameReport
     let onDone: () -> Void
 
+    @EnvironmentObject var vm: LibraryViewModel
+    @State private var isUndoing = false
+    @State private var undone = false
+    @State private var undoFailures: [RenameFailure] = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Rename Complete").font(.title3.bold())
@@ -280,6 +288,27 @@ private struct RenameResultsView: View {
                 StatPill(label: "Unchanged", count: report.unchanged, color: .secondary)
                 StatPill(label: "Skipped", count: report.skipped, color: .orange)
                 StatPill(label: "Failed", count: report.totalFailed, color: .red)
+            }
+
+            if report.succeeded > 0 {
+                HStack(spacing: 8) {
+                    if undone {
+                        Label("Reverted back to the original names", systemImage: "checkmark.circle.fill")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button(isUndoing ? "Reverting…" : "Undo All \(report.succeeded) Rename\(report.succeeded == 1 ? "" : "s")") {
+                            undoAll()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isUndoing)
+                        Text("Only available now, while this screen is still open.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                if !undoFailures.isEmpty {
+                    Text("\(undoFailures.count) file\(undoFailures.count == 1 ? "" : "s") couldn't be reverted (moved or renamed again since).")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
             }
 
             if report.totalFailed > 0 {
@@ -308,10 +337,46 @@ private struct RenameResultsView: View {
                 Button("Done", action: onDone)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(isUndoing)
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Reverses every successful rename from this batch by moving each file back to its original
+    /// name and pointing the comic's row back at that path -- only offered while this results
+    /// screen is still on-screen (the batch's old/new paths aren't persisted anywhere after that),
+    /// so this is a "changed your mind right now" safety net, not a general history/undo log.
+    private func undoAll() {
+        isUndoing = true
+        let moves = report.succeededMoves
+        Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            var failures: [RenameFailure] = []
+            for move in moves {
+                let currentURL = URL(fileURLWithPath: move.newPath)
+                let originalURL = URL(fileURLWithPath: move.oldPath)
+                guard !fm.fileExists(atPath: originalURL.path) else {
+                    failures.append(RenameFailure(name: currentURL.lastPathComponent,
+                                                   reason: "Something already exists at the original path"))
+                    continue
+                }
+                do {
+                    try fm.moveItem(at: currentURL, to: originalURL)
+                    DatabaseManager.shared.updateFilePath(id: move.comicId, newPath: originalURL.path)
+                } catch {
+                    failures.append(RenameFailure(name: currentURL.lastPathComponent,
+                                                   reason: "Couldn't move it back: \(error.localizedDescription)"))
+                }
+            }
+            await MainActor.run {
+                undoFailures = failures
+                isUndoing = false
+                undone = true
+                vm.reload()
+            }
+        }
     }
 }
 
@@ -350,6 +415,14 @@ struct RenameFailure: Equatable {
     let reason: String
 }
 
+/// One completed rename, kept around only so "Undo All" on the results screen knows what to move
+/// back where -- not persisted anywhere, so it only exists for the lifetime of that screen.
+struct RenameMove: Equatable {
+    let comicId: Int64
+    let oldPath: String
+    let newPath: String
+}
+
 /// Pure summary of a rename batch's outcome -- kept separate from the view so it's directly unit-
 /// testable (Swift Testing, no simulator needed) rather than only exercisable by running the UI.
 struct RenameReport: Equatable {
@@ -358,14 +431,15 @@ struct RenameReport: Equatable {
     let skipped: Int
     let failedStaging: [RenameFailure]
     let failedFinal: [RenameFailure]
+    let succeededMoves: [RenameMove]
 
     var totalFailed: Int { failedStaging.count + failedFinal.count }
 
     static func summarize(
         succeeded: Int, unchanged: Int, skipped: Int,
-        failedStaging: [RenameFailure], failedFinal: [RenameFailure]
+        failedStaging: [RenameFailure], failedFinal: [RenameFailure], succeededMoves: [RenameMove] = []
     ) -> RenameReport {
         RenameReport(succeeded: succeeded, unchanged: unchanged, skipped: skipped,
-                      failedStaging: failedStaging, failedFinal: failedFinal)
+                      failedStaging: failedStaging, failedFinal: failedFinal, succeededMoves: succeededMoves)
     }
 }
