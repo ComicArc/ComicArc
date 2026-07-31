@@ -263,6 +263,8 @@ struct ShelfCard: View {
                     Design.cardBg
                     if let img = thumbnail {
                         Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                            .frame(width: 90, height: 130, alignment: .top)
+                            .clipped()
                     } else {
                         Image(systemName: "book.closed").foregroundStyle(.secondary)
                     }
@@ -664,7 +666,12 @@ private struct GroupCard: View {
         ZStack {
             Design.cardBg
             if let img = thumbnail {
+                // Anchored to the top, not centered -- real comic covers run taller/narrower
+                // than this card's shape, so filling it always crops something, and the top
+                // (title/logo) is almost always more identifying than whatever's at the bottom.
                 Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: Design.groupCardWidth, height: Design.groupCardHeight, alignment: .top)
+                    .clipped()
             } else {
                 LinearGradient(colors: [Design.brandBlue, Design.brandBlue.opacity(0.5)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)

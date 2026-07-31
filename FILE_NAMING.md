@@ -64,24 +64,24 @@ only** — CBR extraction needs a command-line tool (`unar`) that isn't
 available inside the iOS sandbox. `.jpg`/`.png` also work, for
 single-page files.
 
-## Don't have time to rename everything by hand?
+## Messy filenames? There's a cleanup tool
 
-**Settings → Fix Filenames → Rename Files to Match Library…**
+**Settings → Fix Filenames → Clean Up Filenames…**
 
-This scans your whole library, shows you exactly what would change
-(old name → new name) for every file that doesn't already match, and
-lets you deselect anything you don't want touched before applying
-anything. It only ever renames the file *within its existing folder*
-— it never moves anything between folders, so your Publisher/Character/
-Series structure is untouched. Two comics that would end up with the
-same name are automatically skipped and flagged, rather than risking
-one silently overwriting the other.
+This scans your whole library and shows you exactly what would change
+(old name → new name) for every file that has underscores or repeated
+spaces, letting you deselect anything you don't want touched before
+applying anything. It only ever renames the file *within its existing
+folder* — it never moves anything between folders, so your
+Publisher/Character/Series structure is untouched. Two files that would
+end up with the same name are automatically skipped and flagged, rather
+than risking one silently overwriting the other.
 
-The new name is built from whatever ComicArc already has stored for
-that comic (its series and issue number) — so if a comic's series or
-issue number is wrong, fix that first via **Manage Series…** (or a
-comic's own detail page), then run the rename tool to bring the
-filename in line with the correction.
+This is a plain text cleanup of the filename that's already there —
+underscores become spaces, repeated spaces collapse to one — nothing
+more. It doesn't rename files based on series/issue metadata, so it
+can't fix a genuinely wrong filename; it can only tidy up the one you
+already have.
 
 ## Already have ComicInfo.xml metadata embedded in your CBZs?
 

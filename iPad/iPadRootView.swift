@@ -540,6 +540,8 @@ private struct iPadComicTile: View {
                     Image(platformImage: img)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .clipped()
                 } else {
                     Design.cardBg
                         .overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))

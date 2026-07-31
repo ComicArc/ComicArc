@@ -106,7 +106,13 @@ struct ComicCard: View {
         ZStack {
             Design.cardBg
             if let img = thumbnail {
+                // Real comic covers run taller/narrower than this card's shape, so filling it
+                // always crops something -- anchored to the top (not centered) so that crop
+                // always comes off the bottom (usually just art) instead of the top (the
+                // title/logo, almost always the most identifying part of a cover).
                 Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: cardWidth, height: cardHeight, alignment: .top)
+                    .clipped()
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(.secondary)

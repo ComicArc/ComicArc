@@ -45,8 +45,8 @@ struct RenameFilesView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Rename Files to Match Library").font(.title3.bold())
-                Text("Renames comic files on disk to ComicArc's canonical format — \"Series (Edition) #Issue\" — so every file is named consistently no matter its publisher or series. Folders are never moved, only the filename inside each one. A checkmark means the name was verified against the offline comics database, not just guessed from the current filename.")
+                Text("Fix Filenames").font(.title3.bold())
+                Text("Cleans up filenames on disk: underscores become spaces, and repeated spaces collapse to one. It only tidies up what's already there — it doesn't rename files based on their metadata. Folders are never moved, only the filename inside each one.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -89,11 +89,6 @@ struct RenameFilesView: View {
                                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                     .foregroundStyle(candidate.conflict ? .orange : Design.brandGold)
                                     .lineLimit(1)
-                                if candidate.verified {
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .font(.caption2).foregroundStyle(.green)
-                                        .help("Verified against the offline comics database")
-                                }
                             }
                         }
                         Spacer()
@@ -143,30 +138,23 @@ struct RenameFilesView: View {
         Task.detached(priority: .userInitiated) {
             let comics = DatabaseManager.shared.allComics()
 
-            // Resolves one canonical GCD name per (publisher, series) group (so a comic whose own
-            // GCD match failed still gets the same real name as its matched siblings, instead of
-            // being locked into a folder-derived abbreviation forever) and disambiguates the whole
-            // batch up front, so comics that would otherwise reduce to the identical proposed name
-            // (annuals/specials/TPBs with no parsed issue number, or same-numbered issues from a
-            // different volume) get a meaningful disambiguator instead of colliding and getting
-            // silently skipped below. See `ComicFileNaming.idealFilenames` for the full algorithm.
+            // Just a text cleanup of each comic's own current filename (underscores -> spaces,
+            // collapsed whitespace) -- see `ComicFileNaming.cleanedFilename`.
             let idealNames = ComicFileNaming.idealFilenames(for: comics)
 
-            var proposed: [(comic: Comic, newPath: String, verified: Bool)] = []
+            var proposed: [(comic: Comic, newPath: String)] = []
             var unchanged = 0
             for comic in comics {
                 guard let idealName = idealNames[comic.id] else { continue }
                 let url = URL(fileURLWithPath: comic.filePath)
                 guard url.lastPathComponent != idealName else { unchanged += 1; continue }
                 let newPath = url.deletingLastPathComponent().appendingPathComponent(idealName).path
-                proposed.append((comic, newPath, comic.gcdSeriesName != nil))
+                proposed.append((comic, newPath))
             }
 
-            // Any collision remaining here is a genuine cross-series coincidence or a true
-            // same-issue duplicate file -- disambiguatedFilenames already resolved every
-            // same-bare-name collision above, so this is just the existing safety net for
-            // whatever's left, keyed case-insensitively since macOS's default filesystems
-            // (APFS, HFS+) treat "Batman #1.cbz" and "batman #1.cbz" as the same file.
+            // A collision here means two different files in the same folder would clean up to the
+            // identical name -- keyed case-insensitively since macOS's default filesystems (APFS,
+            // HFS+) treat "Batman #1.cbz" and "batman #1.cbz" as the same file.
             var pathCounts: [String: Int] = [:]
             for p in proposed { pathCounts[p.newPath.lowercased(), default: 0] += 1 }
 
@@ -177,8 +165,7 @@ struct RenameFilesView: View {
                     oldPath: p.comic.filePath,
                     newPath: p.newPath,
                     conflict: conflict,
-                    isSelected: !conflict,
-                    verified: p.verified
+                    isSelected: !conflict
                 )
             }
             let finalUnchanged = unchanged
@@ -403,7 +390,6 @@ private struct RenameCandidate: Identifiable {
     let newPath: String
     let conflict: Bool
     var isSelected: Bool
-    let verified: Bool
 
     var id: Int64 { comicId }
     var oldName: String { URL(fileURLWithPath: oldPath).lastPathComponent }

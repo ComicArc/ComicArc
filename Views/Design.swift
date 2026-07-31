@@ -44,7 +44,10 @@ enum Design {
     static let cardWidth:       CGFloat = 172
     static let cardHeight:      CGFloat = 258
     static let groupCardWidth:  CGFloat = 220
-    static let groupCardHeight: CGFloat = 310
+    // Matches cardWidth:cardHeight's exact 2:3 ratio (was 310, a noticeably wider 0.71 ratio than
+    // real comic covers, which run close to 2:3 -- that mismatch alone forced significantly more
+    // of every cover to be cropped away than the individual issue card needed).
+    static let groupCardHeight: CGFloat = 330
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
 

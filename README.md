@@ -63,7 +63,7 @@ The iPad app (`ComicArcPad`, iPadOS 17+) isn't on the App Store yet — it lives
 - **Series Manager**: reorder issues in a series, rename it, or set a custom cover.
 - **Possible Duplicates** flags comics sharing a publisher/series/issue number — the usual sign of a rescan or a re-download under a different filename.
 - **Metadata Conflicts**: if a rescan finds a ComicInfo.xml value that disagrees with what you already have on file, it's flagged for your review, never silently overwritten.
-- **Rename Files**: batch-renames anything that doesn't match a single, consistent filename standard (`Series (Edition) #Issue`), with a one-tap per-file fix available from the issue detail view too.
+- **Rename Files**: cleans up messy filenames in bulk — underscores become spaces, repeated spaces collapse to one — with a one-tap per-file fix available from the issue detail view too. It only tidies up what's already there; it doesn't rename files based on their metadata.
 
 ### Reader
 

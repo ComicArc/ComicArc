@@ -1095,23 +1095,20 @@ final class ReadingOrderEngineDatabaseTests {
         #expect(db.proposedFilename(comicId: comic.id) == nil)
     }
 
-    @Test func proposedFilenameReturnsIdealNameWhenFileIsWrong() throws {
+    @Test func proposedFilenameCleansUpUnderscoresInTheActualFilename() throws {
         try insertComic(series: "Batman", issue: "1", title: "Batman #1")
         let comic = try #require(db.allComics(series: "Batman", sortOrder: .manual).first)
-        _ = db.exec("UPDATE comics SET file_path = '/tmp/wrong-name.cbz' WHERE id = \(comic.id)")
+        _ = db.exec("UPDATE comics SET file_path = '/tmp/Batman_#001.cbz' WHERE id = \(comic.id)")
         #expect(db.proposedFilename(comicId: comic.id) == "Batman #001.cbz")
     }
 
-    @Test("Same real-world shape as the ASM (1963) bug: most of a folder matched GCD under the real series name, but this one issue's own match failed and it kept a folder-derived fallback name -- the proposed filename should still use the sibling-matched canonical name, not this comic's own (wrong) `series` field")
-    func proposedFilenameUsesCanonicalNameFromMatchedSiblings() throws {
+    @Test("proposedFilename only cleans up the file's own actual name -- it no longer reconstructs a name from series/GCD metadata, so a 'wrong' name with nothing to clean (no underscores/extra whitespace) proposes no change at all")
+    func proposedFilenameNeverReconstructsFromMetadata() throws {
         try insertComic(series: "ASM (1963)", issue: "1", title: "The Amazing Spider-Man #1")
-        try insertComic(series: "ASM (1963)", issue: "2", title: "ASM (1963) #2")
-        let comics = db.allComics(series: "ASM (1963)", sortOrder: .manual)
-        let matchedIssue = try #require(comics.first { $0.issueNumber == "1" })
-        let unmatchedIssue = try #require(comics.first { $0.issueNumber == "2" })
-        _ = db.exec("UPDATE comics SET gcd_series_name = 'The Amazing Spider-Man' WHERE id = \(matchedIssue.id)")
-        _ = db.exec("UPDATE comics SET file_path = '/tmp/ASM (1963) #2.cbz' WHERE id = \(unmatchedIssue.id)")
-        #expect(db.proposedFilename(comicId: unmatchedIssue.id) == "The Amazing Spider-Man #002.cbz")
+        let comic = try #require(db.allComics(series: "ASM (1963)", sortOrder: .manual).first)
+        _ = db.exec("UPDATE comics SET gcd_series_name = 'The Amazing Spider-Man' WHERE id = \(comic.id)")
+        _ = db.exec("UPDATE comics SET file_path = '/tmp/completely-different-name.cbz' WHERE id = \(comic.id)")
+        #expect(db.proposedFilename(comicId: comic.id) == nil)
     }
 
     @Test func metadataInspectorInfoDuplicateCountReflectsRealMatches() throws {

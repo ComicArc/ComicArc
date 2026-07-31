@@ -371,6 +371,8 @@ private struct IssueThumbnail: View {
         Group {
             if let img {
                 Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Design.cardBg)

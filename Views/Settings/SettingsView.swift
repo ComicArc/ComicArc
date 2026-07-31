@@ -381,13 +381,13 @@ struct SettingsView: View {
     @ViewBuilder private var fixFilenamesSection: some View {
         Section("Fix Filenames") {
             VStack(alignment: .leading, spacing: 6) {
-                Text("ComicArc reads folders as Publisher / Character / Series. It's flexible about the exact filename on import, but reads most reliably — and renames to — ComicArc's canonical format: \"Series (Edition) #Issue\" (e.g. \"Batman (2016) #001.cbz\"). Files that don't match this can still import, but their series or issue number may come out wrong.")
+                Text("ComicArc reads folders as Publisher / Character / Series. This tool just cleans up messy filenames — underscores become spaces, repeated spaces collapse to one — it doesn't rename files based on their metadata.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, 2)
-            Button("Rename Files to Match Library…") { showRenameFiles = true }
-                .help("Preview and apply a batch rename of files whose names don't match their series/issue number")
+            Button("Clean Up Filenames…") { showRenameFiles = true }
+                .help("Preview and apply a batch cleanup of filenames with underscores or extra whitespace")
         }
     }
 

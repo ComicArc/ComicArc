@@ -297,6 +297,8 @@ private struct TierListCard: View {
     private var coverThumbnail: some View {
         if let path = tierList.coverImagePath, let img = PlatformImage.fromFile(path) {
             Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
         } else {
             ZStack {
                 Design.surfaceBg
@@ -599,6 +601,8 @@ private struct TierListItemCard: View {
             Group {
                 if let img = thumbnail {
                     Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .clipped()
                 } else {
                     Color.secondary.opacity(0.1)
                         .overlay(Image(systemName: "book.closed").font(.caption2).foregroundStyle(.tertiary))

@@ -15,7 +15,7 @@ First public release.
 - Issue detail view: metadata editing, tags, reviews, inline ratings, manual comics-database match correction
 - Series Manager: reorder, rename, or set a custom cover for a series
 - Possible Duplicates and Metadata Conflicts review screens
-- Rename Files: batch and per-file filename correction against a single canonical naming standard
+- Rename Files: batch and per-file filename cleanup (underscores to spaces, collapsed whitespace)
 
 ### Reader
 - macOS: in-window reader, page and continuous-scroll modes, double-page spread, zoom/pan, page scrubber, autoplay, bookmarks, color filters, RTL mode

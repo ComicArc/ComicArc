@@ -94,11 +94,11 @@ struct MetadataInspectorView: View {
                         row("Pages", "\(info.comic.pageCount)")
                         if let proposedName {
                             VStack(alignment: .leading, spacing: 6) {
-                                Label("Filename doesn't match the library", systemImage: "exclamationmark.triangle.fill")
+                                Label("Filename could be cleaned up", systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption.weight(.semibold)).foregroundStyle(.orange)
                                 Text(proposedName)
                                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-                                Button(isRenaming ? "Renaming…" : "Rename File to Match") { renameFile(to: proposedName) }
+                                Button(isRenaming ? "Renaming…" : "Clean Up Filename") { renameFile(to: proposedName) }
                                     .buttonStyle(.bordered).controlSize(.small)
                                     .disabled(isRenaming)
                             }

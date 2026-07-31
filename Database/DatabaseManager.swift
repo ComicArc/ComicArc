@@ -1713,9 +1713,7 @@ final class DatabaseManager: @unchecked Sendable {
         queue.sync {
             guard let target = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL",
                                      args: [comicId], map: comicRow).first else { return nil }
-            let siblings = rows("\(comicSelect) WHERE c.publisher = ? AND c.series = ? AND c.deleted_at IS NULL",
-                                 args: [target.publisher, target.series], map: comicRow)
-            guard let ideal = ComicFileNaming.idealFilenames(for: siblings)[comicId] else { return nil }
+            guard let ideal = ComicFileNaming.idealFilenames(for: [target])[comicId] else { return nil }
             let currentName = URL(fileURLWithPath: target.filePath).lastPathComponent
             return currentName == ideal ? nil : ideal
         }
