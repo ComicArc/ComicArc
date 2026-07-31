@@ -64,6 +64,8 @@ private struct CoverPickerPageCell: View {
         }
         .buttonStyle(.plain)
         .disabled(image == nil)
+        .accessibilityLabel("Page \(index + 1)")
+        .accessibilityHint("Double-tap to use this page as the cover")
         .task(id: index) {
             // Same rationale as the reader filmstrip: a grid of every page in the comic would
             // otherwise decode full-resolution pages through the shared reading-page cache,

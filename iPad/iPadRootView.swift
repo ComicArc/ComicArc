@@ -25,6 +25,10 @@ struct iPadRootView: View {
             .fullScreenCover(item: $vm.readerComic) { comic in
                 iPadReaderView(comic: comic, onClose: { vm.closeReader() })
                     .environmentObject(vm)
+                    // Same fix as the Mac reader: without this, swapping straight from one comic
+                    // to another (e.g. advancing to the next issue) reuses this view's existing
+                    // @State (currentPage, zoom, autoplay) instead of resetting it for the new comic.
+                    .id(comic.id)
             }
 
             if let action = vm.pendingUndo {
@@ -35,6 +39,23 @@ struct iPadRootView: View {
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .allowsHitTesting(true)
+            }
+
+            if let progress = vm.importProgress {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 12) {
+                        ProgressView().controlSize(.small).tint(.white)
+                        Text("Importing \(progress.done) of \(progress.total)…")
+                            .font(.callout).foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 18).padding(.vertical, 12)
+                    .background(.black.opacity(0.92), in: Capsule())
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                    .padding(.bottom, 24)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .allowsHitTesting(false)
             }
 
             if vm.showScanReport {
@@ -54,6 +75,7 @@ struct iPadRootView: View {
             }
         }
         .animation(Design.springGentle, value: vm.pendingUndo?.message)
+        .animation(Design.springGentle, value: vm.importProgress)
         .animation(Design.springGentle, value: vm.showScanReport)
         .animation(Design.springGentle, value: vm.renameCandidateCount)
         .onReceive(NotificationCenter.default.publisher(for: .triggerRenameFiles)) { _ in
@@ -62,6 +84,36 @@ struct iPadRootView: View {
         .sheet(isPresented: $showRenameFilesGlobal) {
             RenameFilesView().environmentObject(vm)
         }
+        .alert(
+            "Import Complete",
+            isPresented: Binding(
+                get: { vm.lastImportSummary != nil },
+                set: { if !$0 { vm.lastImportSummary = nil } }
+            ),
+            presenting: vm.lastImportSummary
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { summary in
+            Text(iPadImportSummaryMessage(summary))
+        }
+        // See the matching comment on Mac's ContentView -- most of this app's text uses fixed-
+        // size fonts rather than semantic text styles, so a full Dynamic Type migration is a
+        // larger change than this pass can safely make. Capping the range keeps a moderately
+        // larger text preference usable without the most extreme accessibility sizes breaking
+        // this app's fixed-width grids.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    private func iPadImportSummaryMessage(_ summary: LibraryViewModel.ImportSummary) -> String {
+        var parts: [String] = []
+        if summary.added > 0 { parts.append("\(summary.added) imported") }
+        if summary.skipped > 0 { parts.append("\(summary.skipped) already in your library") }
+        if !summary.failures.isEmpty {
+            let names = summary.failures.prefix(3).map { "\($0.name) (\($0.reason))" }.joined(separator: ", ")
+            let more = summary.failures.count > 3 ? ", and \(summary.failures.count - 3) more" : ""
+            parts.append("\(summary.failures.count) failed: \(names)\(more)")
+        }
+        return parts.isEmpty ? "Nothing to import." : parts.joined(separator: ". ") + "."
     }
 
     private var iPadScanReportBanner: some View {
@@ -315,6 +367,49 @@ private struct iPadSidebar: View {
     }
 }
 
+private struct iPadReadNextShelf: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("READ NEXT")
+                    .font(.system(size: 13, weight: .black))
+                    .kerning(1.5)
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(vm.readNextSuggestions) { comic in
+                        Button {
+                            vm.openReader(comic)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                MiniComicCard(comic: comic)
+                                    .frame(width: 90, height: 130)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text(comic.title)
+                                    .font(.caption2).lineLimit(2)
+                                    .frame(width: 90, alignment: .leading)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(comic.title)
+                        .accessibilityHint("Double-tap to start reading")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+}
+
 private struct iPadContentColumn: View {
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
@@ -323,8 +418,16 @@ private struct iPadContentColumn: View {
         Group {
             switch vm.destination {
             case .library, .continueReading, .favorites, .readingList, .publisher, .tag:
-                iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
-                    .navigationTitle(vm.destination.title)
+                VStack(spacing: 0) {
+                    // Mac shows this same recommendation as an inline shelf on its home grid; iPad's
+                    // library view is a flat grid with no natural "home" section, so it's shown here
+                    // only on the plain .library destination rather than every filtered view.
+                    if case .library = vm.destination, !vm.readNextSuggestions.isEmpty {
+                        iPadReadNextShelf()
+                    }
+                    iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
+                }
+                .navigationTitle(vm.destination.title)
             case .stats:
                 StatsView().environmentObject(vm)
                     .navigationTitle("Statistics")
@@ -378,6 +481,9 @@ private struct iPadContentColumn: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 iPadImportButton()
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                FilterPicker()
             }
         }
     }
@@ -740,6 +846,8 @@ struct iPadSettingsView: View {
     @State private var showClearLibraryConfirm = false
     @State private var showRerunOnboardingConfirm = false
     @State private var showRenameFiles  = false
+    @State private var folderToRemove: String?
+    @State private var folderToRemoveComicCount = 0
     @State private var cacheCleared     = false
     @State private var comicCount       = 0
     @State private var backupErrorMessage: String?
@@ -890,7 +998,10 @@ struct iPadSettingsView: View {
                         HStack {
                             Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "folder")
                             Spacer()
-                            Button(role: .destructive) { vm.removeLibraryFolder(path) } label: {
+                            Button(role: .destructive) {
+                                folderToRemoveComicCount = vm.comicCount(underFolder: path)
+                                folderToRemove = path
+                            } label: {
                                 Image(systemName: "minus.circle.fill")
                             }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -1073,6 +1184,23 @@ struct iPadSettingsView: View {
         }
         .alert("Cache cleared", isPresented: $cacheCleared) {
             Button("OK", role: .cancel) {}
+        }
+        .confirmationDialog(
+            folderToRemoveComicCount > 0
+                ? "Remove this folder and its \(folderToRemoveComicCount) comic\(folderToRemoveComicCount == 1 ? "" : "s")?"
+                : "Remove this folder?",
+            isPresented: Binding(get: { folderToRemove != nil }, set: { if !$0 { folderToRemove = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let path = folderToRemove { vm.removeLibraryFolder(path) }
+                folderToRemove = nil
+            }
+            Button("Cancel", role: .cancel) { folderToRemove = nil }
+        } message: {
+            Text(folderToRemoveComicCount > 0
+                 ? "The files themselves are untouched on disk. Their entries move to Trash and can be restored from there."
+                 : "ComicArc will stop scanning this folder.")
         }
         .confirmationDialog("Clear Library?", isPresented: $showClearLibraryConfirm, titleVisibility: .visible) {
             Button("Clear Library", role: .destructive) { vm.clearLibrary() }

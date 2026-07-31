@@ -53,6 +53,8 @@ struct AllTagsView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityHint("Double-tap to browse comics tagged \(entry.tag.name)")
                                 .contextMenu {
                                     Button("Rename…") {
                                         renameText = entry.tag.name

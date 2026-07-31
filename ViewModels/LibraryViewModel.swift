@@ -73,6 +73,11 @@ final class LibraryViewModel: ObservableObject {
     @Published var publishers:        [String] = []
     @Published var allTags:           [(tag: Tag, count: Int)] = []
     @Published var inProgressComics:  [Comic] = []
+    // Series the user actively favorites but has fully caught up on -- distinct from
+    // inProgressComics (which only covers books with a page already turned). Previously a
+    // finished favorite series just vanished from the home screen with no nudge toward its
+    // next unread issue.
+    @Published var readNextSuggestions: [Comic] = []
     @Published var destination: AppDestination = .library
     @Published var selectedSeries:    String? = nil
     @Published var searchText:        String = ""
@@ -80,6 +85,12 @@ final class LibraryViewModel: ObservableObject {
         DatabaseManager.SortOrder(rawValue: UserDefaults.standard.string(forKey: "comicSortOrder") ?? "") ?? .manual {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "comicSortOrder") }
     }
+
+    /// `minRatingFilter == 0` means "no minimum" (every rating, including unrated). Both persist
+    /// across navigation the same way sortOrder does, rather than silently resetting -- so
+    /// "show me only what I haven't read" stays on while browsing from series to series.
+    @Published var unreadOnly:      Bool = false { didSet { reload() } }
+    @Published var minRatingFilter: Int  = 0     { didSet { reload() } }
 
     @Published var readingOrderMode: DatabaseManager.ReadingOrderMode = .current {
         didSet {
@@ -97,6 +108,19 @@ final class LibraryViewModel: ObservableObject {
     @Published var showImportWizard:    Bool = false
     @Published var libraryHealthReport: LibraryHealthReport? = nil
     @Published var renameCandidateCount: Int = 0
+
+    struct ImportProgress: Equatable { var done: Int; var total: Int }
+    struct ImportSummary: Equatable {
+        var added: Int
+        var skipped: Int
+        var failures: [(name: String, reason: String)]
+        static func == (lhs: ImportSummary, rhs: ImportSummary) -> Bool {
+            lhs.added == rhs.added && lhs.skipped == rhs.skipped &&
+            lhs.failures.map(\.name) == rhs.failures.map(\.name)
+        }
+    }
+    @Published var importProgress: ImportProgress? = nil
+    @Published var lastImportSummary: ImportSummary? = nil
     @Published var renameSuggestionDismissed: Bool = false
     private var scanReportDismissTask: DispatchWorkItem?
 
@@ -230,7 +254,25 @@ final class LibraryViewModel: ObservableObject {
         scan()
     }
 
+    /// Comics currently living under `path` -- callers can show this count in a confirmation
+    /// before actually removing the folder, since doing so also removes those comics from the
+    /// library (see `removeLibraryFolder`).
+    func comicCount(underFolder path: String) -> Int {
+        db.comicIds(underFolder: path).count
+    }
+
     func removeLibraryFolder(_ path: String) {
+        // Previously left every comic from this folder in the library forever, pointing at a
+        // path ComicArc no longer manages at all -- soft-deleting them (reason "folder_removed",
+        // distinct from a genuinely missing file) means they land in the same Trash/restore flow
+        // as everything else instead of becoming permanent, untouchable ghosts.
+        let orphaned = db.comicIds(underFolder: path)
+        if !orphaned.isEmpty {
+            db.softDelete(orphaned, reason: "folder_removed")
+            orphaned.forEach { ThumbnailCache.shared.evict($0) }
+            removeFromSpotlight(orphaned)
+        }
+
         var paths = libraryPaths
         paths.removeAll { $0 == path }
         libraryPaths = paths
@@ -240,6 +282,7 @@ final class LibraryViewModel: ObservableObject {
         removeLibraryFolderBookmark(path: path)
         #endif
         restartWatcher()
+        reload()
     }
 
     private init() {
@@ -335,7 +378,9 @@ final class LibraryViewModel: ObservableObject {
         let gen = reloadGeneration
         let section = selectedSection
 
-        if section == .library && useGroupedView && selectedSeries == nil && activeTag == nil && searchText.isEmpty {
+        let hasActiveFilter = unreadOnly || minRatingFilter > 0
+        if section == .library && useGroupedView && selectedSeries == nil && activeTag == nil
+            && searchText.isEmpty && !hasActiveFilter {
             loadCharacterGroups()
             return
         }
@@ -346,6 +391,8 @@ final class LibraryViewModel: ObservableObject {
         let q     = searchText.isEmpty ? nil : searchText
         let sort  = sortOrder
         let group = selectedGroup
+        let unread = unreadOnly
+        let minRating = minRatingFilter > 0 ? minRatingFilter : nil
 
         Task.detached(priority: .userInitiated) { [db] in
             let pubs = db.publishers()
@@ -365,15 +412,18 @@ final class LibraryViewModel: ObservableObject {
             case .continueReading:
                 loaded = db.inProgress()
             case .favorites:
-                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, favoritesOnly: true)
+                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, favoritesOnly: true,
+                                      unreadOnly: unread, minRating: minRating)
             case .readingList:
-                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, readingListOnly: true)
+                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, readingListOnly: true,
+                                      unreadOnly: unread, minRating: minRating)
             default:
                 let character    = group?.character
                 let nullCharOnly = group != nil && character == nil
                 loaded = db.allComics(publisher: pub, character: character, series: ser,
                                       search: q, sortOrder: sort,
-                                      nullCharacterOnly: nullCharOnly, tag: tag)
+                                      nullCharacterOnly: nullCharOnly, tag: tag,
+                                      unreadOnly: unread, minRating: minRating)
             }
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
@@ -395,16 +445,36 @@ final class LibraryViewModel: ObservableObject {
             let pubs   = db.publishers()
             let tags   = db.allTags()
             let shelf  = db.inProgress(limit: 8)
+            let readNext = Self.computeReadNextSuggestions(db: db)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
-                self.characterGroups   = groups
-                self.publishers        = pubs
-                self.allTags           = tags
-                self.inProgressComics  = shelf
-                self.comics            = []
-                self.isLoading         = false
+                self.characterGroups     = groups
+                self.publishers          = pubs
+                self.allTags             = tags
+                self.inProgressComics    = shelf
+                self.readNextSuggestions = readNext
+                self.comics              = []
+                self.isLoading           = false
             }
         }
+    }
+
+    /// For each series with at least one favorited comic, if the furthest-along favorited issue
+    /// in that series is fully finished, look up the next issue in reading order and suggest it
+    /// if it's still unread. Bounded by favorite count (typically small), so this is cheap enough
+    /// to run on every reload rather than needing its own cached/invalidated state.
+    nonisolated private static func computeReadNextSuggestions(db: DatabaseManager) -> [Comic] {
+        let favorites = db.allComics(favoritesOnly: true)
+        let bySeries = Dictionary(grouping: favorites) { "\($0.publisher)|\($0.series)" }
+        var suggestions: [Comic] = []
+        for (_, group) in bySeries {
+            guard let lastFinished = group.filter(\.isFinished).max(by: {
+                ($0.readingOrderPosition ?? $0.position) < ($1.readingOrderPosition ?? $1.position)
+            }) else { continue }
+            guard let next = db.nextComic(after: lastFinished), next.progress == 0 else { continue }
+            suggestions.append(next)
+        }
+        return Array(suggestions.prefix(12))
     }
 
     func select(_ item: AppDestination) {
@@ -527,8 +597,20 @@ final class LibraryViewModel: ObservableObject {
         refreshDuplicates()
     }
 
-    func bulkDelete() {
+    /// Same trash-and-undo behavior as `delete(_:fileService:)` (single/multi-comic delete from a
+    /// card or Duplicates), just reached from bulk-select instead -- previously this path never
+    /// moved files to Trash at all, only `delete(_:)` did, so bulk-deleting left every file
+    /// untouched on disk while the per-comic delete button genuinely trashed it.
+    func bulkDelete(fileService: (any FileServiceProtocol)? = nil) {
         let ids = Array(selectedComicIds)
+        let toDelete = comics.filter { selectedComicIds.contains($0.id) }
+        if let fileService {
+            for c in toDelete {
+                if let trashedURL = fileService.moveToTrash(URL(fileURLWithPath: c.filePath)) {
+                    db.setTrashedFilePath(id: c.id, path: trashedURL.path)
+                }
+            }
+        }
         db.softDelete(ids)
         ids.forEach { ThumbnailCache.shared.evict($0) }
         removeFromSpotlight(ids)
@@ -538,9 +620,9 @@ final class LibraryViewModel: ObservableObject {
         refreshDuplicates()
 
         offerUndo("\(ids.count) comic\(ids.count == 1 ? "" : "s") deleted") { [weak self] in
-            self?.db.restore(ids)
-            self?.reload()
-            self?.indexSpotlight()
+            guard let self else { return }
+            for id in ids { self.restoreFromTrash(id: id) }
+            self.indexSpotlight()
         }
     }
 
@@ -563,6 +645,10 @@ final class LibraryViewModel: ObservableObject {
                     self.presentScanReport(state)
                     self.refreshLibraryHealth()
                     self.refreshRenameCandidates()
+                    // The corruption-recovery safety net (DatabaseManager.recoverIfCorrupted)
+                    // previously only had a backup from launch time -- a scan is exactly the kind
+                    // of session that adds a lot of new, otherwise-unbacked-up data.
+                    if state.added > 0 { Task.detached(priority: .utility) { self.db.refreshBackup() } }
                 }
             }
         }
@@ -570,14 +656,41 @@ final class LibraryViewModel: ObservableObject {
 
     func importFiles(_ urls: [URL]) {
         let roots = libraryPaths
+        importProgress = ImportProgress(done: 0, total: urls.count)
         Task.detached(priority: .utility) { [weak self] in
-            for url in urls { LibraryScanner.shared.addSingle(url: url, libraryRoots: roots) }
+            var added = 0, skipped = 0
+            var failures: [(name: String, reason: String)] = []
+            for (i, url) in urls.enumerated() {
+                switch LibraryScanner.shared.addSingle(url: url, libraryRoots: roots) {
+                case .added:
+                    added += 1
+                case .movedOrRenamed, .alreadyInLibrary:
+                    skipped += 1
+                case .fileNotFound:
+                    failures.append((url.lastPathComponent, "File no longer exists"))
+                case .unsupportedFormat:
+                    failures.append((url.lastPathComponent, "Unsupported file type"))
+                }
+                let done = i + 1
+                await MainActor.run { self?.importProgress = ImportProgress(done: done, total: urls.count) }
+            }
             await self?.reload()
             await self?.refreshDuplicates()
 
             let paths = urls.map(\.path)
             let newComics = DatabaseManager.shared.comics(withPaths: paths)
             if !newComics.isEmpty { ThumbnailCache.shared.prewarm(comics: newComics) }
+
+            await MainActor.run {
+                self?.importProgress = nil
+                // A single successful, ordinary import with nothing to flag isn't worth
+                // interrupting the user over -- only surface the summary when there's something
+                // to report (any failure) or the batch was large enough that silent completion
+                // would leave real doubt about whether it actually worked.
+                if !failures.isEmpty || urls.count > 1 {
+                    self?.lastImportSummary = ImportSummary(added: added, skipped: skipped, failures: failures)
+                }
+            }
         }
     }
 
@@ -1178,6 +1291,17 @@ final class LibraryViewModel: ObservableObject {
                 Self.spotlightLogger.error("Failed to index \(items.count) item(s) in Spotlight: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Handles a Spotlight search result tap. `CSSearchableItemActionType` activities carry the
+    /// tapped item's uniqueIdentifier (the same "comicarc-<id>" string indexSpotlight() assigned)
+    /// in userInfo -- previously nothing consumed this, so tapping a search result just launched
+    /// the app to whatever screen was already open instead of the comic that was searched for.
+    func openComicFromSpotlight(_ activity: NSUserActivity) {
+        guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+              identifier.hasPrefix("comicarc-"),
+              let id = Int64(identifier.dropFirst("comicarc-".count)) else { return }
+        openReader(id: id)
     }
 
     private func presentScanReport(_ state: LibraryScanner.ScanState) {

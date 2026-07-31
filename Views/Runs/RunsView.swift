@@ -309,6 +309,7 @@ struct RunDetailView: View {
     let run:      Run
     let onDelete: () -> Void
 
+    @Environment(\.fileService) private var fileService
     @State private var currentRun:      Run
     @State private var items:           [RunItem] = []
     @State private var itemsLoading     = true
@@ -317,6 +318,7 @@ struct RunDetailView: View {
     @State private var showReviewSheet  = false
     @State private var reviewText:      String    = ""
     @State private var showEditSheet    = false
+    @State private var exportErrorMessage: String?
 
     init(run: Run, onDelete: @escaping () -> Void) {
         self.run      = run
@@ -417,6 +419,14 @@ struct RunDetailView: View {
         .sheet(isPresented: $showEditSheet) {
             EditRunView(run: $currentRun)
         }
+        .alert("Export Failed", isPresented: Binding(
+            get: { exportErrorMessage != nil },
+            set: { if !$0 { exportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportErrorMessage ?? "")
+        }
     }
 
     private var runPageHeader: some View {
@@ -478,6 +488,18 @@ struct RunDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("Rate & Review")
+
+                    Button {
+                        BackupService.exportCSV(
+                            comics: items.map(\.comic), fileService: fileService,
+                            filename: "\(currentRun.title).csv"
+                        ) { exportErrorMessage = $0 }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Export as CSV")
 
                     Button(role: .destructive) {
                         LibraryViewModel.shared.deleteRunWithUndo(currentRun)

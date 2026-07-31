@@ -109,6 +109,8 @@ struct GCDMatchPickerView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Double-tap to choose this series")
                 }
                 .listStyle(.plain)
             }
@@ -137,6 +139,8 @@ struct GCDMatchPickerView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Double-tap to match this comic to issue #\(issue.number)")
                 }
                 .listStyle(.plain)
             }

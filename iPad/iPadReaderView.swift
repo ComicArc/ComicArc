@@ -24,6 +24,20 @@ struct iPadReaderView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var viewWidth: CGFloat = 0
+    @State private var nextIssue: Comic?
+    @State private var dismissedNextIssuePrompt = false
+
+    // Parity with the Mac reader -- these previously existed only there, leaving the platform
+    // most people actually read on with a noticeably thinner reader.
+    @State private var rtl: Bool
+    @State private var fitModeRaw: String
+    @AppStorage("readerColorFilter") private var colorFilterRaw = ColorFilter.none.rawValue
+    @State private var bookmarks: [Bookmark] = []
+    @State private var isBookmarked = false
+    @State private var showBookmarks = false
+
+    private var fitMode: FitMode { FitMode(rawValue: fitModeRaw) ?? .fitPage }
+    private var colorFilter: ColorFilter { ColorFilter(rawValue: colorFilterRaw) ?? .none }
 
     init(comic: Comic, onClose: @escaping () -> Void) {
         self.comic = comic
@@ -34,9 +48,28 @@ struct iPadReaderView: View {
         _currentPage = State(initialValue: min(max(0, comic.progress), max(0, comic.pageCount - 1)))
         let prefs = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
         _scrollMode = State(initialValue: prefs?.scrollMode ?? UserDefaults.standard.bool(forKey: "scrollMode"))
+        _rtl = State(initialValue: prefs?.rtl ?? UserDefaults.standard.bool(forKey: "readingDirectionRTL"))
+        _fitModeRaw = State(initialValue: prefs?.fitMode ?? UserDefaults.standard.string(forKey: "readerFitMode") ?? FitMode.fitPage.rawValue)
     }
 
     private var pageCount: Int { comic.pageCount }
+
+    private func saveSeriesPrefs() {
+        DatabaseManager.shared.setSeriesReaderPrefs(
+            series: comic.series, publisher: comic.publisher,
+            fitMode: fitModeRaw, rtl: rtl, doubleSpread: false, scrollMode: scrollMode
+        )
+    }
+
+    private func loadBookmarks() {
+        bookmarks = ReadingSessionService.shared.bookmarks(for: comic.id)
+        isBookmarked = bookmarks.contains { $0.page == currentPage }
+    }
+
+    private func toggleBookmark() {
+        isBookmarked = ReadingSessionService.shared.toggleBookmark(comicId: comic.id, page: currentPage)
+        loadBookmarks()
+    }
 
     var body: some View {
         ZStack {
@@ -49,6 +82,16 @@ struct iPadReaderView: View {
             }
 
             overlayControls
+
+            if isOnLastPage, !autoplay, let nextIssue, !dismissedNextIssuePrompt {
+                VStack {
+                    Spacer()
+                    upNextCard(nextIssue)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .background(
             GeometryReader { geo in
@@ -59,7 +102,7 @@ struct iPadReaderView: View {
         )
         .statusBarHidden(!showBars)
         .persistentSystemOverlays(showBars ? .visible : .hidden)
-        .onAppear { scheduleHide() }
+        .onAppear { scheduleHide(); loadNextIssue(); loadBookmarks() }
         .onDisappear {
             saveProgress()
 
@@ -70,29 +113,27 @@ struct iPadReaderView: View {
             if phase != .active { saveProgress() }
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
-        .onChange(of: scrollMode) { _, newValue in
-
-            let existing = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
-            DatabaseManager.shared.setSeriesReaderPrefs(
-                series: comic.series, publisher: comic.publisher,
-                fitMode: existing?.fitMode ?? FitMode.fitPage.rawValue,
-                rtl: existing?.rtl ?? false,
-                doubleSpread: existing?.doubleSpread ?? false,
-                scrollMode: newValue
-            )
-        }
+        .onChange(of: currentPage) { _, _ in loadBookmarks() }
+        .onChange(of: scrollMode) { _, _ in saveSeriesPrefs() }
+        .onChange(of: rtl) { _, _ in saveSeriesPrefs() }
+        .onChange(of: fitModeRaw) { _, _ in saveSeriesPrefs() }
+        .sheet(isPresented: $showBookmarks) { bookmarksSheet }
     }
 
     private var pageReader: some View {
         TabView(selection: $currentPage) {
             ForEach(0..<pageCount, id: \.self) { idx in
-                ReaderPageView(comic: comic, pageIndex: idx)
+                ReaderPageView(comic: comic, pageIndex: idx, fitMode: fitMode)
                     .tag(idx)
                     .scaleEffect(scale)
                     .offset(offset)
+                    .colorEffect(colorFilter)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        // Reverses swipe direction so a right-to-left manga-style series turns pages the way a
+        // reader familiar with that format expects, same intent as the Mac reader's own RTL mode.
+        .environment(\.layoutDirection, rtl ? .rightToLeft : .leftToRight)
         .ignoresSafeArea()
         .simultaneousGesture(tapGesture)
         .gesture(pinchGesture)
@@ -104,6 +145,9 @@ struct iPadReaderView: View {
             // leaves the next pinch/drag starting from the *previous* page's zoomed baseline.
             lastScale = 1; lastOffset = .zero
             scheduleHide()
+            // Previously only saved on backgrounding/disappear -- a crash or force-quit mid-
+            // session could silently roll progress back to wherever the reader was last opened.
+            saveProgress()
         }
     }
 
@@ -111,13 +155,44 @@ struct iPadReaderView: View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 0) {
                 ForEach(0..<pageCount, id: \.self) { idx in
-                    ReaderPageView(comic: comic, pageIndex: idx)
+                    ReaderPageView(comic: comic, pageIndex: idx, fitMode: fitMode)
                         .frame(maxWidth: .infinity)
+                        .colorEffect(colorFilter)
                 }
             }
         }
         .ignoresSafeArea()
         .simultaneousGesture(tapGesture)
+    }
+
+    private var bookmarksSheet: some View {
+        NavigationStack {
+            List {
+                if bookmarks.isEmpty {
+                    Text("No bookmarks yet. Tap the bookmark icon while reading to save a page.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ForEach(bookmarks) { mark in
+                        Button {
+                            currentPage = mark.page
+                            showBookmarks = false
+                        } label: {
+                            HStack {
+                                Text(mark.label.isEmpty ? "Page \(mark.page + 1)" : mark.label)
+                                Spacer()
+                                Text("Page \(mark.page + 1)").foregroundStyle(.secondary).font(.caption)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Bookmarks")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showBookmarks = false }
+                }
+            }
+        }
     }
 
     private var tapGesture: some Gesture {
@@ -235,6 +310,48 @@ struct iPadReaderView: View {
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.8))
                 .monospacedDigit()
+            Button(action: toggleBookmark) {
+                Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                    .font(.title3)
+                    .foregroundStyle(isBookmarked ? Design.brandGold : .white)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel(isBookmarked ? "Remove Bookmark" : "Add Bookmark")
+
+            Menu {
+                Button {
+                    showBookmarks = true
+                } label: {
+                    Label("Bookmarks\(bookmarks.isEmpty ? "" : " (\(bookmarks.count))")", systemImage: "list.bullet")
+                }
+
+                Divider()
+
+                Picker("Fit", selection: $fitModeRaw) {
+                    Label("Fit Page", systemImage: "rectangle.arrowtriangle.2.inward").tag(FitMode.fitPage.rawValue)
+                    Label("Fit Width", systemImage: "arrow.left.and.right").tag(FitMode.fitWidth.rawValue)
+                    Label("Fit Height", systemImage: "arrow.up.and.down").tag(FitMode.fitHeight.rawValue)
+                    Label("Original Size", systemImage: "square.dashed").tag(FitMode.original.rawValue)
+                }
+
+                Picker("Color Filter", selection: $colorFilterRaw) {
+                    Label("None", systemImage: "circle.slash").tag(ColorFilter.none.rawValue)
+                    Label("Night", systemImage: "moon.fill").tag(ColorFilter.night.rawValue)
+                    Label("Sepia", systemImage: "sun.max.fill").tag(ColorFilter.sepia.rawValue)
+                    Label("Grayscale", systemImage: "circle.lefthalf.filled").tag(ColorFilter.grayscale.rawValue)
+                }
+
+                Toggle(isOn: $rtl) {
+                    Label("Right to Left", systemImage: "arrow.left.arrow.right")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Reader Settings")
+
             Button(action: { withAnimation { showFilmstrip.toggle() } }) {
                 Image(systemName: "square.grid.3x3.fill")
                     .font(.title3)
@@ -311,6 +428,60 @@ struct iPadReaderView: View {
         ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
     }
 
+    private var isOnLastPage: Bool { pageCount > 0 && currentPage >= pageCount - 1 }
+
+    /// Looks up the next issue in this series (if any) and warms its cover + first couple pages
+    /// in the background, so the "Up Next" card and autoplay's seamless continuation both have
+    /// something ready to act on instead of a cold load.
+    private func loadNextIssue() {
+        let current = comic
+        Task.detached(priority: .userInitiated) {
+            guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
+            ThumbnailCache.shared.thumbnail(for: next) { _ in }
+            PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+            await MainActor.run { nextIssue = next }
+        }
+    }
+
+    private func advanceToNextIssue() {
+        guard let nextIssue else { return }
+        saveProgress()
+        vm.openReader(nextIssue)
+    }
+
+    private func upNextCard(_ next: Comic) -> some View {
+        HStack(spacing: 12) {
+            MiniComicCard(comic: next)
+                .frame(width: 46, height: 69)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Up Next").font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text(next.title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("Continue") { advanceToNextIssue() }
+                .buttonStyle(GoldCapsuleStyle())
+
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { dismissedNextIssuePrompt = true }
+            } label: {
+                Image(systemName: "xmark").font(.caption).foregroundStyle(.white.opacity(0.6))
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Up next: \(next.title)")
+        .accessibilityHint("Double-tap to continue reading")
+        .accessibilityAction { advanceToNextIssue() }
+    }
+
     private func runAutoplay() async {
         guard autoplay, !scrollMode else { return }
         let steps = 60
@@ -327,8 +498,13 @@ struct iPadReaderView: View {
         guard autoplay, !Task.isCancelled else { await MainActor.run { countdownProgress = 0 }; return }
         await MainActor.run {
             countdownProgress = 0
-            if currentPage < pageCount - 1 { currentPage += 1 }
-            else { autoplay = false }
+            if currentPage < pageCount - 1 {
+                currentPage += 1
+            } else if nextIssue != nil {
+                advanceToNextIssue()
+            } else {
+                autoplay = false
+            }
         }
     }
 }
@@ -336,20 +512,56 @@ struct iPadReaderView: View {
 private struct ReaderPageView: View {
     let comic: Comic
     let pageIndex: Int
+    var fitMode: FitMode = .fitPage
     @State private var image: PlatformImage?
     @State private var loadFailed = false
+    @State private var retryToken = UUID()
+
+    @ViewBuilder
+    private func fittedImage(_ img: PlatformImage, size: CGSize) -> some View {
+        let imgSize = img.size
+        switch fitMode {
+        case .fitPage:
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                .frame(width: size.width, height: size.height)
+        case .fitWidth:
+            let h = imgSize.height > 0 ? (size.width * imgSize.height / imgSize.width) : size.height
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: size.width, height: h)
+        case .fitHeight:
+            let w = imgSize.width > 0 ? (size.height * imgSize.width / imgSize.height) : size.width
+            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: w, height: size.height)
+        case .original:
+            ScrollView([.horizontal, .vertical]) {
+                Image(platformImage: img).frame(width: imgSize.width, height: imgSize.height)
+            }
+            .frame(width: size.width, height: size.height)
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
             Group {
                 if let img = image {
-                    Image(platformImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: geo.size.width, height: geo.size.height)
+                    fittedImage(img, size: geo.size)
                 } else if loadFailed {
+                    // A real dead end before this: no explanation, no way forward except
+                    // backing out of the reader entirely for one bad page.
                     Color.black
-                        .overlay(Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.secondary))
+                        .overlay(
+                            VStack(spacing: 12) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.largeTitle).foregroundStyle(.secondary)
+                                Text("Couldn't load page \(pageIndex + 1)")
+                                    .font(.callout).foregroundStyle(.secondary)
+                                Button("Retry") {
+                                    loadFailed = false
+                                    retryToken = UUID()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        )
                         .frame(width: geo.size.width, height: geo.size.height)
                 } else {
                     Color.black
@@ -358,7 +570,7 @@ private struct ReaderPageView: View {
                 }
             }
         }
-        .task {
+        .task(id: retryToken) {
             PageCache.shared.load(comic: comic, page: pageIndex) { img in
                 if let img { image = img } else { loadFailed = true }
             }

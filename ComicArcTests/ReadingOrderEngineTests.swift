@@ -949,6 +949,23 @@ final class ReadingOrderEngineDatabaseTests {
         #expect(link.parentSeries == "Old Parent", "renaming the child must not affect the parent side")
     }
 
+    @Test func renameSeriesMigratesCustomCoverReaderPrefsAndManualOrder() throws {
+        let comicId = try insertComic(series: "Old Name", publisher: "DC", issue: "1", title: "Old Name #1")
+        db.setSeriesCover(series: "Old Name", publisher: "DC", comicId: comicId)
+        db.setSeriesReaderPrefs(series: "Old Name", publisher: "DC", fitMode: "fitWidth", rtl: true,
+                                doubleSpread: true, scrollMode: false)
+        db.reorderSeriesGroups(groupName: "Batman", publisher: "DC", orderedSeries: ["Old Name", "Something Else"])
+
+        db.renameSeries(oldName: "Old Name", publisher: "DC", newName: "New Name")
+
+        #expect(db.currentSeriesCover(series: "New Name", publisher: "DC") == comicId)
+        #expect(db.currentSeriesCover(series: "Old Name", publisher: "DC") == nil)
+        let prefs = db.seriesReaderPrefs(series: "New Name", publisher: "DC")
+        #expect(prefs?.fitMode == "fitWidth")
+        #expect(prefs?.rtl == true)
+        #expect(db.seriesReaderPrefs(series: "Old Name", publisher: "DC") == nil)
+    }
+
     @Test func batchUpdateFolderMetaKeepsSeriesLinksInSyncAfterFolderRename() throws {
         try insertComic(series: "ASM (1963)", issue: "1", title: "ASM (1963) #1", volume: "1963")
         try insertComic(series: "ASM (Modern)", issue: "1", title: "ASM (Modern) #1", volume: "1999")
@@ -1117,5 +1134,109 @@ final class ReadingOrderEngineDatabaseTests {
         let comics = db.allComics(series: "Dup", sortOrder: .manual)
         let info = db.metadataInspectorInfo(comicId: try #require(comics.first).id)
         #expect(info?.duplicateMatchCount == 1)
+    }
+
+    @Test func nextComicReturnsTheFollowingIssueInReadingOrder() throws {
+        for n in 1...3 { try insertComic(series: "Batman", issue: "\(n)", title: "Batman #\(n)") }
+        let comics = db.allComics(series: "Batman", sortOrder: .manual)
+        let issue1 = try #require(comics.first { $0.issueNumber == "1" })
+        let issue2 = try #require(comics.first { $0.issueNumber == "2" })
+        let next = db.nextComic(after: issue1)
+        #expect(next?.id == issue2.id)
+    }
+
+    @Test func nextComicIsNilAtTheEndOfTheSeries() throws {
+        for n in 1...2 { try insertComic(series: "Robin", issue: "\(n)", title: "Robin #\(n)") }
+        let comics = db.allComics(series: "Robin", sortOrder: .manual)
+        let lastIssue = try #require(comics.first { $0.issueNumber == "2" })
+        #expect(db.nextComic(after: lastIssue) == nil)
+    }
+
+    @Test func nextComicDoesNotCrossIntoADifferentSeries() throws {
+        try insertComic(series: "Batman", issue: "1", title: "Batman #1")
+        try insertComic(series: "Detective Comics", issue: "1", title: "Detective Comics #1")
+        let batman1 = try #require(db.allComics(series: "Batman", sortOrder: .manual).first)
+        #expect(db.nextComic(after: batman1) == nil)
+    }
+
+    @Test func unreadOnlyExcludesComicsWithAnyProgress() throws {
+        let unreadId = try insertComic(series: "Batman", issue: "1", title: "Batman #1")
+        let startedId = try insertComic(series: "Batman", issue: "2", title: "Batman #2")
+        db.updateProgress(comicId: startedId, page: 3)
+        let results = db.allComics(series: "Batman", sortOrder: .manual, unreadOnly: true)
+        #expect(results.contains { $0.id == unreadId })
+        #expect(!results.contains { $0.id == startedId })
+    }
+
+    @Test func minRatingFiltersOutAnythingBelowThreshold() throws {
+        let highId = try insertComic(series: "Batman", issue: "1", title: "Batman #1")
+        let lowId = try insertComic(series: "Batman", issue: "2", title: "Batman #2")
+        db.setRating(highId, rating: 5)
+        db.setRating(lowId, rating: 2)
+        let results = db.allComics(series: "Batman", sortOrder: .manual, minRating: 4)
+        #expect(results.contains { $0.id == highId })
+        #expect(!results.contains { $0.id == lowId })
+    }
+
+    @Test func searchFindsComicsByNotesReviewAndTag() throws {
+        let notedId = try insertComic(series: "Batman", issue: "1", title: "Batman #1")
+        let reviewedId = try insertComic(series: "Batman", issue: "2", title: "Batman #2")
+        let taggedId = try insertComic(series: "Batman", issue: "3", title: "Batman #3")
+        db.setComicNotes(notedId, notes: "Lent to Alex")
+        db.setComicReview(reviewedId, review: "Best Joker story ever written")
+        db.addTag(name: "must-reread", to: taggedId)
+
+        #expect(db.allComics(search: "Alex").contains { $0.id == notedId })
+        #expect(db.allComics(search: "Joker story").contains { $0.id == reviewedId })
+        #expect(db.allComics(search: "must-reread").contains { $0.id == taggedId })
+    }
+
+    @Test func comicIdsUnderFolderFindsOnlyComicsInThatFolder() throws {
+        let insideId = try insertTestComic(into: db, series: "Batman", publisher: "DC", issue: "1",
+                                            title: "Batman #1", filePath: "/Library/DC/Batman/Batman #1.cbz")
+        let outsideId = try insertTestComic(into: db, series: "Superman", publisher: "DC", issue: "1",
+                                             title: "Superman #1", filePath: "/Library/DC/Superman/Superman #1.cbz")
+        let ids = db.comicIds(underFolder: "/Library/DC/Batman")
+        #expect(ids.contains(insideId))
+        #expect(!ids.contains(outsideId))
+    }
+
+    @Test func comicIdsUnderFolderDoesNotMatchASimilarlyNamedSiblingFolder() throws {
+        let comicsId = try insertTestComic(into: db, series: "Batman", publisher: "DC", issue: "1",
+                                            title: "Batman #1", filePath: "/Library/Comics/Batman #1.cbz")
+        let comics2Id = try insertTestComic(into: db, series: "Superman", publisher: "DC", issue: "1",
+                                             title: "Superman #1", filePath: "/Library/Comics2/Superman #1.cbz")
+        let ids = db.comicIds(underFolder: "/Library/Comics")
+        #expect(ids.contains(comicsId))
+        #expect(!ids.contains(comics2Id))
+    }
+
+    @Test func softDeleteRecordsWhetherItWasUserOrMissingInitiated() throws {
+        let deletedId = try insertComic(series: "Batman", issue: "1", title: "Batman #1")
+        let missingId = try insertComic(series: "Batman", issue: "2", title: "Batman #2")
+        db.softDelete([deletedId], reason: "user")
+        db.softDelete([missingId], reason: "missing")
+        let trashed = db.trashedComics()
+        #expect(trashed.first { $0.id == deletedId }?.deletedReason == "user")
+        #expect(trashed.first { $0.id == missingId }?.deletedReason == "missing")
+    }
+
+    @Test func softDeleteDefaultsToUserReason() throws {
+        let id = try insertComic(series: "Batman", issue: "1", title: "Batman #1")
+        db.softDelete([id])
+        #expect(db.trashedComics().first { $0.id == id }?.deletedReason == "user")
+    }
+
+    @Test func nextComicRespectsManualReadingOrderOverrides() throws {
+        let firstId = try insertComic(series: "Annuals", issue: "1", title: "Annuals #1")
+        let annualId = try insertComic(series: "Annuals", issue: nil, title: "Annuals Annual #1")
+        let secondId = try insertComic(series: "Annuals", issue: "2", title: "Annuals #2")
+        // Force the annual to sit between #1 and #2, same as Series Manager would via a manual
+        // reorder -- nextComic should follow this override, not raw filename/issue-number order.
+        db.setReadingOrderOverride(comicId: annualId, position: 150, reason: "Manually placed")
+        db.setReadingOrderOverride(comicId: firstId, position: 100, reason: "Manually placed")
+        db.setReadingOrderOverride(comicId: secondId, position: 200, reason: "Manually placed")
+        let first = try #require(db.comic(id: firstId))
+        #expect(db.nextComic(after: first)?.id == annualId)
     }
 }

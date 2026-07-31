@@ -17,6 +17,7 @@ struct SeriesManagerView: View {
     @State private var showOnlyFlagged  = false
     @State private var showSeriesLinkPicker = false
     @State private var pagePickerIssue: Comic? = nil
+    @State private var exportErrorMessage: String? = nil
     // Bumped whenever a custom cover is set for a row -- IssueThumbnail's `.task` only runs once
     // per view identity, so merely refetching `issues` (same comic ids, same ForEach identity)
     // would never make an already-appeared row re-query ThumbnailCache and pick up the new image.
@@ -46,6 +47,11 @@ struct SeriesManagerView: View {
                 Spacer()
                 Menu {
                     Button("Link as Continuation of Another Series…") { showSeriesLinkPicker = true }
+                    Button("Export Series as CSV…") {
+                        BackupService.exportCSV(
+                            comics: issues, fileService: fileService, filename: "\(series).csv"
+                        ) { exportErrorMessage = $0 }
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -59,6 +65,14 @@ struct SeriesManagerView: View {
             .sheet(isPresented: $showSeriesLinkPicker) {
                 SeriesLinkPickerView(childSeries: series, childPublisher: publisher ?? "Unknown")
                     .environmentObject(vm)
+            }
+            .alert("Export Failed", isPresented: Binding(
+                get: { exportErrorMessage != nil },
+                set: { if !$0 { exportErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(exportErrorMessage ?? "")
             }
 
             Rectangle().fill(Design.borderColor).frame(height: 1)

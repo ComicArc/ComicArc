@@ -228,25 +228,32 @@ final class DatabaseManager: @unchecked Sendable {
         return true
     }
 
-    private func migrate() {
-
-        let dbPath = Self.dataDir.appendingPathComponent("comics.db")
-        let bakPath = Self.dataDir.appendingPathComponent("comics.db.bak")
-        if FileManager.default.fileExists(atPath: dbPath.path) {
+    /// Refreshes `comics.db.bak`, the snapshot `recoverIfCorrupted` falls back to. Called at
+    /// launch (via `migrate()`) and again after a scan/resync completes -- previously this only
+    /// ever ran once per launch, so a corruption discovered after a long reading/tagging/rating
+    /// session, or right after importing a big batch of new comics, would recover to a backup
+    /// that predated all of it. Cheap enough to call again after a scan: a WAL checkpoint plus a
+    /// file copy, not a full re-export.
+    func refreshBackup() {
+        queue.sync {
+            let dbPath = Self.dataDir.appendingPathComponent("comics.db")
+            let bakPath = Self.dataDir.appendingPathComponent("comics.db.bak")
+            guard FileManager.default.fileExists(atPath: dbPath.path) else { return }
             // Checkpoint first so the backup reflects all committed data, not just whatever has
             // landed in the main file so far -- WAL-mode commits can live only in the -wal file
             // for a while, and a prior session that ended without a full checkpoint (killed, not
             // quit normally) would otherwise be missing its most recent writes from this backup.
             exec("PRAGMA wal_checkpoint(TRUNCATE)")
-            // copyItem throws if the destination already exists, and the throw was silently
-            // swallowed by `try?` below -- meaning this backup was actually only ever written
-            // once, on the very first launch ever (likely a near-empty library), and silently
-            // never updated on any later launch. A corruption recovery months later would have
-            // rolled the whole library back to day one. Remove the stale backup first so this
-            // snapshot is refreshed on every launch instead.
+            // copyItem throws if the destination already exists -- remove the stale backup first
+            // so this snapshot is genuinely replaced each time, not silently left as the very
+            // first one ever written.
             try? FileManager.default.removeItem(at: bakPath)
             try? FileManager.default.copyItem(at: dbPath, to: bakPath)
         }
+    }
+
+    private func migrate() {
+        refreshBackup()
         exec("""
         CREATE TABLE IF NOT EXISTS comics (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,7 +286,7 @@ final class DatabaseManager: @unchecked Sendable {
         exec("""
         CREATE TABLE IF NOT EXISTS ratings (
             comic_id INTEGER PRIMARY KEY REFERENCES comics(id),
-            rating   INTEGER CHECK(rating BETWEEN 1 AND 5),
+            rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
             review   TEXT
         )
         """)
@@ -564,6 +571,13 @@ final class DatabaseManager: @unchecked Sendable {
         // bring the database row back while the file stayed stranded in the system Trash.
         exec("ALTER TABLE comics ADD COLUMN trashed_file_path TEXT")
 
+        // Distinguishes a comic soft-deleted because the user chose to delete it from one that
+        // was soft-deleted because its file vanished from disk (drive unplugged, moved/renamed
+        // outside the app) -- previously both looked identical in the Trash screen, and
+        // "Restore" on a still-missing file would silently bring the row back pointing at
+        // nothing. NULL (pre-existing soft-deletes) is treated as "user" by the app.
+        exec("ALTER TABLE comics ADD COLUMN deleted_reason TEXT")
+
         // A "favorite moment" is just a bookmark the user has flagged as worth revisiting on its
         // own -- not a new table, since every favorite moment is already a page-position bookmark
         // (with its own label). Distinct from the resume-reading position, which lives on `comics`.
@@ -602,6 +616,7 @@ final class DatabaseManager: @unchecked Sendable {
         resortSpecialIssuesIfNeeded()
         widenMainlinePositionStrideIfNeeded()
         recomputeOnceAfterUpgradeIfNeeded()
+        allowUnratedReviewsIfNeeded()
     }
 
     private func recomputeOnceAfterUpgradeIfNeeded() {
@@ -623,6 +638,33 @@ final class DatabaseManager: @unchecked Sendable {
             + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
         """)
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('specialIssueSortV1')")
+    }
+
+    /// `ratings.rating` had `CHECK(rating BETWEEN 1 AND 5)`, but `setComicReview` -- and every
+    /// other read path in this file (`COALESCE(r.rating, 0)`) -- has always treated 0 as the
+    /// real, valid "no rating yet" sentinel. Writing a review for a comic that had never been
+    /// rated inserted `rating=0`, which the CHECK constraint silently rejected: `run()`'s Bool
+    /// result was discarded at that call site, so the review just never saved, with no error
+    /// surfaced anywhere. Rebuilds the table with the constraint the rest of the app already
+    /// assumed was true (SQLite can't ALTER an existing CHECK constraint in place).
+    private func allowUnratedReviewsIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'ratingsAllowZeroV1'") > 0
+        guard !alreadyRun else { return }
+        _ = inTransaction {
+            exec("ALTER TABLE ratings RENAME TO ratings_old_ratingsAllowZeroV1")
+            exec("""
+                CREATE TABLE ratings (
+                    comic_id INTEGER PRIMARY KEY REFERENCES comics(id),
+                    rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
+                    review   TEXT
+                )
+                """)
+            exec("INSERT INTO ratings SELECT * FROM ratings_old_ratingsAllowZeroV1")
+            exec("DROP TABLE ratings_old_ratingsAllowZeroV1")
+            return true
+        }
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('ratingsAllowZeroV1')")
     }
 
     private func widenMainlinePositionStrideIfNeeded() {
@@ -1477,7 +1519,8 @@ final class DatabaseManager: @unchecked Sendable {
             readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil,
             readingOrderReason: colText(s, 26),
             gcdMatchConfidence: sqlite3_column_type(s, 27) != SQLITE_NULL ? colInt(s, 27) : nil,
-            gcdSeriesName: colText(s, 28), gcdIssueNumber: colText(s, 29)
+            gcdSeriesName: colText(s, 28), gcdIssueNumber: colText(s, 29),
+            deletedReason: colText(s, 32)
         )
     }
 
@@ -1491,7 +1534,8 @@ final class DatabaseManager: @unchecked Sendable {
                (f.comic_id IS NOT NULL) as is_favorite,
                (rl.comic_id IS NOT NULL) as in_reading_list,
                r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
-               c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format
+               c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format,
+               c.deleted_reason
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id
@@ -1537,7 +1581,8 @@ final class DatabaseManager: @unchecked Sendable {
     func allComics(publisher: String? = nil, character: String? = nil, series: String? = nil,
                    search: String? = nil, sortOrder: SortOrder = .publisher,
                    favoritesOnly: Bool = false, readingListOnly: Bool = false,
-                   nullCharacterOnly: Bool = false, tag: String? = nil) -> [Comic] {
+                   nullCharacterOnly: Bool = false, tag: String? = nil,
+                   unreadOnly: Bool = false, minRating: Int? = nil) -> [Comic] {
         queue.sync {
             var conds = ["c.deleted_at IS NULL"]
             var args: [Any?] = []
@@ -1546,12 +1591,22 @@ final class DatabaseManager: @unchecked Sendable {
             else if let chr = character { conds.append("c.character = ?"); args.append(chr) }
             if let ser = series { conds.append("c.series = ?"); args.append(ser) }
             if let q = search, !q.isEmpty {
-                conds.append("(c.title LIKE ? ESCAPE '\\' OR c.series LIKE ? ESCAPE '\\' OR c.publisher LIKE ? ESCAPE '\\' OR c.writer LIKE ? ESCAPE '\\' OR c.penciller LIKE ? ESCAPE '\\' OR c.character LIKE ? ESCAPE '\\')")
+                // Covers everything a user might reasonably remember tagging/writing about a
+                // comic, not just its catalog metadata -- previously notes, reviews, and tags
+                // were all things you could attach to a comic but never actually search by.
+                conds.append("""
+                    (c.title LIKE ? ESCAPE '\\' OR c.series LIKE ? ESCAPE '\\' OR c.publisher LIKE ? ESCAPE '\\'
+                     OR c.writer LIKE ? ESCAPE '\\' OR c.penciller LIKE ? ESCAPE '\\' OR c.character LIKE ? ESCAPE '\\'
+                     OR c.notes LIKE ? ESCAPE '\\' OR r.review LIKE ? ESCAPE '\\'
+                     OR c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name LIKE ? ESCAPE '\\'))
+                    """)
                 let p = "%\(Self.likeEscaped(q))%"
-                args += [p, p, p, p, p, p]
+                args += [p, p, p, p, p, p, p, p, p]
             }
             if favoritesOnly   { conds.append("f.comic_id IS NOT NULL") }
             if readingListOnly { conds.append("rl.comic_id IS NOT NULL") }
+            if unreadOnly      { conds.append("COALESCE(rp.current_page, 0) = 0") }
+            if let minRating   { conds.append("COALESCE(r.rating, 0) >= ?"); args.append(minRating) }
             if let tag {
                 conds.append("c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name = ?)")
                 args.append(tag)
@@ -1564,6 +1619,26 @@ final class DatabaseManager: @unchecked Sendable {
     func comic(id: Int64) -> Comic? {
         queue.sync {
             rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [id], map: comicRow).first
+        }
+    }
+
+    /// The next comic after `comic` in the same (publisher, series), using the exact same
+    /// ordering as `.manual` sort (reading_order_position, falling back to position, then id) --
+    /// the same order Series Manager and the reading-order engine already treat as authoritative,
+    /// so "next" here always matches what a user would see if they scrolled the series manually.
+    /// Returns nil at the end of the series -- deliberately doesn't cross into a linked child
+    /// series (e.g. a legacy renumbering); that's a real reading-order continuation, but a
+    /// different, larger question than "what's the next file after this one."
+    func nextComic(after comic: Comic) -> Comic? {
+        queue.sync {
+            let orderExpr = "COALESCE(c.reading_order_position, c.position, c.id)"
+            let sql = """
+                \(comicSelect)
+                WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ?
+                  AND \(orderExpr) > (SELECT COALESCE(reading_order_position, position, id) FROM comics WHERE id = ?)
+                ORDER BY \(orderExpr), c.title LIMIT 1
+                """
+            return rows(sql, args: [comic.publisher, comic.series, comic.id], map: comicRow).first
         }
     }
 
@@ -1963,6 +2038,20 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    /// Every active comic whose file lives under `folderPath` -- used when a library folder is
+    /// removed from configuration, so those comics can be soft-deleted along with it instead of
+    /// lingering in the library forever, pointing at a folder ComicArc no longer manages at all.
+    func comicIds(underFolder folderPath: String) -> [Int64] {
+        queue.sync {
+            let prefix = folderPath.hasSuffix("/") ? folderPath : folderPath + "/"
+            return rows(
+                "SELECT id FROM comics WHERE deleted_at IS NULL AND (file_path = ? OR file_path LIKE ? ESCAPE '\\')",
+                args: [folderPath, "\(Self.likeEscaped(prefix))%"],
+                map: { colInt64($0, 0) }
+            )
+        }
+    }
+
     func knownHashes() -> Set<String> {
         queue.sync {
             Set(rows("SELECT file_hash FROM comics WHERE file_hash IS NOT NULL AND deleted_at IS NULL",
@@ -1970,14 +2059,18 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func softDelete(_ ids: [Int64]) {
+    /// `reason` is "user" for an explicit delete, or "missing" for the scanner's own stale-file
+    /// cleanup -- lets the Trash screen (and its Restore action) tell the two apart instead of
+    /// treating a file that vanished off a drive identically to one someone chose to delete.
+    func softDelete(_ ids: [Int64], reason: String = "user") {
         guard !ids.isEmpty else { return }
         queue.sync {
             let ph = ids.map { _ in "?" }.joined(separator: ",")
             var stmt: OpaquePointer?
-            let sql = "UPDATE comics SET deleted_at = datetime('now') WHERE id IN (\(ph))"
+            let sql = "UPDATE comics SET deleted_at = datetime('now'), deleted_reason = ? WHERE id IN (\(ph))"
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            for (i, id) in ids.enumerated() { sqlite3_bind_int64(stmt, Int32(i + 1), id) }
+            sqlite3_bind_text(stmt, 1, (reason as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            for (i, id) in ids.enumerated() { sqlite3_bind_int64(stmt, Int32(i + 2), id) }
             sqlite3_step(stmt); sqlite3_finalize(stmt)
         }
     }
@@ -2273,11 +2366,12 @@ final class DatabaseManager: @unchecked Sendable {
 
     func renameSeries(oldName: String, publisher: String?, newName: String) {
         queue.sync {
-            // Keep any series_links row pointing at this series in sync too -- otherwise renaming
-            // a series orphans its link (the stored name no longer matches anything in `comics`),
-            // silently breaking whatever volume-aware reading-order chaining it was providing.
-            // Wrapped in a transaction so a crash between the `comics` update and the
-            // `series_links` updates can't leave them pointing at different series names.
+            // Keep every other place a series is named by its raw string in sync too -- a custom
+            // cover (series_covers), per-series reader settings (series_reader_prefs), and a
+            // manual series ordering position (series_order) all previously went silently
+            // orphaned under the old name after a rename, on top of series_links (already
+            // handled). Wrapped in one transaction so a crash mid-rename can't leave these
+            // pointing at different series names from each other.
             _ = inTransaction {
                 if let pub = publisher, !pub.isEmpty, pub != "All" {
                     let ok1 = run("UPDATE comics SET series = ? WHERE series = ? AND publisher = ?",
@@ -2286,13 +2380,22 @@ final class DatabaseManager: @unchecked Sendable {
                                    args: [newName, oldName, pub]) != -1
                     let ok3 = run("UPDATE series_links SET child_series = ? WHERE child_series = ? AND child_publisher = ?",
                                    args: [newName, oldName, pub]) != -1
-                    return ok1 && ok2 && ok3
+                    let ok4 = run("UPDATE series_covers SET series = ? WHERE series = ? AND publisher = ?",
+                                   args: [newName, oldName, pub]) != -1
+                    let ok5 = run("UPDATE series_reader_prefs SET series = ? WHERE series = ? AND publisher = ?",
+                                   args: [newName, oldName, pub]) != -1
+                    let ok6 = run("UPDATE series_order SET series = ? WHERE series = ? AND publisher = ?",
+                                   args: [newName, oldName, pub]) != -1
+                    return ok1 && ok2 && ok3 && ok4 && ok5 && ok6
                 } else {
                     let ok1 = run("UPDATE comics SET series = ? WHERE series = ?",
                                    args: [newName, oldName]) != -1
                     let ok2 = run("UPDATE series_links SET parent_series = ? WHERE parent_series = ?", args: [newName, oldName]) != -1
                     let ok3 = run("UPDATE series_links SET child_series = ? WHERE child_series = ?", args: [newName, oldName]) != -1
-                    return ok1 && ok2 && ok3
+                    let ok4 = run("UPDATE series_covers SET series = ? WHERE series = ?", args: [newName, oldName]) != -1
+                    let ok5 = run("UPDATE series_reader_prefs SET series = ? WHERE series = ?", args: [newName, oldName]) != -1
+                    let ok6 = run("UPDATE series_order SET series = ? WHERE series = ?", args: [newName, oldName]) != -1
+                    return ok1 && ok2 && ok3 && ok4 && ok5 && ok6
                 }
             }
         }
