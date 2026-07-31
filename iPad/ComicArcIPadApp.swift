@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 
 @main
 struct ComicArcIPadApp: App {
@@ -32,6 +33,9 @@ struct ComicArcIPadApp: App {
                     if phase == .active, !vm.libraryPaths.isEmpty { vm.scan() }
 
                     if phase == .background { DatabaseManager.shared.checkpoint() }
+                }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    vm.openComicFromSpotlight(activity)
                 }
         }
         .commands {

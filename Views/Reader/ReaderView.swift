@@ -47,6 +47,14 @@ enum ColorFilter: String, CaseIterable {
 struct ReaderView: View {
     let comic: Comic
     let onClose: () -> Void
+    /// Swaps the reader straight into the next issue in the series -- ContentView's ReaderView
+    /// is `.id(comic.id)`-keyed, so calling this with a different comic tears down and rebuilds
+    /// this whole view fresh for it (currentPage, zoom, etc. all reset), the same as opening any
+    /// other comic normally.
+    let onOpenComic: (Comic) -> Void
+
+    @State private var nextIssue: Comic?
+    @State private var dismissedNextIssuePrompt = false
 
     @Environment(\.windowService) private var windowService
     @FocusState private var isFocused: Bool
@@ -96,9 +104,11 @@ struct ReaderView: View {
                height: panOffset.height + dragOffset.height)
     }
 
-    init(comic: Comic, initialPage: Int? = nil, onClose: @escaping () -> Void) {
+    init(comic: Comic, initialPage: Int? = nil, onClose: @escaping () -> Void,
+         onOpenComic: @escaping (Comic) -> Void) {
         self.comic        = comic
         self.onClose      = onClose
+        self.onOpenComic  = onOpenComic
         // Clamp both bounds: page_count can change after progress was saved (a metadata refresh
         // correcting a bad initial page count, or a revival at the same path with a different
         // file) and a stale out-of-range progress would otherwise land the reader on a blank
@@ -149,6 +159,18 @@ struct ReaderView: View {
 
                 if autoplay {
                     autoplayBar
+                }
+
+                if isOnLastPage, !autoplay, let nextIssue, !dismissedNextIssuePrompt {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            upNextCard(nextIssue)
+                                .padding(24)
+                        }
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .onContinuousHover { phase in
@@ -235,6 +257,7 @@ struct ReaderView: View {
             loadBookmarks()
             scheduleHide()
             windowService.enterImmersiveMode()
+            loadNextIssue()
         }
         .onDisappear {
             saveProgress(); logSession(); hideTask?.cancel()
@@ -244,6 +267,7 @@ struct ReaderView: View {
             PageCache.shared.evict(comicId: comic.id)
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
+        .onReceive(NotificationCenter.default.publisher(for: .triggerPrint)) { _ in printCurrentPage() }
         .sheet(isPresented: $showShortcuts) { shortcutsSheet }
         .sheet(isPresented: $showBookmarks) { bookmarksPanel }
         // Always dark, regardless of the user's app theme: the reader chrome (topBar/bottomBar)
@@ -340,6 +364,42 @@ struct ReaderView: View {
             .frame(height: 3)
         }
         .ignoresSafeArea()
+    }
+
+    private var isOnLastPage: Bool { comic.pageCount > 0 && currentPage >= comic.pageCount - 1 }
+
+    private func upNextCard(_ next: Comic) -> some View {
+        HStack(spacing: 12) {
+            MiniComicCard(comic: next)
+                .frame(width: 46, height: 69)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Up Next").font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text(next.title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
+            }
+
+            Button("Continue") { advanceToNextIssue() }
+                .buttonStyle(GoldCapsuleStyle())
+
+            Button {
+                withAnimation(Design.easeFast) { dismissedNextIssuePrompt = true }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption).foregroundStyle(.white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
+        .frame(maxWidth: 360)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Up next: \(next.title)")
+        .accessibilityHint("Double-tap to continue reading")
+        .accessibilityAction { advanceToNextIssue() }
     }
 
     private var topBar: some View {
@@ -727,6 +787,13 @@ struct ReaderView: View {
         loadBookmarks()
     }
 
+    private func printCurrentPage() {
+        PageCache.shared.load(comic: comic, page: currentPage) { img in
+            guard let img else { return }
+            windowService.printImage(img)
+        }
+    }
+
     private func loadBookmarks() {
         bookmarks    = ReadingSessionService.shared.bookmarks(for: comic.id)
         isBookmarked = bookmarks.contains { $0.page == currentPage }
@@ -747,6 +814,27 @@ struct ReaderView: View {
         ReadingSessionService.shared.logSession(comicId: comic.id, from: sessionStartPage, to: currentPage)
     }
 
+    /// Looks up the next issue in this series (if any) so the "Up Next" overlay and autoplay's
+    /// seamless continuation both have something to act on -- also warms its cover and first
+    /// couple pages in the background so the actual transition, whenever it happens, is instant
+    /// instead of a cold load.
+    private func loadNextIssue() {
+        let current = comic
+        Task.detached(priority: .userInitiated) {
+            guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
+            ThumbnailCache.shared.thumbnail(for: next) { _ in }
+            PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+            await MainActor.run { nextIssue = next }
+        }
+    }
+
+    private func advanceToNextIssue() {
+        guard let nextIssue else { return }
+        saveProgress()
+        logSession()
+        onOpenComic(nextIssue)
+    }
+
     private func runAutoplay() async {
         guard autoplay, !scrollMode else { return }
         let steps = 60
@@ -763,8 +851,16 @@ struct ReaderView: View {
         guard autoplay, !Task.isCancelled else { await MainActor.run { countdownProgress = 0 }; return }
         await MainActor.run {
             countdownProgress = 0
-            if currentPage < comic.pageCount - 1 { nextPage() }
-            else { autoplay = false }
+            if currentPage < comic.pageCount - 1 {
+                nextPage()
+            } else if nextIssue != nil {
+                // Autoplay is a hands-off "just keep reading" mode -- carrying it across the
+                // seam into the next issue (instead of silently stopping) is what makes it match
+                // that intent instead of quietly giving up at the one moment it'd matter most.
+                advanceToNextIssue()
+            } else {
+                autoplay = false
+            }
         }
     }
 }
@@ -828,8 +924,18 @@ struct PagedModeView: View {
                 } else if let img = imageLeft {
                     pageImage(img, size: geo.size)
                 } else {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle).foregroundStyle(.secondary)
+                    // A real dead end before this: no explanation, no way forward except backing
+                    // out of the reader entirely -- one bad page (a flaky external drive, a
+                    // genuinely corrupt page inside an otherwise-fine archive) shouldn't strand
+                    // the whole session.
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Couldn't load page \(currentPage + 1)")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Button("Retry") { loadPage(currentPage) }
+                            .buttonStyle(.bordered)
+                    }
                 }
             }
         }

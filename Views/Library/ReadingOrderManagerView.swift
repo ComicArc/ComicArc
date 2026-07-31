@@ -88,6 +88,7 @@ private struct SuggestionGroupCard: View {
                                 Label("Looks Right", systemImage: "checkmark")
                             }
                             .buttonStyle(.borderedProminent).controlSize(.small).tint(Design.brandGold)
+                            .accessibilityLabel("\(comic.title) looks right")
 
                             Button(role: .destructive) {
                                 onNotRight(comic)
@@ -95,6 +96,7 @@ private struct SuggestionGroupCard: View {
                                 Label("Not Right", systemImage: "xmark")
                             }
                             .buttonStyle(.bordered).controlSize(.small)
+                            .accessibilityLabel("\(comic.title) is not right")
                         }
                         .padding(.top, 2)
                     }

@@ -48,6 +48,9 @@ struct SettingsView: View {
     @AppStorage("appTheme") private var appThemeRaw = AppTheme.dark.rawValue
     @AppStorage("customAccentColorHex") private var customAccentHex: String = ""
 
+    @State private var folderToRemove: String?
+    @State private var folderToRemoveComicCount = 0
+
     private var progressFormat: Binding<ProgressFormat> {
         Binding(get: { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction },
                 set: { progressFormatRaw = $0.rawValue })
@@ -211,7 +214,10 @@ struct SettingsView: View {
                     HStack {
                         Text(path).lineLimit(1).truncationMode(.middle)
                         Spacer()
-                        Button(role: .destructive) { vm.removeLibraryFolder(path) } label: {
+                        Button(role: .destructive) {
+                            folderToRemoveComicCount = vm.comicCount(underFolder: path)
+                            folderToRemove = path
+                        } label: {
                             Image(systemName: "minus.circle.fill")
                         }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -238,6 +244,23 @@ struct SettingsView: View {
                 Text("\(vm.scanState.done) / \(vm.scanState.total) — \(vm.scanState.added) added")
                     .font(.caption).foregroundStyle(.secondary)
             }
+        }
+        .confirmationDialog(
+            folderToRemoveComicCount > 0
+                ? "Remove this folder and its \(folderToRemoveComicCount) comic\(folderToRemoveComicCount == 1 ? "" : "s")?"
+                : "Remove this folder?",
+            isPresented: Binding(get: { folderToRemove != nil }, set: { if !$0 { folderToRemove = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let path = folderToRemove { vm.removeLibraryFolder(path) }
+                folderToRemove = nil
+            }
+            Button("Cancel", role: .cancel) { folderToRemove = nil }
+        } message: {
+            Text(folderToRemoveComicCount > 0
+                 ? "The files themselves are untouched on disk. Their entries move to Trash and can be restored from there."
+                 : "ComicArc will stop scanning this folder.")
         }
     }
 
@@ -511,6 +534,22 @@ struct TrashView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var trashed: [Comic] = []
+    @State private var stillMissingAlert: Comic?
+
+    /// "missing" (file vanished from disk) and "folder_removed" (its library folder was removed
+    /// from Settings, file likely untouched) are both distinct from an explicit user delete (or
+    /// nil, for anything soft-deleted before this distinction existed) -- restoring either only
+    /// really makes sense once the file is confirmed to still be reachable, checked before acting.
+    private func badge(for comic: Comic) -> (label: String, systemImage: String)? {
+        switch comic.deletedReason {
+        case "missing":        return ("Missing", "questionmark.folder")
+        case "folder_removed": return ("Folder Removed", "folder.badge.minus")
+        default:                return nil
+        }
+    }
+    private func needsFileCheckBeforeRestore(_ comic: Comic) -> Bool {
+        comic.deletedReason == "missing" || comic.deletedReason == "folder_removed"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -531,14 +570,27 @@ struct TrashView: View {
                 List(trashed) { comic in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(comic.title).font(.subheadline)
+                            HStack(spacing: 6) {
+                                Text(comic.title).font(.subheadline)
+                                if let badge = badge(for: comic) {
+                                    Label(badge.label, systemImage: badge.systemImage)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.orange)
+                                        .labelStyle(.titleAndIcon)
+                                        .help("Not something you deleted yourself")
+                                }
+                            }
                             Text(comic.publisher + " · " + comic.series)
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button("Restore") {
-                            vm.restoreFromTrash(id: comic.id)
-                            trashed.removeAll { $0.id == comic.id }
+                            if needsFileCheckBeforeRestore(comic), !FileManager.default.fileExists(atPath: comic.filePath) {
+                                stillMissingAlert = comic
+                            } else {
+                                vm.restoreFromTrash(id: comic.id)
+                                trashed.removeAll { $0.id == comic.id }
+                            }
                         }
                         .buttonStyle(.bordered).controlSize(.small)
                     }
@@ -550,6 +602,21 @@ struct TrashView: View {
             trashed = await Task.detached(priority: .userInitiated) {
                 DatabaseManager.shared.trashedComics()
             }.value
+        }
+        .alert("File Still Missing", isPresented: Binding(
+            get: { stillMissingAlert != nil },
+            set: { if !$0 { stillMissingAlert = nil } }
+        )) {
+            Button("Restore Anyway") {
+                if let comic = stillMissingAlert {
+                    vm.restoreFromTrash(id: comic.id)
+                    trashed.removeAll { $0.id == comic.id }
+                }
+                stillMissingAlert = nil
+            }
+            Button("Cancel", role: .cancel) { stillMissingAlert = nil }
+        } message: {
+            Text("This file still isn't at its original location. Restoring brings the entry back to your library, but ComicArc won't be able to open it until the file is back in place.")
         }
     }
 }

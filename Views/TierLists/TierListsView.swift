@@ -327,6 +327,7 @@ struct TierListDetailView: View {
     let tierList: TierList
     let onDelete: () -> Void
 
+    @Environment(\.fileService) private var fileService
     @State private var currentTierList: TierList
     @State private var items:           [TierListItem] = []
     @State private var itemsLoading     = true
@@ -336,6 +337,7 @@ struct TierListDetailView: View {
     @State private var reviewText:      String = ""
     @State private var showEditSheet    = false
     @State private var showDeleteConfirm = false
+    @State private var exportErrorMessage: String?
     @State private var draggedItemId:   Int64?
     @State private var dropTargetTier:  String?
 
@@ -445,6 +447,14 @@ struct TierListDetailView: View {
         } message: {
             Text("The comics themselves are not affected -- only this ranking is removed.")
         }
+        .alert("Export Failed", isPresented: Binding(
+            get: { exportErrorMessage != nil },
+            set: { if !$0 { exportErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(exportErrorMessage ?? "")
+        }
     }
 
     private var header: some View {
@@ -486,6 +496,18 @@ struct TierListDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("Rate & Review")
+
+                    Button {
+                        BackupService.exportCSV(
+                            comics: items.map(\.comic), fileService: fileService,
+                            filename: "\(currentTierList.title).csv"
+                        ) { exportErrorMessage = $0 }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Export as CSV")
 
                     Button(role: .destructive) { showDeleteConfirm = true } label: {
                         Text("Delete Tier List").foregroundStyle(.red)

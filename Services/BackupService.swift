@@ -2,6 +2,42 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum BackupService {
+    /// Exports a specific, already-curated set of comics (a series, a reading path, a tier list)
+    /// as a plain CSV -- distinct from `export()`'s full-library JSON backup, which round-trips
+    /// through the app but isn't meant for opening in a spreadsheet to print a checklist, share
+    /// a want-list, or hand off to another tool.
+    @MainActor
+    static func exportCSV(comics: [Comic], fileService: any FileServiceProtocol,
+                          filename: String, onError: @escaping (String) -> Void) {
+        fileService.pickSaveDestination(filename: filename) { savedURL in
+            guard let url = savedURL else { return }
+            let header = ["Title", "Series", "Publisher", "Issue Number", "Volume", "Format",
+                           "Year", "Rating", "Read", "File Path"]
+            var rows = [header]
+            for c in comics {
+                rows.append([
+                    c.title, c.series, c.publisher, c.issueNumber ?? "", c.volume ?? "", c.format ?? "",
+                    c.year.map(String.init) ?? "", c.rating > 0 ? String(c.rating) : "",
+                    c.isFinished ? "Yes" : "No", c.filePath
+                ])
+            }
+            let csv = rows.map { row in
+                row.map(csvField).joined(separator: ",")
+            }.joined(separator: "\r\n")
+            do {
+                try csv.data(using: .utf8)?.write(to: url, options: .atomic)
+                fileService.shareFile(url)
+            } catch {
+                onError("Export failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func csvField(_ value: String) -> String {
+        guard value.contains(",") || value.contains("\"") || value.contains("\n") else { return value }
+        return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
     @MainActor
     static func export(fileService: any FileServiceProtocol, filename: String = "ComicArc-backup.json",
                         onError: @escaping (String) -> Void) {

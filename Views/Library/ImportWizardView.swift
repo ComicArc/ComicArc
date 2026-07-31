@@ -172,7 +172,9 @@ struct ImportWizardView: View {
                         vm.selectedSeries = item.series
                         vm.showSeriesManager = true
                         dismiss()
-                    }.buttonStyle(.borderless).font(.caption)
+                    }
+                    .buttonStyle(.borderless).font(.caption)
+                    .accessibilityLabel("Review \(item.series), \(item.count) issue\(item.count == 1 ? "" : "s")")
                 }
             }
             if items.count > 8 {

@@ -7,6 +7,7 @@ extension Notification.Name {
     static let triggerImport       = Notification.Name("triggerImport")
     static let triggerRenameFiles  = Notification.Name("triggerRenameFiles")
     static let readerDidClose      = Notification.Name("readerDidClose")
+    static let triggerPrint        = Notification.Name("triggerPrint")
 }
 
 struct ContentView: View {
@@ -35,6 +36,8 @@ struct ContentView: View {
             if let comic = vm.readerComic {
                 ReaderView(comic: comic, initialPage: vm.readerInitialPage) {
                     withAnimation(.easeInOut(duration: 0.25)) { vm.closeReader() }
+                } onOpenComic: { next in
+                    vm.openReader(next)
                 }
                 // Ties this view's identity to the comic itself rather than just to the `if`
                 // branch -- without it, a future reassignment of readerComic straight from one
@@ -66,10 +69,42 @@ struct ContentView: View {
                 .zIndex(30)
                 .allowsHitTesting(true)
             }
+
+            if let progress = vm.importProgress {
+                VStack {
+                    Spacer()
+                    importProgressToast(progress)
+                        .padding(.bottom, 24)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(30)
+                .allowsHitTesting(false)
+            }
         }
         .animation(Design.springGentle, value: vm.pendingUndo?.message)
+        .animation(Design.springGentle, value: vm.importProgress)
+        .alert(
+            "Import Complete",
+            isPresented: Binding(
+                get: { vm.lastImportSummary != nil },
+                set: { if !$0 { vm.lastImportSummary = nil } }
+            ),
+            presenting: vm.lastImportSummary
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { summary in
+            Text(importSummaryMessage(summary))
+        }
 
         .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
+        // Most of the app's text uses fixed-size fonts, not semantic text styles, so it doesn't
+        // scale with Dynamic Type -- a real gap, but fully migrating every font in the app to
+        // scale correctly is a much larger change than this pass can safely make. Capping the
+        // range (rather than leaving it fully unbounded) means a user with a moderately larger
+        // text size preference still gets what DOES scale (native controls, semantic-styled
+        // text already used in several screens) without the most extreme accessibility sizes
+        // visually breaking this app's fixed-width card grids and toolbars.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .frame(minWidth: 960, minHeight: 640)
         .animation(.easeInOut(duration: 0.2), value: vm.readerComic?.id)
         .onChange(of: vm.readerComic?.id) { _, newId in
@@ -135,6 +170,29 @@ struct ContentView: View {
         .padding(.horizontal, 18).padding(.vertical, 12)
         .background(.black.opacity(0.92), in: Capsule())
         .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+    }
+
+    private func importProgressToast(_ progress: LibraryViewModel.ImportProgress) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().controlSize(.small).tint(.white)
+            Text("Importing \(progress.done) of \(progress.total)…")
+                .font(.callout).foregroundStyle(.white)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .background(.black.opacity(0.92), in: Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+    }
+
+    private func importSummaryMessage(_ summary: LibraryViewModel.ImportSummary) -> String {
+        var parts: [String] = []
+        if summary.added > 0 { parts.append("\(summary.added) imported") }
+        if summary.skipped > 0 { parts.append("\(summary.skipped) already in your library") }
+        if !summary.failures.isEmpty {
+            let names = summary.failures.prefix(3).map { "\($0.name) (\($0.reason))" }.joined(separator: ", ")
+            let more = summary.failures.count > 3 ? ", and \(summary.failures.count - 3) more" : ""
+            parts.append("\(summary.failures.count) failed: \(names)\(more)")
+        }
+        return parts.isEmpty ? "Nothing to import." : parts.joined(separator: ". ") + "."
     }
 
     @ViewBuilder
@@ -261,6 +319,13 @@ struct ContentView: View {
 
         ToolbarItem(id: "sort", placement: .primaryAction) {
             SortPicker()
+                .opacity(isLibrarySection ? 1 : 0)
+                .disabled(!isLibrarySection)
+                .allowsHitTesting(isLibrarySection)
+        }
+
+        ToolbarItem(id: "filter", placement: .primaryAction) {
+            FilterPicker()
                 .opacity(isLibrarySection ? 1 : 0)
                 .disabled(!isLibrarySection)
                 .allowsHitTesting(isLibrarySection)

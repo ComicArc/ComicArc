@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 #if os(macOS)
 import Sparkle
 #endif
@@ -119,6 +120,9 @@ struct ComicArcApp: App {
             #endif
             .environment(\.fileService, fileService)
             .environment(\.windowService, windowService)
+            .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                vm.openComicFromSpotlight(activity)
+            }
         }
         #if os(macOS)
         .commands {
@@ -128,7 +132,13 @@ struct ComicArcApp: App {
 
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .saveItem) {}
-            CommandGroup(replacing: .printItem) {}
+            CommandGroup(replacing: .printItem) {
+                Button("Print Current Page…") {
+                    NotificationCenter.default.post(name: .triggerPrint, object: nil)
+                }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(vm.readerComic == nil)
+            }
 
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { vm.select(.settings) }
@@ -185,7 +195,7 @@ struct ComicArcApp: App {
                     .keyboardShortcut("a", modifiers: .command)
                     .disabled(!vm.bulkMode)
                 Divider()
-                Button("Delete Selected") { vm.bulkDelete() }
+                Button("Delete Selected") { vm.bulkDelete(fileService: fileService) }
                     .keyboardShortcut(.delete, modifiers: .command)
                     .disabled(!vm.bulkMode || vm.selectedComicIds.isEmpty)
             }

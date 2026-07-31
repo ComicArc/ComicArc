@@ -34,6 +34,10 @@ protocol WindowServiceProtocol {
     func hideCursorUntilMouseMoves()
     func showCursor()
     func configureMainWindow()
+
+    /// Opens the system print panel for a single page image. No-op where printing isn't
+    /// supported (iOS/iPadOS has no equivalent entry point wired up yet).
+    func printImage(_ image: PlatformImage)
 }
 
 struct NoOpFileService: FileServiceProtocol {
@@ -59,6 +63,7 @@ struct NoOpWindowService: WindowServiceProtocol {
     func hideCursorUntilMouseMoves() {}
     func showCursor() {}
     func configureMainWindow() {}
+    func printImage(_ image: PlatformImage) {}
 }
 
 @MainActor

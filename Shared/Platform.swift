@@ -1,5 +1,30 @@
 import SwiftUI
 import Foundation
+import ImageIO
+
+// A handful of real-world scanned/uncompressed comic pages come through at absurd pixel
+// dimensions (raw scanner output dropped into a CBZ with no resave) that would otherwise decode
+// to gigabytes of raw bitmap and can crash the reader outright. This caps the *decode* itself
+// (not just display) via ImageIO's thumbnail-from-source path, which is cheap to check (reads
+// only the header) and only kicks in when a page is genuinely pathological -- ordinary comic
+// pages (a few thousand pixels on a side) are decoded exactly as before.
+private let maxDecodedPixelDimension = 8000
+
+private func safeCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let w = props[kCGImagePropertyPixelWidth] as? Int,
+          let h = props[kCGImagePropertyPixelHeight] as? Int,
+          max(w, h) > maxPixelSize else {
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        kCGImageSourceCreateThumbnailWithTransform: true
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, opts as CFDictionary)
+}
 
 #if os(macOS)
 import AppKit
@@ -21,7 +46,12 @@ extension NSImage {
         return result
     }
 
-    static func fromData(_ data: Data) -> NSImage? { NSImage(data: data) }
+    static func fromData(_ data: Data) -> NSImage? {
+        if let cg = safeCGImage(from: data, maxPixelSize: maxDecodedPixelDimension) {
+            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        }
+        return NSImage(data: data)
+    }
     static func fromFile(_ path: String) -> NSImage? { NSImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> NSImage? { NSImage(contentsOf: url) }
 
@@ -65,7 +95,12 @@ extension UIImage {
         return renderer.image { _ in source.draw(in: CGRect(origin: .zero, size: drawSize)) }
     }
 
-    static func fromData(_ data: Data) -> UIImage? { UIImage(data: data) }
+    static func fromData(_ data: Data) -> UIImage? {
+        if let cg = safeCGImage(from: data, maxPixelSize: maxDecodedPixelDimension) {
+            return UIImage(cgImage: cg)
+        }
+        return UIImage(data: data)
+    }
     static func fromFile(_ path: String) -> UIImage? { UIImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> UIImage? { guard let data = try? Data(contentsOf: url) else { return nil }; return UIImage(data: data) }
 

@@ -103,6 +103,8 @@ private struct ConflictFieldRow: View {
                 Text(row.conflict.proposedValue ?? "—").font(.subheadline.bold())
                 Text("(\(row.conflict.proposedSource))").font(.caption2).foregroundStyle(.tertiary)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(fieldLabel): currently \(row.conflict.currentValue ?? "empty"), \(row.conflict.proposedSource) suggests \(row.conflict.proposedValue ?? "empty")")
             HStack(spacing: 8) {
                 Button {
                     onResolve(row, false)
@@ -110,6 +112,7 @@ private struct ConflictFieldRow: View {
                     Label("Keep Current", systemImage: "checkmark")
                 }
                 .buttonStyle(.bordered).controlSize(.small)
+                .accessibilityLabel("Keep current \(fieldLabel.lowercased()): \(row.conflict.currentValue ?? "empty")")
 
                 Button {
                     onResolve(row, true)
@@ -117,6 +120,7 @@ private struct ConflictFieldRow: View {
                     Label("Use \(row.conflict.proposedSource) Value", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.small).tint(Design.brandGold)
+                .accessibilityLabel("Use \(row.conflict.proposedSource) value for \(fieldLabel.lowercased()): \(row.conflict.proposedValue ?? "empty")")
             }
             .padding(.top, 2)
         }

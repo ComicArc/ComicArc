@@ -68,6 +68,7 @@ struct LibraryBrowserView: View {
 
 struct LibraryFilterBar: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.fileService) private var fileService
     @State private var confirmBulkDelete = false
     @State private var showBulkReassign = false
 
@@ -204,7 +205,7 @@ struct LibraryFilterBar: View {
                 isPresented: $confirmBulkDelete,
                 titleVisibility: .visible
             ) {
-                Button("Delete", role: .destructive) { vm.bulkDelete() }
+                Button("Delete", role: .destructive) { vm.bulkDelete(fileService: fileService) }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Deleted comics move to Trash and can be restored from Settings.")
@@ -237,6 +238,36 @@ struct ContinueReadingShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(vm.inProgressComics) { comic in
+                        ShelfCard(comic: comic)
+                            .onTapGesture { vm.openReader(comic) }
+                    }
+                }
+                .padding(.horizontal, Design.gridSpacing)
+            }
+        }
+        .padding(.top, Design.gridSpacing)
+    }
+}
+
+struct ReadNextShelf: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("READ NEXT")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(Design.textPrimary)
+                    .kerning(1.5)
+            }
+            .padding(.horizontal, Design.gridSpacing)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(vm.readNextSuggestions) { comic in
                         ShelfCard(comic: comic)
                             .onTapGesture { vm.openReader(comic) }
                     }
@@ -327,6 +358,10 @@ struct CharacterGroupGridView: View {
             } else {
                 if !vm.inProgressComics.isEmpty {
                     ContinueReadingShelf()
+                    Divider().overlay(Design.borderColor).padding(.vertical, 6)
+                }
+                if !vm.readNextSuggestions.isEmpty {
+                    ReadNextShelf()
                     Divider().overlay(Design.borderColor).padding(.vertical, 6)
                 }
                 LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
@@ -901,6 +936,46 @@ struct SortPicker: View {
         }
         .help("Sort: \(vm.sortOrder.rawValue)")
         .accessibilityLabel("Sort by \(vm.sortOrder.rawValue)")
+    }
+}
+
+struct FilterPicker: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    private var isActive: Bool { vm.unreadOnly || vm.minRatingFilter > 0 }
+
+    var body: some View {
+        Menu {
+            Button {
+                vm.unreadOnly.toggle()
+            } label: {
+                if vm.unreadOnly {
+                    Label("Unread Only", systemImage: "checkmark")
+                } else {
+                    Text("Unread Only")
+                }
+            }
+
+            Divider()
+
+            ForEach([0, 1, 2, 3, 4, 5], id: \.self) { threshold in
+                Button {
+                    vm.minRatingFilter = threshold
+                } label: {
+                    let label = threshold == 0 ? "Any Rating" : "★\(threshold) & Up"
+                    if vm.minRatingFilter == threshold {
+                        Label(label, systemImage: "checkmark")
+                    } else {
+                        Text(label)
+                    }
+                }
+            }
+        } label: {
+            Label("Filter", systemImage: isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 12))
+        }
+        .help(isActive ? "Filters active" : "Filter by read status or rating")
+        .accessibilityLabel(isActive ? "Filters active" : "Filter comics")
     }
 }
 

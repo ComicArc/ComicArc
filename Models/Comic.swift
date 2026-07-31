@@ -35,6 +35,10 @@ struct Comic: Identifiable, Equatable, Hashable {
     var gcdMatchConfidence: Int? = nil
     var gcdSeriesName: String? = nil
     var gcdIssueNumber: String? = nil
+    /// Why this comic is soft-deleted -- "user" (explicitly deleted) or "missing" (its file
+    /// vanished from disk during a scan). Nil for pre-existing soft-deletes, treated as "user".
+    /// Only meaningful when `deletedAt` is set; irrelevant otherwise.
+    var deletedReason: String? = nil
 
     var fileExtension: String { URL(fileURLWithPath: filePath).pathExtension.lowercased() }
     var isStarted: Bool { progress > 0 }

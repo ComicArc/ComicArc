@@ -209,7 +209,7 @@ final class LibraryScanner: @unchecked Sendable {
             // plausible and shouldn't be blocked, so this only guards a large ABSOLUTE count too.
             let suspiciouslyLarge = checkable.count >= 20 && stale.count > checkable.count / 2
             if !stale.isEmpty && !suspiciouslyLarge {
-                db.softDelete(stale); anyRemoved = true
+                db.softDelete(stale, reason: "missing"); anyRemoved = true
                 stale.forEach { ThumbnailCache.shared.evict($0) }
                 setState { $0.removed = stale.count; $0.removedIds = stale }
             } else if suspiciouslyLarge {
@@ -249,13 +249,23 @@ final class LibraryScanner: @unchecked Sendable {
         onProgress(state)
     }
 
-    func addSingle(url: URL, libraryRoots: [String]) {
+    enum AddSingleResult: Equatable {
+        case added
+        case movedOrRenamed
+        case alreadyInLibrary
+        case fileNotFound
+        case unsupportedFormat
+    }
+
+    @discardableResult
+    func addSingle(url: URL, libraryRoots: [String]) -> AddSingleResult {
         queue.sync {
             let fm = FileManager.default
             let fp = url.path
-            guard fm.fileExists(atPath: fp), supported.contains(url.pathExtension.lowercased()) else { return }
+            guard fm.fileExists(atPath: fp) else { return .fileNotFound }
+            guard supported.contains(url.pathExtension.lowercased()) else { return .unsupportedFormat }
             let knownPaths = db.knownPaths()
-            guard !knownPaths.contains(fp) else { return }
+            guard !knownPaths.contains(fp) else { return .alreadyInLibrary }
             let hash = fileHash(fp)
             // A hash match against a known comic could mean two things: a genuine duplicate file
             // (the original is still where it was), or this IS the original, just renamed/moved
@@ -272,7 +282,7 @@ final class LibraryScanner: @unchecked Sendable {
                     // (and becomes visible to Possible Duplicates, like a full rescan would do).
                 } else {
                     db.updateFilePath(forHash: h, newPath: fp)
-                    return
+                    return .movedOrRenamed
                 }
             }
             if let staleId = db.softDeletedComicId(atPath: fp) {
@@ -301,6 +311,7 @@ final class LibraryScanner: @unchecked Sendable {
                 seriesSource: meta.seriesSource, publisherSource: meta.publisherSource,
                 issueNumberSource: meta.issueNumberSource
             )])
+            return .added
         }
     }
 
@@ -311,7 +322,7 @@ final class LibraryScanner: @unchecked Sendable {
         queue.sync {
             let stale = db.stalePaths().filter { $0.path == path }.map(\.id)
             if !stale.isEmpty {
-                db.softDelete(stale)
+                db.softDelete(stale, reason: "missing")
                 stale.forEach { ThumbnailCache.shared.evict($0) }
             }
             return stale

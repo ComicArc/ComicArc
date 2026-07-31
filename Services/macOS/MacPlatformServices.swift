@@ -82,5 +82,16 @@ struct MacWindowService: WindowServiceProtocol {
         NSApp.mainWindow?.setFrameAutosaveName("ComicArcMain")
         NSApp.mainWindow?.titleVisibility = .hidden
     }
+
+    func printImage(_ image: NSImage) {
+        let imageView = NSImageView(image: image)
+        imageView.frame = NSRect(origin: .zero, size: image.size)
+        let printInfo = NSPrintInfo.shared
+        printInfo.horizontalPagination = .fit
+        printInfo.verticalPagination = .fit
+        let operation = NSPrintOperation(view: imageView, printInfo: printInfo)
+        operation.showsPrintPanel = true
+        operation.run()
+    }
 }
 #endif
