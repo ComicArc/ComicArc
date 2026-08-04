@@ -32,6 +32,16 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>ComicArc.sdef</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ComicArc uses your local network to sync reading progress with your other devices running ComicArc. Nothing leaves your network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_comicarc-sync._tcp</string>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

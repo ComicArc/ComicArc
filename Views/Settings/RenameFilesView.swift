@@ -107,8 +107,10 @@ struct RenameFilesView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Button(selectedCount == candidates.filter({ !$0.conflict }).count ? "Deselect All" : "Select All") {
+        let selected = selectedCount
+        let selectableCount = candidates.filter({ !$0.conflict }).count
+        return HStack {
+            Button(selected == selectableCount ? "Deselect All" : "Select All") {
                 let allSelected = selectedCount == candidates.filter({ !$0.conflict }).count
                 for idx in candidates.indices where !candidates[idx].conflict {
                     candidates[idx].isSelected = !allSelected
@@ -119,15 +121,15 @@ struct RenameFilesView: View {
             Spacer()
 
             if isApplying {
-                ProgressView(value: Double(applyProgress), total: Double(selectedCount))
+                ProgressView(value: Double(applyProgress), total: Double(selected))
                     .frame(width: 140)
-                Text("\(applyProgress)/\(selectedCount)").font(.caption).foregroundStyle(.secondary)
+                Text("\(applyProgress)/\(selected)").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("\(selectedCount) of \(candidates.count) selected")
+                Text("\(selected) of \(candidates.count) selected")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Rename \(selectedCount)…") { apply() }
+                Button("Rename \(selected)…") { apply() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedCount == 0)
+                    .disabled(selected == 0)
             }
         }
         .padding(16)

@@ -2,7 +2,6 @@ import Testing
 @testable import ComicArc
 
 struct ComicIdentityResolverTests {
-
     @Test("ComicInfo.xml wins regardless of folder, when present")
     func comicInfoWinsOverFolder() {
         let resolved = ComicIdentityResolver.resolve(.init(

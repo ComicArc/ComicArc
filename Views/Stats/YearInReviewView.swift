@@ -10,6 +10,7 @@ struct YearInReviewView: View {
     @State private var selectedYear: Int = Calendar.current.component(.year, from: Date())
     @State private var stats: DatabaseManager.YearInReviewStats?
     @State private var isLoading = true
+    @State private var shareCardURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -76,6 +77,15 @@ struct YearInReviewView: View {
                 }
             }
             Spacer()
+            if let shareCardURL {
+                ShareLink(item: shareCardURL, preview: SharePreview("\(selectedYear) in Review")) {
+                    Image(systemName: "square.and.arrow.up.on.square")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Share as Image")
+                .padding(.trailing, 4)
+            }
             Button("Done") { dismiss() }.keyboardShortcut(.escape)
         }
         .padding(20)
@@ -127,7 +137,7 @@ struct YearInReviewView: View {
         .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
     }
 
-    private func topRatedSection(_ topRated: [(title: String, rating: Int)]) -> some View {
+    private func topRatedSection(_ topRated: [(comicId: Int64, title: String, rating: Int)]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("TOP RATED").font(.system(size: 12, weight: .black)).foregroundStyle(.secondary).kerning(1.2)
             VStack(spacing: 0) {
@@ -187,8 +197,35 @@ struct YearInReviewView: View {
 
     private func loadStats() async {
         let year = selectedYear
-        stats = await Task.detached(priority: .userInitiated) {
+        shareCardURL = nil
+        let result = await Task.detached(priority: .userInitiated) {
             DatabaseManager.shared.yearInReview(year: year)
         }.value
+        stats = result
+
+        // Covers for the share card specifically: topRated comics were rated sometime over the
+        // whole year, not necessarily viewed recently, so (unlike Tier Lists/Reading Paths, whose
+        // item cards are on-screen right before Share is tapped) the thumbnail cache is often
+        // cold here -- worth a small background fetch rather than settling for empty covers on
+        // the one recap screen most likely to actually get shared.
+        let ids = result.topRated.map(\.comicId)
+        let images = await Task.detached(priority: .utility) {
+            ids.compactMap { id -> PlatformImage? in
+                guard let comic = DatabaseManager.shared.comic(id: id) else { return nil }
+                return ThumbnailCache.shared.thumbnailSync(for: comic)
+            }
+        }.value
+        guard selectedYear == year else { return }
+        let card = ShareCardView(
+            title: "\(year) in Review",
+            subtitle: "\(result.issuesRead) issue\(result.issuesRead == 1 ? "" : "s") read",
+            covers: images,
+            stats: [
+                ("Pages", "\(result.pagesRead)"),
+                ("Streak", "\(result.longestStreakDays)d"),
+                ("Rereads", "\(result.rereadCount)")
+            ]
+        )
+        shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "YearInReview-\(year).png")
     }
 }

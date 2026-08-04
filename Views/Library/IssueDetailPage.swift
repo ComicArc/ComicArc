@@ -211,6 +211,7 @@ struct IssueDetailPage: View {
                     current.isFavorite.toggle()
                     vm.toggleFavorite(current)
                 }
+                .accessibilityHint(current.isFavorite ? "Double-tap to remove from favorites" : "Double-tap to add to favorites")
 
                 iconAction(
                     icon: current.inReadingList ? "bookmark.fill" : "bookmark",
@@ -220,6 +221,7 @@ struct IssueDetailPage: View {
                     current.inReadingList.toggle()
                     vm.toggleReadingList(current)
                 }
+                .accessibilityHint(current.inReadingList ? "Double-tap to remove from reading list" : "Double-tap to add to reading list")
 
                 Menu {
                     Button("Choose a Page From This Issue…") { showPagePicker = true }
@@ -227,11 +229,14 @@ struct IssueDetailPage: View {
                 } label: {
                     VStack(spacing: 5) {
                         Image(systemName: "photo").font(.system(size: 22)).foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                         Text("Cover").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                     }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .accessibilityLabel("Change Cover")
+                .accessibilityHint("Choose a page from this issue or an image file to use as the cover")
             }
         }
         .padding(40)
@@ -245,12 +250,15 @@ struct IssueDetailPage: View {
                 Image(systemName: icon)
                     .font(.system(size: 22))
                     .foregroundStyle(color)
+                    .accessibilityHidden(true)
                 Text(label)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var detailColumn: some View {

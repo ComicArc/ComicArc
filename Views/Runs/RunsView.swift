@@ -319,6 +319,7 @@ struct RunDetailView: View {
     @State private var reviewText:      String    = ""
     @State private var showEditSheet    = false
     @State private var exportErrorMessage: String?
+    @State private var shareCardURL:    URL?
 
     init(run: Run, onDelete: @escaping () -> Void) {
         self.run      = run
@@ -332,7 +333,6 @@ struct RunDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-
             runPageHeader
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
@@ -411,7 +411,14 @@ struct RunDetailView: View {
             loadItems()
         }
         .sheet(isPresented: $showingAddComics) {
-            AddComicsToRunView(run: run) { loadItems() }
+            AddComicsToCollectionView(
+                title: run.title,
+                alreadyInCollection: { DatabaseManager.shared.comicIdsInRun(runId: run.id) },
+                onAdd: { ids in
+                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: ids)
+                    loadItems()
+                }
+            )
         }
         .sheet(isPresented: $showReviewSheet) {
             reviewSheet
@@ -463,6 +470,7 @@ struct RunDetailView: View {
                     LibraryViewModel.shared.setRunRating(run.id,
                                                         rating: newVal,
                                                         review: reviewText.isEmpty ? nil : reviewText)
+                    rebuildShareCard()
                 }
 
                 HStack(spacing: 6) {
@@ -500,6 +508,15 @@ struct RunDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("Export as CSV")
+
+                    if let shareCardURL {
+                        ShareLink(item: shareCardURL, preview: SharePreview(currentRun.title)) {
+                            Image(systemName: "square.and.arrow.up.on.square")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Share as Image")
+                    }
 
                     Button(role: .destructive) {
                         LibraryViewModel.shared.deleteRunWithUndo(currentRun)
@@ -569,8 +586,21 @@ struct RunDetailView: View {
         itemsLoading = true
         Task.detached(priority: .userInitiated) {
             let rows = DatabaseManager.shared.runItems(runId: runId)
-            await MainActor.run { items = rows; itemsLoading = false }
+            await MainActor.run { items = rows; itemsLoading = false; rebuildShareCard() }
         }
+    }
+
+    private func rebuildShareCard() {
+        let card = ShareCardView(
+            title: currentRun.title,
+            subtitle: "Reading Path • \(items.count) issue\(items.count == 1 ? "" : "s")",
+            covers: ShareCardCovers.fromCache(items.map(\.comic)),
+            stats: [
+                ("Issues", "\(items.count)"),
+                ("Rating", runRating > 0 ? String(repeating: "★", count: runRating) : "—")
+            ]
+        )
+        shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "ReadingPath-\(currentRun.id).png")
     }
 }
 
@@ -783,72 +813,6 @@ struct EditRunView: View {
         run.description = d
         run.buyLink     = l.isEmpty ? nil : l
         dismiss()
-    }
-}
-
-struct AddComicsToRunView: View {
-    let run:   Run
-    let onAdd: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var allComics:    [(comic: Comic, searchKey: String)] = []
-    @State private var alreadyInRun: Set<Int64>  = []
-    @State private var selected      = Set<Int64>()
-    @State private var search        = ""
-
-    private var filtered: [Comic] {
-        let candidates = allComics.filter { !alreadyInRun.contains($0.comic.id) }
-        guard !search.isEmpty else { return candidates.map(\.comic) }
-        let q = search.lowercased()
-        return candidates.filter { $0.searchKey.contains(q) }.map(\.comic)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Add to \"\(run.title)\"").font(.title3.bold())
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Add \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                    // Order by the picker's own list order, not Set iteration order (which is
-                    // unspecified) -- otherwise multi-selecting several comics lands them in the
-                    // run in an arbitrary order unrelated to anything the user saw or chose.
-                    let orderedIds = allComics.map(\.comic.id).filter { selected.contains($0) }
-                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: orderedIds)
-                    onAdd(); dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(selected.isEmpty)
-            }
-            .padding()
-
-            Divider()
-
-            TextField("Search…", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal).padding(.vertical, 8)
-
-            List(filtered, selection: $selected) { comic in
-                HStack(spacing: 10) {
-                    PublisherBadge(publisher: comic.publisher)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(comic.title).font(.body)
-                        Text(comic.series).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .tag(comic.id)
-            }
-            .listStyle(.inset)
-        }
-        .frame(width: 520, height: 520)
-        .task {
-            let runId = run.id
-            let (comics, inRun) = await Task.detached(priority: .userInitiated) {
-                (DatabaseManager.shared.allComics(), DatabaseManager.shared.comicIdsInRun(runId: runId))
-            }.value
-            allComics    = comics.map { (comic: $0, searchKey: "\($0.title) \($0.series)".lowercased()) }
-            alreadyInRun = inRun
-        }
     }
 }
 

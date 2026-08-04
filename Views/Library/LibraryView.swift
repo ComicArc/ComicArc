@@ -279,6 +279,155 @@ struct ReadNextShelf: View {
     }
 }
 
+struct OnThisDayShelf: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("ON THIS DAY")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(Design.textPrimary)
+                    .kerning(1.5)
+            }
+            .padding(.horizontal, Design.gridSpacing)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(vm.onThisDayEntries) { entry in
+                        OnThisDayCard(entry: entry)
+                            .onTapGesture { vm.openReader(entry.comic) }
+                    }
+                }
+                .padding(.horizontal, Design.gridSpacing)
+            }
+        }
+        .padding(.top, Design.gridSpacing)
+    }
+}
+
+struct OnThisDayCard: View {
+    let entry: DiaryEntry
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var thumbnail: PlatformImage?
+    @State private var isHovered = false
+
+    private var yearsAgo: Int {
+        let loggedYear = Int(entry.loggedAt.prefix(4)) ?? Calendar.current.component(.year, from: Date())
+        return max(1, Calendar.current.component(.year, from: Date()) - loggedYear)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack {
+                Design.cardBg
+                if let img = thumbnail {
+                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 90, height: 130, alignment: .top)
+                        .clipped()
+                } else {
+                    Image(systemName: "book.closed").foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 90, height: 130)
+            .comicCardStyle()
+
+            Text(entry.comic.title)
+                .font(.caption2).lineLimit(2)
+                .frame(width: 90, alignment: .leading)
+                .foregroundStyle(.secondary)
+
+            Text(yearsAgo == 1 ? "1 YEAR AGO" : "\(yearsAgo) YEARS AGO")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Design.brandGold)
+        }
+        .scaleEffect(isHovered && !reduceMotion ? 1.04 : 1.0)
+        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
+        .onHover { isHovered = $0 }
+        .onAppear { ThumbnailCache.shared.thumbnail(for: entry.comic) { thumbnail = $0 } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(entry.comic.title)
+        .accessibilityValue(yearsAgo == 1 ? "Read 1 year ago today" : "Read \(yearsAgo) years ago today")
+        .accessibilityHint("Double-tap to open in reader")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+struct RecommendedShelf: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("RECOMMENDED FOR YOU")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(Design.textPrimary)
+                    .kerning(1.5)
+            }
+            .padding(.horizontal, Design.gridSpacing)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(vm.recommendations) { comic in
+                        RecommendedCard(comic: comic)
+                            .onTapGesture { vm.openReader(comic) }
+                    }
+                }
+                .padding(.horizontal, Design.gridSpacing)
+            }
+        }
+        .padding(.top, Design.gridSpacing)
+    }
+}
+
+struct RecommendedCard: View {
+    let comic: Comic
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var thumbnail: PlatformImage?
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack {
+                Design.cardBg
+                if let img = thumbnail {
+                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 90, height: 130, alignment: .top)
+                        .clipped()
+                } else {
+                    Image(systemName: "book.closed").foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 90, height: 130)
+            .comicCardStyle()
+
+            Text(comic.title)
+                .font(.caption2).lineLimit(2)
+                .frame(width: 90, alignment: .leading)
+                .foregroundStyle(.secondary)
+
+            Text(comic.series)
+                .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
+                .frame(width: 90, alignment: .leading)
+        }
+        .scaleEffect(isHovered && !reduceMotion ? 1.04 : 1.0)
+        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
+        .onHover { isHovered = $0 }
+        .onAppear { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(comic.title)
+        .accessibilityValue("From \(comic.series), recommended based on your ratings")
+        .accessibilityHint("Double-tap to open in reader")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
 struct ShelfCard: View {
     let comic: Comic
     @EnvironmentObject var vm: LibraryViewModel
@@ -362,6 +511,14 @@ struct CharacterGroupGridView: View {
                 }
                 if !vm.readNextSuggestions.isEmpty {
                     ReadNextShelf()
+                    Divider().overlay(Design.borderColor).padding(.vertical, 6)
+                }
+                if !vm.onThisDayEntries.isEmpty {
+                    OnThisDayShelf()
+                    Divider().overlay(Design.borderColor).padding(.vertical, 6)
+                }
+                if !vm.recommendations.isEmpty {
+                    RecommendedShelf()
                     Divider().overlay(Design.borderColor).padding(.vertical, 6)
                 }
                 LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
@@ -717,7 +874,6 @@ private struct GroupCard: View {
     }
 
     private func loadThumbnail() {
-
         if let path = coverImagePath, let img = PlatformImage.fromFile(path) {
             thumbnail = img
             return
@@ -769,7 +925,6 @@ struct LibraryGridView: View {
                             cardHeight: density.cardHeight
                         )
                         .onDrag {
-
                             draggedId = comic.id
                             return NSItemProvider(object: NSString(string: String(comic.id)))
                         }
@@ -941,6 +1096,8 @@ struct SortPicker: View {
 
 struct FilterPicker: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @State private var showSaveViewPrompt = false
+    @State private var saveViewNameDraft = ""
 
     private var isActive: Bool { vm.unreadOnly || vm.minRatingFilter > 0 }
 
@@ -970,12 +1127,32 @@ struct FilterPicker: View {
                     }
                 }
             }
+
+            Divider()
+
+            Button {
+                saveViewNameDraft = ""
+                showSaveViewPrompt = true
+            } label: {
+                Label("Save Current View…", systemImage: "pin")
+            }
         } label: {
             Label("Filter", systemImage: isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 12))
         }
         .help(isActive ? "Filters active" : "Filter by read status or rating")
         .accessibilityLabel(isActive ? "Filters active" : "Filter comics")
+        .alert("Save Current View", isPresented: $showSaveViewPrompt) {
+            TextField("Name", text: $saveViewNameDraft)
+            Button("Save") {
+                let trimmed = saveViewNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                vm.saveCurrentAsView(name: trimmed)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Remembers the current sort, filter, and search so you can jump straight back to it from the sidebar.")
+        }
     }
 }
 

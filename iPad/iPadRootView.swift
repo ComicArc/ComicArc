@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 import SwiftUI
 
 struct iPadRootView: View {
@@ -227,7 +227,6 @@ private struct iPadSidebar: View {
             }
             if !vm.publishers.isEmpty {
                 Section("Publishers") {
-
                     ForEach(vm.publishers, id: \.self) { pub in
                         Label(pub, systemImage: "building.columns")
                             .foregroundStyle(Design.publisherColor(pub))
@@ -265,12 +264,27 @@ private struct iPadSidebar: View {
                     Button("See All Tags…") { showAllTags = true }
                 }
             }
+            if !vm.savedViews.isEmpty {
+                Section("Saved Views") {
+                    ForEach(vm.savedViews) { view in
+                        Button {
+                            vm.applySavedView(view)
+                        } label: {
+                            Label(view.name, systemImage: view.icon)
+                        }
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { vm.deleteSavedView(id: view.id) }
+                        }
+                    }
+                }
+            }
             Section("Discover") {
-                ForEach(visibleDiscoverItems.filter { coreDiscoverItems.contains($0) }) { item in
+                let visibleItems = visibleDiscoverItems
+                ForEach(visibleItems.filter { coreDiscoverItems.contains($0) }) { item in
                     Label(item.title, systemImage: item.icon).tag(item.destination)
                 }
 
-                let moreItems = visibleDiscoverItems.filter { !coreDiscoverItems.contains($0) }
+                let moreItems = visibleItems.filter { !coreDiscoverItems.contains($0) }
                 if !moreItems.isEmpty {
                     DisclosureGroup(isExpanded: $showMoreDiscover) {
                         ForEach(moreItems) { item in
@@ -410,6 +424,106 @@ private struct iPadReadNextShelf: View {
     }
 }
 
+private struct iPadOnThisDayShelf: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    private func yearsAgo(_ entry: DiaryEntry) -> Int {
+        let loggedYear = Int(entry.loggedAt.prefix(4)) ?? Calendar.current.component(.year, from: Date())
+        return max(1, Calendar.current.component(.year, from: Date()) - loggedYear)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("ON THIS DAY")
+                    .font(.system(size: 13, weight: .black))
+                    .kerning(1.5)
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(vm.onThisDayEntries) { entry in
+                        let years = yearsAgo(entry)
+                        Button {
+                            vm.openReader(entry.comic)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                MiniComicCard(comic: entry.comic)
+                                    .frame(width: 90, height: 130)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text(entry.comic.title)
+                                    .font(.caption2).lineLimit(2)
+                                    .frame(width: 90, alignment: .leading)
+                                    .foregroundStyle(.secondary)
+                                Text(years == 1 ? "1 YEAR AGO" : "\(years) YEARS AGO")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(Design.brandGold)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(entry.comic.title)
+                        .accessibilityValue(years == 1 ? "Read 1 year ago today" : "Read \(years) years ago today")
+                        .accessibilityHint("Double-tap to start reading")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+}
+
+private struct iPadRecommendedShelf: View {
+    @EnvironmentObject var vm: LibraryViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Design.brandGold)
+                Text("RECOMMENDED FOR YOU")
+                    .font(.system(size: 13, weight: .black))
+                    .kerning(1.5)
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(vm.recommendations) { comic in
+                        Button {
+                            vm.openReader(comic)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                MiniComicCard(comic: comic)
+                                    .frame(width: 90, height: 130)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text(comic.title)
+                                    .font(.caption2).lineLimit(2)
+                                    .frame(width: 90, alignment: .leading)
+                                    .foregroundStyle(.secondary)
+                                Text(comic.series)
+                                    .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
+                                    .frame(width: 90, alignment: .leading)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(comic.title)
+                        .accessibilityValue("From \(comic.series), recommended based on your ratings")
+                        .accessibilityHint("Double-tap to start reading")
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+}
+
 private struct iPadContentColumn: View {
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
@@ -424,6 +538,12 @@ private struct iPadContentColumn: View {
                     // only on the plain .library destination rather than every filtered view.
                     if case .library = vm.destination, !vm.readNextSuggestions.isEmpty {
                         iPadReadNextShelf()
+                    }
+                    if case .library = vm.destination, !vm.onThisDayEntries.isEmpty {
+                        iPadOnThisDayShelf()
+                    }
+                    if case .library = vm.destination, !vm.recommendations.isEmpty {
+                        iPadRecommendedShelf()
                     }
                     iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
                 }
@@ -465,7 +585,7 @@ private struct iPadContentColumn: View {
                 Button(action: { vm.scan() }) {
                     Image(systemName: "arrow.clockwise")
                 }
-                .disabled(vm.isScanning || vm.isResyncing)
+                .disabled(vm.isBusy)
                 .accessibilityLabel("Rescan Library")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -476,7 +596,7 @@ private struct iPadContentColumn: View {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
                 }
-                .disabled(vm.isScanning || vm.isResyncing || vm.libraryPaths.isEmpty)
+                .disabled(vm.isBusy || vm.libraryPaths.isEmpty)
                 .accessibilityLabel("Resync Library")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -846,6 +966,7 @@ struct iPadSettingsView: View {
     @State private var showClearLibraryConfirm = false
     @State private var showRerunOnboardingConfirm = false
     @State private var showRenameFiles  = false
+    @State private var showPeerSync     = false
     @State private var folderToRemove: String?
     @State private var folderToRemoveComicCount = 0
     @State private var cacheCleared     = false
@@ -1021,7 +1142,7 @@ struct iPadSettingsView: View {
                     Button { vm.scan() } label: {
                         Label("Scan Now", systemImage: "arrow.clockwise")
                     }
-                    .disabled(vm.isScanning || vm.isResyncing)
+                    .disabled(vm.isBusy)
                     Button {
                         vm.resyncLibrary()
                     } label: {
@@ -1034,7 +1155,7 @@ struct iPadSettingsView: View {
                             Label("Resync Library", systemImage: "arrow.triangle.2.circlepath")
                         }
                     }
-                    .disabled(vm.isScanning || vm.isResyncing)
+                    .disabled(vm.isBusy)
                 }
             } header: {
                 Text("Library")
@@ -1130,6 +1251,18 @@ struct iPadSettingsView: View {
             }
             }
 
+            if sectionMatches("Sync") {
+            Section("Sync") {
+                Text("Sync your reading progress with another device (like your Mac) over your local network -- no account, no cloud.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button {
+                    showPeerSync = true
+                } label: {
+                    Label("Sync with Nearby Device…", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            }
+
             if sectionMatches("Help") {
             Section("Help") {
                 Button {
@@ -1216,6 +1349,7 @@ struct iPadSettingsView: View {
             Text("This will erase your entire library database, all reading progress, ratings, reviews, reading paths, tier lists, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
         }
         .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
+        .sheet(isPresented: $showPeerSync) { PeerSyncView() }
         .alert("Backup Error", isPresented: Binding(get: { backupErrorMessage != nil }, set: { if !$0 { backupErrorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

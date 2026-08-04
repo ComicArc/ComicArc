@@ -2,7 +2,6 @@ import Testing
 @testable import ComicArc
 
 struct SeriesContinuityTests {
-
     // MARK: - proposeLinks
 
     @Test func proposeLinksResolvesUnambiguousBond() {

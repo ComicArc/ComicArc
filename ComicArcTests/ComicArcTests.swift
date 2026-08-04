@@ -7,7 +7,6 @@ private func roundTrip<T: Codable>(_ value: T) throws -> T {
 }
 
 struct AppDestinationTests {
-
     @Test func destinationCodableSimpleCase() throws {
         for dest: AppDestination in [.library, .continueReading, .favorites, .readingList,
                                       .runs, .stats, .history, .settings] {
@@ -73,7 +72,6 @@ struct AppDestinationTests {
 @Suite(.serialized)
 @MainActor
 struct LibraryViewModelTests {
-
     @Test func selectUpdatesDestination() {
         let vm = LibraryViewModel.shared
         let original = vm.destination
@@ -178,7 +176,6 @@ struct LibraryViewModelTests {
 }
 
 struct ComicSortClassifierTests {
-
     @Test func regularNumberedIssueIsNotSpecial() {
         #expect(ComicSortClassifier.isSpecialIssue(
             issueNumber: "1", title: "Amazing Spider-Man (1963-2012) #001", series: "Amazing Spider-Man") == false)
@@ -229,9 +226,7 @@ struct ComicSortClassifierTests {
 
 }
 
-
 struct ComicFileNamingTests {
-
     @Test func replacesUnderscoresWithSpaces() {
         let name = ComicFileNaming.cleanedFilename(
             currentName: "The_Amazing_Spider-Man_(1999) #002", fileExtension: "cbz")
@@ -260,6 +255,30 @@ struct ComicFileNamingTests {
         let name = ComicFileNaming.cleanedFilename(
             currentName: "Some_File", fileExtension: "pdf")
         #expect(name == "Some File.pdf")
+    }
+
+    @Test func collapsesExactDuplicateYearParenthetical() {
+        let name = ComicFileNaming.cleanedFilename(
+            currentName: "Batman (2016) (2016) #001", fileExtension: "cbz")
+        #expect(name == "Batman (2016) #001.cbz")
+    }
+
+    @Test func collapsesYearRangeFollowedByBareYearParenthetical() {
+        let name = ComicFileNaming.cleanedFilename(
+            currentName: "Batman (2016-2020) (2016) #001", fileExtension: "cbz")
+        #expect(name == "Batman (2016) #001.cbz")
+    }
+
+    @Test func collapsesOpenEndedYearRangeFollowedByBareYearParenthetical() {
+        let name = ComicFileNaming.cleanedFilename(
+            currentName: "Batman (2016-) (2018)", fileExtension: "cbz")
+        #expect(name == "Batman (2016).cbz")
+    }
+
+    @Test func leavesASingleYearParentheticalAlone() {
+        let name = ComicFileNaming.cleanedFilename(
+            currentName: "Batman (2016) #001", fileExtension: "cbz")
+        #expect(name == "Batman (2016) #001.cbz")
     }
 
     @Test func idealFilenamesDerivesFromExistingFilenameNotMetadata() {

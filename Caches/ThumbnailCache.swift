@@ -5,7 +5,6 @@ import ZIPFoundation
 final class ThumbnailCache: @unchecked Sendable {
     static let shared = ThumbnailCache()
     private init() {
-
         cache.countLimit      = 500
         cache.totalCostLimit  = 80 * 1024 * 1024
     }

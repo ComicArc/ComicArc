@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(visionOS)
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -62,12 +62,12 @@ struct iPadReaderView: View {
     }
 
     private func loadBookmarks() {
-        bookmarks = ReadingSessionService.shared.bookmarks(for: comic.id)
+        bookmarks = DatabaseManager.shared.bookmarks(comicId: comic.id)
         isBookmarked = bookmarks.contains { $0.page == currentPage }
     }
 
     private func toggleBookmark() {
-        isBookmarked = ReadingSessionService.shared.toggleBookmark(comicId: comic.id, page: currentPage)
+        isBookmarked = DatabaseManager.shared.toggleBookmark(comicId: comic.id, page: currentPage)
         loadBookmarks()
     }
 
@@ -415,7 +415,6 @@ struct iPadReaderView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task {
-
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled else { return }
             await MainActor.run {
@@ -425,7 +424,7 @@ struct iPadReaderView: View {
     }
 
     private func saveProgress() {
-        ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
+        LibraryViewModel.shared.updateProgress(comic: comic, page: currentPage)
     }
 
     private var isOnLastPage: Bool { pageCount > 0 && currentPage >= pageCount - 1 }
@@ -608,7 +607,6 @@ struct iPadDocumentPicker: UIViewControllerRepresentable {
     let onPick: ([URL]) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-
         let types: [UTType] = [
             UTType(filenameExtension: "cbz") ?? .zip,
             .pdf

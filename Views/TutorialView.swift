@@ -121,7 +121,6 @@ struct TutorialView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-
                 spotlightLayer(geo: geo)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -233,7 +232,6 @@ struct TutorialView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
-
                 HStack(spacing: 6) {
                     ForEach(TStep.allCases, id: \.rawValue) { s in
                         let active = s == currentStep

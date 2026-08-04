@@ -340,6 +340,7 @@ struct TierListDetailView: View {
     @State private var exportErrorMessage: String?
     @State private var draggedItemId:   Int64?
     @State private var dropTargetTier:  String?
+    @State private var shareCardURL:    URL?
 
     init(tierList: TierList, onDelete: @escaping () -> Void) {
         self.tierList     = tierList
@@ -426,7 +427,14 @@ struct TierListDetailView: View {
             loadItems()
         }
         .sheet(isPresented: $showingAddComics) {
-            AddComicsToTierListView(tierList: tierList) { loadItems() }
+            AddComicsToCollectionView(
+                title: tierList.title,
+                alreadyInCollection: { DatabaseManager.shared.comicIdsInTierList(tierListId: tierList.id) },
+                onAdd: { ids in
+                    LibraryViewModel.shared.addToTierList(tierListId: tierList.id, comicIds: ids)
+                    loadItems()
+                }
+            )
         }
         .sheet(isPresented: $showReviewSheet) {
             reviewSheet
@@ -484,6 +492,7 @@ struct TierListDetailView: View {
                     LibraryViewModel.shared.setTierListRating(currentTierList.id,
                                                               rating: newVal,
                                                               review: reviewText.isEmpty ? nil : reviewText)
+                    rebuildShareCard()
                 }
 
                 HStack(spacing: 6) {
@@ -508,6 +517,15 @@ struct TierListDetailView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .help("Export as CSV")
+
+                    if let shareCardURL {
+                        ShareLink(item: shareCardURL, preview: SharePreview(currentTierList.title)) {
+                            Image(systemName: "square.and.arrow.up.on.square")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Share as Image")
+                    }
 
                     Button(role: .destructive) { showDeleteConfirm = true } label: {
                         Text("Delete Tier List").foregroundStyle(.red)
@@ -606,8 +624,22 @@ struct TierListDetailView: View {
         itemsLoading = true
         Task.detached(priority: .userInitiated) {
             let rows = DatabaseManager.shared.tierListItems(tierListId: id)
-            await MainActor.run { items = rows; itemsLoading = false }
+            await MainActor.run { items = rows; itemsLoading = false; rebuildShareCard() }
         }
+    }
+
+    private func rebuildShareCard() {
+        let ranked = ComicTier.allCases.flatMap { items(in: $0.rawValue) }
+        let card = ShareCardView(
+            title: currentTierList.title,
+            subtitle: "Tier List • \(items.count) comic\(items.count == 1 ? "" : "s")",
+            covers: ShareCardCovers.fromCache(ranked.map(\.comic)),
+            stats: [
+                ("Comics", "\(items.count)"),
+                ("Rating", tierListRating > 0 ? String(repeating: "★", count: tierListRating) : "—")
+            ]
+        )
+        shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "TierList-\(currentTierList.id).png")
     }
 }
 
@@ -727,69 +759,6 @@ struct EditTierListView: View {
         tierList.title       = t
         tierList.description = d
         dismiss()
-    }
-}
-
-struct AddComicsToTierListView: View {
-    let tierList: TierList
-    let onAdd:    () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var allComics:      [(comic: Comic, searchKey: String)] = []
-    @State private var alreadyInList:  Set<Int64> = []
-    @State private var selected        = Set<Int64>()
-    @State private var search          = ""
-
-    private var filtered: [Comic] {
-        let candidates = allComics.filter { !alreadyInList.contains($0.comic.id) }
-        guard !search.isEmpty else { return candidates.map(\.comic) }
-        let q = search.lowercased()
-        return candidates.filter { $0.searchKey.contains(q) }.map(\.comic)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Add to \"\(tierList.title)\"").font(.title3.bold())
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Add \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                    let orderedIds = allComics.map(\.comic.id).filter { selected.contains($0) }
-                    LibraryViewModel.shared.addToTierList(tierListId: tierList.id, comicIds: orderedIds)
-                    onAdd(); dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(selected.isEmpty)
-            }
-            .padding()
-
-            Divider()
-
-            TextField("Search…", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal).padding(.vertical, 8)
-
-            List(filtered, selection: $selected) { comic in
-                HStack(spacing: 10) {
-                    PublisherBadge(publisher: comic.publisher)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(comic.title).font(.body)
-                        Text(comic.series).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .tag(comic.id)
-            }
-            .listStyle(.inset)
-        }
-        .frame(width: 520, height: 520)
-        .task {
-            let tierListId = tierList.id
-            let (comics, inList) = await Task.detached(priority: .userInitiated) {
-                (DatabaseManager.shared.allComics(), DatabaseManager.shared.comicIdsInTierList(tierListId: tierListId))
-            }.value
-            allComics     = comics.map { (comic: $0, searchKey: "\($0.title) \($0.series)".lowercased()) }
-            alreadyInList = inList
-        }
     }
 }
 

@@ -15,7 +15,9 @@ enum SettingsSearch {
         "Import": ["cbr", "unar", "rar"],
         "Sidebar": ["discover", "reorder", "hide"],
         "Fix Filenames": ["rename", "filename"],
+        "ComicInfo Write-Back": ["comicinfo", "write back", "metadata", "xml", "portable"],
         "Data": ["backup", "export", "trash", "resync", "clear", "cache", "health check"],
+        "Sync": ["nearby", "multipeer", "ipad", "mac", "progress", "wifi", "network", "peer"],
         "Backup": ["export", "import", "restore"],
         "Help": ["tutorial", "onboarding"],
         "About": ["version"],
@@ -92,6 +94,11 @@ struct SettingsView: View {
     @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
     @State private var showTrash             = false
     @State private var showRenameFiles       = false
+    @State private var showPeerSync          = false
+    #if os(macOS)
+    @State private var showConvertCBRToCBZ   = false
+    @AppStorage("comicInfoWriteBackEnabled") private var comicInfoWriteBackEnabled = false
+    #endif
     @State private var showClearConfirm      = false
     @State private var showOnboardingConfirm = false
     @State private var backupErrorMessage: String?
@@ -122,7 +129,11 @@ struct SettingsView: View {
                 if sectionMatches("Import") { importSection }
                 if sectionMatches("Sidebar") { sidebarSection }
                 if sectionMatches("Fix Filenames") { fixFilenamesSection }
+                #if os(macOS)
+                if sectionMatches("ComicInfo Write-Back") { comicInfoWriteBackSection }
+                #endif
                 if sectionMatches("Data") { dataSection }
+                if sectionMatches("Sync") { syncSection }
                 if sectionMatches("Help") { helpSection }
                 if sectionMatches("About") { aboutSection }
             }
@@ -149,6 +160,10 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
         .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
+        .sheet(isPresented: $showPeerSync) { PeerSyncView() }
+        #if os(macOS)
+        .sheet(isPresented: $showConvertCBRToCBZ) { ConvertCBRToCBZView() }
+        #endif
         .confirmationDialog("Clear Library?", isPresented: $showClearConfirm, titleVisibility: .visible) {
             Button("Clear Library", role: .destructive) { vm.clearLibrary() }
         } message: {
@@ -229,7 +244,7 @@ struct SettingsView: View {
             Button("Add Folder…") { pickFolder() }
 
             Button("Scan Now") { vm.scan() }
-                .disabled(vm.libraryPaths.isEmpty || vm.isScanning)
+                .disabled(vm.libraryPaths.isEmpty || vm.isBusy)
 
             Picker("Progress Display", selection: progressFormat) {
                 ForEach(ProgressFormat.allCases, id: \.self) { fmt in
@@ -358,6 +373,12 @@ struct SettingsView: View {
                     Text(unarAvailable ? "unar found" : "unar not found — install with: brew install unar")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                #if os(macOS)
+                if unarAvailable {
+                    Button("Convert CBR to CBZ…") { showConvertCBRToCBZ = true }
+                        .help("Re-encode RAR-based comics as CBZ in place, so they no longer need unar to read")
+                }
+                #endif
             }
         }
     }
@@ -414,6 +435,32 @@ struct SettingsView: View {
         }
     }
 
+    #if os(macOS)
+    @ViewBuilder private var comicInfoWriteBackSection: some View {
+        Section("ComicInfo Write-Back") {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Allow Writing Metadata Back to Files", isOn: $comicInfoWriteBackEnabled)
+                Text("Off by default. When on, the Metadata Inspector shows a button to write a comic's Series, Title, Issue Number, Publisher, Writer, Penciller, Volume, and Year directly into that file's own ComicInfo.xml (CBZ only) — so the metadata travels with the file if it's opened in another app. This modifies the file itself; nothing is ever written automatically, only when you tap the button for a specific comic.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+    #endif
+
+    @ViewBuilder private var syncSection: some View {
+        Section("Sync") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sync your reading progress with another device (like an iPad) over your local network -- no account, no cloud.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+            Button("Sync with Nearby Device…") { showPeerSync = true }
+        }
+    }
+
     @ViewBuilder private var dataSection: some View {
         Section("Data") {
             Button("Export Backup…") { exportBackup() }
@@ -435,7 +482,7 @@ struct SettingsView: View {
                     Text("Resync Library")
                 }
             }
-            .disabled(vm.isResyncing || vm.isScanning)
+            .disabled(vm.isBusy)
             .help("Rescans your folders and re-derives publisher, character, series, and issue number for every comic. Use this if reading order or metadata looks wrong.")
             Button("Clear Thumbnail Cache") { clearCache() }
                 .help("Remove cached thumbnails — they regenerate on demand")

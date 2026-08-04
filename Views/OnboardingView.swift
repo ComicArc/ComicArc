@@ -544,7 +544,6 @@ struct OnboardingView: View {
     }
 
     private func checkUnar() -> Bool {
-
         if let bundled = Bundle.main.executableURL?
             .deletingLastPathComponent()
             .appendingPathComponent("unar").path,

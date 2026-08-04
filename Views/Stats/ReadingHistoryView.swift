@@ -5,23 +5,24 @@ struct ReadingHistoryView: View {
     @State private var history: [HistoryEntry] = []
     @State private var isLoading = true
 
-    private var filteredHistory: [HistoryEntry] {
-        guard !vm.searchText.isEmpty else { return history }
+    private func filteredHistory(_ source: [HistoryEntry]) -> [HistoryEntry] {
+        guard !vm.searchText.isEmpty else { return source }
         let q = vm.searchText.lowercased()
-        return history.filter {
+        return source.filter {
             $0.title.lowercased().contains(q) ||
             $0.series.lowercased().contains(q) ||
             $0.publisher.lowercased().contains(q)
         }
     }
 
-    private var grouped: [(date: String, entries: [HistoryEntry])] {
-        Dictionary(grouping: filteredHistory) { Self.localDayKey(from: $0.readAt) }
+    private func grouped(_ entries: [HistoryEntry]) -> [(date: String, entries: [HistoryEntry])] {
+        Dictionary(grouping: entries) { DayGroupingFormatters.localDayKey(from: $0.readAt) }
             .sorted { $0.key > $1.key }
             .map { (date: $0.key, entries: $0.value) }
     }
 
     var body: some View {
+        let filtered = filteredHistory(history)
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("READING HISTORY")
@@ -44,7 +45,7 @@ struct ReadingHistoryView: View {
                         .font(.caption).foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredHistory.isEmpty {
+            } else if filtered.isEmpty {
                 VStack(spacing: 14) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 48)).foregroundStyle(.quaternary)
@@ -55,7 +56,7 @@ struct ReadingHistoryView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(grouped, id: \.date) { group in
+                        ForEach(grouped(filtered), id: \.date) { group in
                             Section {
                                 ForEach(group.entries) { entry in
                                     historyRow(entry)
@@ -125,45 +126,11 @@ struct ReadingHistoryView: View {
         isLoading = false
     }
 
-    // Explicitly `nonisolated` -- see the identical note in DiaryView.swift: `localDayKey` is
-    // called from inside the Task.detached in load() above, and without `nonisolated` these
-    // static members are inferred MainActor-isolated like the rest of this View type, which the
-    // compiler flags as a real isolation violation when called from that background context.
-    nonisolated private static let utcParser: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f
-    }()
-
-    nonisolated private static let localDayKeyFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    private static let localTimeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    nonisolated private static func localDayKey(from iso: String) -> String {
-        guard let d = utcParser.date(from: iso) else { return String(iso.prefix(10)) }
-        return localDayKeyFormatter.string(from: d)
-    }
-
     private func formattedGroupDate(_ iso: String) -> String {
-        guard let d = Self.localDayKeyFormatter.date(from: iso) else { return iso }
-        let out = DateFormatter()
-        out.dateStyle = .full
-        return out.string(from: d).uppercased()
+        DayGroupingFormatters.formattedGroupDate(iso)
     }
 
     private func shortTime(_ iso: String) -> String {
-        guard let d = Self.utcParser.date(from: iso) else { return "" }
-        return Self.localTimeFormatter.string(from: d)
+        DayGroupingFormatters.shortTime(iso)
     }
 }

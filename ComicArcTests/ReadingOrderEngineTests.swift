@@ -4,7 +4,6 @@ import SQLite3
 @testable import ComicArc
 
 struct ReadingOrderEngineTests {
-
     @Test func classifyRegularIssue() {
         #expect(ReadingOrderEngine.classify(issueNumber: "12", title: "Batman #12", series: "Batman") == .regular)
     }
@@ -1165,7 +1164,7 @@ final class ReadingOrderEngineDatabaseTests {
         db.updateProgress(comicId: startedId, page: 3)
         let results = db.allComics(series: "Batman", sortOrder: .manual, unreadOnly: true)
         #expect(results.contains { $0.id == unreadId })
-        #expect(!results.contains { $0.id == startedId })
+        #expect(results.contains { $0.id == startedId } == false)
     }
 
     @Test func minRatingFiltersOutAnythingBelowThreshold() throws {
@@ -1175,7 +1174,7 @@ final class ReadingOrderEngineDatabaseTests {
         db.setRating(lowId, rating: 2)
         let results = db.allComics(series: "Batman", sortOrder: .manual, minRating: 4)
         #expect(results.contains { $0.id == highId })
-        #expect(!results.contains { $0.id == lowId })
+        #expect(results.contains { $0.id == lowId } == false)
     }
 
     @Test func searchFindsComicsByNotesReviewAndTag() throws {
@@ -1198,7 +1197,7 @@ final class ReadingOrderEngineDatabaseTests {
                                              title: "Superman #1", filePath: "/Library/DC/Superman/Superman #1.cbz")
         let ids = db.comicIds(underFolder: "/Library/DC/Batman")
         #expect(ids.contains(insideId))
-        #expect(!ids.contains(outsideId))
+        #expect(ids.contains(outsideId) == false)
     }
 
     @Test func comicIdsUnderFolderDoesNotMatchASimilarlyNamedSiblingFolder() throws {
@@ -1208,7 +1207,7 @@ final class ReadingOrderEngineDatabaseTests {
                                              title: "Superman #1", filePath: "/Library/Comics2/Superman #1.cbz")
         let ids = db.comicIds(underFolder: "/Library/Comics")
         #expect(ids.contains(comicsId))
-        #expect(!ids.contains(comics2Id))
+        #expect(ids.contains(comics2Id) == false)
     }
 
     @Test func softDeleteRecordsWhetherItWasUserOrMissingInitiated() throws {

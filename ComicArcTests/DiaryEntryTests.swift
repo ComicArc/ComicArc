@@ -117,6 +117,57 @@ final class DiaryEntryTests {
         #expect(entries.contains { !$0.isReread && $0.rating == 3 })
     }
 
+    private func loggedAt(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        return f.string(from: date)
+    }
+
+    private func loggedAt(yearsAgo: Int, from date: Date = Date()) -> String {
+        let cal = Calendar(identifier: .gregorian)
+        let shifted = cal.date(byAdding: .year, value: -yearsAgo, to: date)!
+        return loggedAt(shifted)
+    }
+
+    @Test func onThisDayReturnsEntriesFromPastYearsOnTheSameCalendarDay() throws {
+        let id = try insertComic(title: "Batman #1")
+        db.restoreDiaryEntry(comicId: id, rating: 4, review: nil, isReread: false, loggedAt: loggedAt(yearsAgo: 3))
+
+        let entries = db.onThisDayEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.rating == 4)
+    }
+
+    @Test func onThisDayExcludesEntriesLoggedThisYear() throws {
+        let id = try insertComic(title: "Batman #1")
+        db.restoreDiaryEntry(comicId: id, rating: 5, review: nil, isReread: false, loggedAt: loggedAt(yearsAgo: 0))
+
+        #expect(db.onThisDayEntries().isEmpty)
+    }
+
+    @Test func onThisDayExcludesEntriesFromADifferentCalendarDay() throws {
+        let id = try insertComic(title: "Batman #1")
+        let cal = Calendar(identifier: .gregorian)
+        let notToday = cal.date(byAdding: .day, value: 10, to: Date())!
+        db.restoreDiaryEntry(comicId: id, rating: 3, review: nil, isReread: false,
+                             loggedAt: loggedAt(yearsAgo: 2, from: notToday))
+
+        #expect(db.onThisDayEntries().isEmpty)
+    }
+
+    @Test func onThisDayOrdersMostRecentYearFirst() throws {
+        let older = try insertComic(title: "Batman #1")
+        let newer = try insertComic(title: "Batman #2")
+        db.restoreDiaryEntry(comicId: older, rating: 4, review: nil, isReread: false, loggedAt: loggedAt(yearsAgo: 5))
+        db.restoreDiaryEntry(comicId: newer, rating: 5, review: nil, isReread: false, loggedAt: loggedAt(yearsAgo: 1))
+
+        let entries = db.onThisDayEntries()
+        #expect(entries.count == 2)
+        #expect(entries.first?.comic.id == newer)
+    }
+
     @Test func allReadingOrderOverridesReturnsFilePathPositionAndReason() throws {
         let id = try insertComic(title: "Batman Annual #1")
         db.setReadingOrderOverride(comicId: id, position: 42, reason: "Placed manually by the user")

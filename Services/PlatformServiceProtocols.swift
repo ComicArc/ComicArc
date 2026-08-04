@@ -70,7 +70,7 @@ struct NoOpWindowService: WindowServiceProtocol {
 func makePlatformFileService() -> any FileServiceProtocol {
     #if os(macOS)
     MacFileService()
-    #elseif os(iOS)
+    #elseif os(iOS) || os(visionOS)
     IOSFileService()
     #else
     NoOpFileService()

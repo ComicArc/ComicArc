@@ -6,7 +6,6 @@ import Sparkle
 
 #if os(macOS)
 final class AppDelegate: NSObject, NSApplicationDelegate {
-
     private let servicesProvider = ComicArcServicesProvider()
 
     lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
@@ -88,6 +87,7 @@ struct ComicArcApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
     @StateObject private var vm = LibraryViewModel.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
 
@@ -108,20 +108,20 @@ struct ComicArcApp: App {
                         vm.reload()
                     }
                 } else {
-                    #if os(macOS)
                     ContentView().environmentObject(vm)
-                    #else
-                    iPadRootView().environmentObject(vm)
-                    #endif
                 }
             }
-            #if os(macOS)
             .frame(minWidth: 960, minHeight: 640)
-            #endif
             .environment(\.fileService, fileService)
             .environment(\.windowService, windowService)
             .onContinueUserActivity(CSSearchableItemActionType) { activity in
                 vm.openComicFromSpotlight(activity)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // Covers both "scan on cold launch" (the first .active transition) and "scan
+                // when the app is brought back to the foreground" (every subsequent one) --
+                // same trigger the iPad app already uses, so both platforms behave identically.
+                if phase == .active, !vm.libraryPaths.isEmpty { vm.scan() }
             }
         }
         #if os(macOS)
@@ -148,10 +148,10 @@ struct ComicArcApp: App {
             CommandMenu("Library") {
                 Button("Scan Library") { vm.scan() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(vm.libraryPaths.isEmpty || vm.isScanning || vm.isResyncing)
+                    .disabled(vm.libraryPaths.isEmpty || vm.isBusy)
                 Button("Resync Library") { vm.resyncLibrary() }
                     .keyboardShortcut("r", modifiers: [.command, .shift, .option])
-                    .disabled(vm.libraryPaths.isEmpty || vm.isResyncing || vm.isScanning)
+                    .disabled(vm.libraryPaths.isEmpty || vm.isBusy)
                     .help("Rescans and re-derives metadata for every comic — use if reading order or metadata looks wrong")
                 Button("Import Files…") {
                     NotificationCenter.default.post(name: .triggerImport, object: nil)

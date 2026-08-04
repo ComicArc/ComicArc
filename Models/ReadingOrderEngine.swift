@@ -55,7 +55,6 @@ enum ComicType: String, Equatable {
 /// including manual overrides and curated cross-series Reading Runs) is a *view* over this
 /// timeline, not the timeline itself.
 enum ReadingOrderEngine {
-
     /// Bounded to the comic's own issue-number/title text, deliberately excluding `series` -- a
     /// series (or story-arc) *name* that happens to contain a type keyword as an ordinary word
     /// (e.g. "Extra Special Adventures") must never misclassify every issue in it. A real annual/

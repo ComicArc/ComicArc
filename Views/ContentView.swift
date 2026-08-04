@@ -366,11 +366,10 @@ struct ContentView: View {
             }
         } else {
             Button { vm.scan() } label: {
-
                 Label("Scan", systemImage: "magnifyingglass")
             }
             .help("Scan library folders for new comics (⇧⌘R)")
-            .disabled(vm.libraryPaths.isEmpty)
+            .disabled(vm.libraryPaths.isEmpty || vm.isResyncing)
         }
     }
 
@@ -437,6 +436,8 @@ struct SidebarView: View {
     @State private var dropTargetPublisher: String?
     @State private var showAllTags = false
     @State private var showMoreDiscover = false
+    @State private var renamingSavedView: SavedLibraryView?
+    @State private var renameSavedViewDraft = ""
 
     // The Discover section is a lot to take in on day one (up to 9 items) with nothing
     // distinguishing daily-use items from deep-tracking extras -- these three are the ones a
@@ -506,13 +507,21 @@ struct SidebarView: View {
                 }
             }
 
+            if !vm.savedViews.isEmpty {
+                Section("Saved Views") {
+                    ForEach(vm.savedViews) { view in
+                        savedViewRow(view)
+                    }
+                }
+            }
 
             Section("Discover") {
-                ForEach(visibleDiscoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
+                let discoverItems = visibleDiscoverItems
+                ForEach(discoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
                     navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
                 }
 
-                let moreItems = visibleDiscoverItems.filter { !coreDiscoverItems.contains($0) }
+                let moreItems = discoverItems.filter { !coreDiscoverItems.contains($0) }
                 if !moreItems.isEmpty {
                     DisclosureGroup(isExpanded: $showMoreDiscover) {
                         ForEach(moreItems) { discoverItem in
@@ -590,13 +599,48 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
+    private func savedViewRow(_ view: SavedLibraryView) -> some View {
+        Button {
+            vm.applySavedView(view)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: view.icon).frame(width: 16)
+                Text(view.name)
+                Spacer()
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Rename…") {
+                renamingSavedView = view
+                renameSavedViewDraft = view.name
+            }
+            Button("Delete", role: .destructive) { vm.deleteSavedView(id: view.id) }
+        }
+        .accessibilityLabel(view.name)
+        .accessibilityAddTraits(.isButton)
+        .alert("Rename Saved View", isPresented: Binding(
+            get: { renamingSavedView?.id == view.id },
+            set: { active in if !active { renamingSavedView = nil } }
+        )) {
+            TextField("Name", text: $renameSavedViewDraft)
+            Button("Save") {
+                let trimmed = renameSavedViewDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { vm.renameSavedView(id: view.id, to: trimmed) }
+                renamingSavedView = nil
+            }
+            Button("Cancel", role: .cancel) { renamingSavedView = nil }
+        }
+    }
+
     private func navRow(_ label: String,
                         icon: String? = nil,
                         publisherColor: Color? = nil,
                         item: AppDestination,
                         trailingText: String? = nil) -> some View {
         Button {
-
             if case .publisher(let p) = item, case .publisher(let cur) = vm.destination, p == cur {
                 vm.select(.library)
             } else {

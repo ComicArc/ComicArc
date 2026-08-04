@@ -19,11 +19,25 @@ enum ComicSortClassifier {
 /// and its exact output was hard to predict from looking at the original filename. A plain text
 /// cleanup is always predictable: the same substitution, every time, with no hidden reasoning.
 enum ComicFileNaming {
+    /// Matches a year (optionally a range like "2016-2020" or open-ended "2016-") in parentheses,
+    /// immediately followed by a second, redundant bare-year parenthetical -- e.g. some scanners/
+    /// downloaders leave both "Batman (2016-2020) (2016)" and "Batman (2016) (2016)" behind.
+    /// Always keeps the first parenthetical's year and drops the second one entirely.
+    private static let duplicateYearParenthetical = try! NSRegularExpression(
+        pattern: #"\((\d{4})(?:-\d{0,4})?\)\s+\(\d{4}\)"#
+    )
+
+    private static func collapsingDuplicateYearParenthetical(_ name: String) -> String {
+        let range = NSRange(name.startIndex..., in: name)
+        return duplicateYearParenthetical.stringByReplacingMatches(in: name, range: range, withTemplate: "($1)")
+    }
+
     /// `currentName` is the file's existing name, without its extension.
     static func cleanedFilename(currentName: String, fileExtension: String) -> String {
         var name = currentName.replacingOccurrences(of: "_", with: " ")
         while name.contains("  ") { name = name.replacingOccurrences(of: "  ", with: " ") }
         name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        name = collapsingDuplicateYearParenthetical(name)
         return "\(name).\(fileExtension)"
     }
 

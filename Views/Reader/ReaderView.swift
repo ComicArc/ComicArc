@@ -691,7 +691,7 @@ struct ReaderView: View {
                             }
                             Spacer()
                             Button {
-                                ReadingSessionService.shared.setBookmarkFavorite(
+                                DatabaseManager.shared.setBookmarkFavorite(
                                     comicId: comic.id, page: bm.page, isFavorite: !bm.isFavorite)
                                 loadBookmarks()
                             } label: {
@@ -710,7 +710,7 @@ struct ReaderView: View {
                     }
                     .onDelete { idx in
                         idx.forEach { i in
-                            ReadingSessionService.shared.toggleBookmark(comicId: comic.id, page: bookmarks[i].page)
+                            DatabaseManager.shared.toggleBookmark(comicId: comic.id, page: bookmarks[i].page)
                         }
                         loadBookmarks()
                     }
@@ -783,7 +783,7 @@ struct ReaderView: View {
     }
 
     private func toggleBookmark() {
-        isBookmarked = ReadingSessionService.shared.toggleBookmark(comicId: comic.id, page: currentPage)
+        isBookmarked = DatabaseManager.shared.toggleBookmark(comicId: comic.id, page: currentPage)
         loadBookmarks()
     }
 
@@ -795,12 +795,12 @@ struct ReaderView: View {
     }
 
     private func loadBookmarks() {
-        bookmarks    = ReadingSessionService.shared.bookmarks(for: comic.id)
+        bookmarks    = DatabaseManager.shared.bookmarks(comicId: comic.id)
         isBookmarked = bookmarks.contains { $0.page == currentPage }
     }
 
     private func saveProgress() {
-        ReadingSessionService.shared.updateProgress(comic: comic, page: currentPage)
+        LibraryViewModel.shared.updateProgress(comic: comic, page: currentPage)
     }
 
     private func saveProgressDebounced() {
@@ -811,7 +811,7 @@ struct ReaderView: View {
     }
 
     private func logSession() {
-        ReadingSessionService.shared.logSession(comicId: comic.id, from: sessionStartPage, to: currentPage)
+        DatabaseManager.shared.logReadingSession(comicId: comic.id, pageStart: min(sessionStartPage, currentPage), pageEnd: max(sessionStartPage, currentPage))
     }
 
     /// Looks up the next issue in this series (if any) so the "Up Next" overlay and autoplay's
@@ -911,7 +911,6 @@ struct PagedModeView: View {
                 if isLoading {
                     ProgressView().tint(.white)
                 } else if effectiveDoublePage, let left = imageLeft {
-
                     HStack(spacing: 1) {
                         if rtl {
                             if let right = imageRight { pageImage(right, size: geo.size) }

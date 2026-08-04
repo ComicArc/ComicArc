@@ -136,7 +136,11 @@ struct SeriesManagerView: View {
     }
 
     private var issuesSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // Hoisted so each filter over `issues` runs once per render instead of once per
+        // reference below -- both are computed properties re-derived on every access.
+        let flagged = flaggedCount
+        let visible = visibleIssues
+        return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 sectionLabel("Issue Order")
                 Spacer()
@@ -147,13 +151,13 @@ struct SeriesManagerView: View {
                     }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(.red.opacity(0.8))
                 }
-                Text("\(visibleIssues.count) issues · drag, ⌘↑/⌘↓, or use Move Near… to reorder")
+                Text("\(visible.count) issues · drag, ⌘↑/⌘↓, or use Move Near… to reorder")
                     .font(.caption).foregroundStyle(.tertiary)
             }
 
-            if flaggedCount > 0 {
+            if flagged > 0 {
                 Toggle(isOn: $showOnlyFlagged) {
-                    Label("Show only possibly misplaced (\(flaggedCount))", systemImage: "exclamationmark.triangle.fill")
+                    Label("Show only possibly misplaced (\(flagged))", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                 }
@@ -161,7 +165,7 @@ struct SeriesManagerView: View {
             }
 
             List(selection: $selectedIssueId) {
-                ForEach(visibleIssues) { issue in
+                ForEach(visible) { issue in
                     issueRow(issue)
                         .listRowBackground(Design.surfaceBg)
                         .listRowSeparatorTint(Design.borderColor)

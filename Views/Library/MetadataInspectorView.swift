@@ -9,6 +9,14 @@ struct MetadataInspectorView: View {
     @State private var isRenaming = false
     @State private var renameError: String?
     @State private var showGCDPicker = false
+    #if os(macOS)
+    // ComicInfo write-back depends on LibraryScanner.writeComicInfoBack, which shells out via
+    // the same macOS-only archive-writing path as CBR-to-CBZ conversion -- no iPad equivalent.
+    @AppStorage("comicInfoWriteBackEnabled") private var writeBackEnabled = false
+    @State private var isWritingBack = false
+    @State private var writeBackError: String?
+    @State private var writeBackSucceeded = false
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -59,6 +67,26 @@ struct MetadataInspectorView: View {
                         row("Alternate Number", info.alternateNumber)
                         row("ComicInfo Issue Number", info.comicInfoIssueNumber)
                         row("Publication Date", publicationDate(info))
+
+                        #if os(macOS)
+                        if writeBackEnabled && info.comic.fileExtension == "cbz" {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button(isWritingBack ? "Writing…" : "Write Current Metadata to File") {
+                                    writeBack()
+                                }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .disabled(isWritingBack)
+
+                                if writeBackSucceeded {
+                                    Label("Saved to ComicInfo.xml", systemImage: "checkmark.circle.fill")
+                                        .font(.caption2).foregroundStyle(.green)
+                                }
+                                Text("Writes Series, Title, Issue Number, Publisher, Writer, Penciller, Volume, and Year from what ComicArc shows above directly into this file's ComicInfo.xml, so the same info travels with the file if it's opened elsewhere.")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            .padding(.top, 4)
+                        }
+                        #endif
                     }
 
                     Section("Offline Comics Database Match") {
@@ -128,7 +156,41 @@ struct MetadataInspectorView: View {
         } message: {
             Text(renameError ?? "")
         }
+        #if os(macOS)
+        .alert("Couldn't Write ComicInfo.xml", isPresented: Binding(
+            get: { writeBackError != nil },
+            set: { if !$0 { writeBackError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(writeBackError ?? "")
+        }
+        #endif
     }
+
+    #if os(macOS)
+    private func writeBack() {
+        guard let comic = info?.comic else { return }
+        isWritingBack = true
+        writeBackSucceeded = false
+        Task.detached(priority: .userInitiated) {
+            let result = LibraryScanner.shared.writeComicInfoBack(comic: comic)
+            await MainActor.run {
+                isWritingBack = false
+                switch result {
+                case .success:
+                    writeBackSucceeded = true
+                case .failure(.notACBZ):
+                    writeBackError = "Only CBZ files support writing metadata back."
+                case .failure(.archiveOpenFailed):
+                    writeBackError = "Couldn't open this file to write to it. It may be in use or no longer accessible."
+                case .failure(.zipWriteFailed):
+                    writeBackError = "Couldn't save the updated metadata into this file."
+                }
+            }
+        }
+    }
+    #endif
 
     private func load() async {
         let id = comicId

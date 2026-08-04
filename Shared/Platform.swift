@@ -31,7 +31,6 @@ import AppKit
 public typealias PlatformImage = NSImage
 
 extension NSImage {
-
     static func resized(source: NSImage, to target: CGSize) -> NSImage? {
         guard let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let src = CGSize(width: cg.width, height: cg.height)

@@ -40,7 +40,6 @@ enum GridDensity: String, CaseIterable {
 }
 
 enum Design {
-
     static let cardWidth:       CGFloat = 172
     static let cardHeight:      CGFloat = 258
     static let groupCardWidth:  CGFloat = 220
@@ -50,6 +49,23 @@ enum Design {
     static let groupCardHeight: CGFloat = 330
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
+
+    /// A shared spacing/corner-radius scale -- lets new code reach for `Design.Spacing.md` instead
+    /// of guessing at another one-off magic number, without forcing a mechanical rewrite of every
+    /// existing `.padding(_, 12)` call site (most of which are fine as plain literals already).
+    enum Spacing {
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 24
+    }
+
+    enum Radius {
+        static let sm: CGFloat = 4
+        static let md: CGFloat = 8
+        static let lg: CGFloat = 12
+    }
 
     static var appBackground: Color { AppTheme.current.palette.appBackground }
     static var navBackground: Color { AppTheme.current.palette.navBackground }
@@ -223,7 +239,7 @@ struct PublisherBadge: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(Design.publisherColor(publisher))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.sm))
             .shadow(color: Design.publisherColor(publisher).opacity(0.3), radius: 4, x: 0, y: 2)
     }
 }

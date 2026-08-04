@@ -104,6 +104,7 @@ final class YearInReviewTests {
         let review = db.yearInReview(year: 2026)
         #expect(review.topRated.first?.title == "ASM #1", "5-star should rank above 4-star")
         #expect(review.topRated.count == 2)
+        #expect(review.topRated.first?.comicId == asm, "comicId must identify the actual rated comic, e.g. for looking up its cover")
     }
 
     @Test func yearInReviewReturnsZeroesForYearWithNoActivity() throws {
