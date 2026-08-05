@@ -24,7 +24,7 @@ struct ShareCardView: View {
                 HStack(spacing: 8) {
                     ForEach(Array(covers.prefix(6).enumerated()), id: \.offset) { _, img in
                         Image(platformImage: img)
-                            .resizable().aspectRatio(contentMode: .fill)
+                            .comicCoverStyle()
                             .frame(width: 74, height: 108)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }

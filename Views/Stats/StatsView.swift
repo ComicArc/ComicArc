@@ -367,12 +367,7 @@ private struct DashboardCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Design.cardBg)
-            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
-            .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
+        content.dashboardCardStyle(padding: padding)
     }
 }
 

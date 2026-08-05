@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import SwiftUI
 import ZIPFoundation
 
 final class ThumbnailCache: @unchecked Sendable {
@@ -27,6 +28,13 @@ final class ThumbnailCache: @unchecked Sendable {
     // it. `globalGeneration` covers clearAll(), which invalidates every comic at once.
     private var generations: [Int64: Int] = [:]
     private var globalGeneration = 0
+
+    private let accentColorLock = NSLock()
+    private var accentColors: [Int64: Color] = [:]
+    // Without this, a comic with no color sidecar (extraction failed, or genuinely no color)
+    // re-hits disk on every single appearance forever -- there was previously no way to
+    // distinguish "never looked up" from "looked up, nothing there".
+    private var noAccentColorIds: Set<Int64> = []
 
     private let coversDir: URL = {
         let dir = DatabaseManager.dataDir.appendingPathComponent("covers")
@@ -62,6 +70,10 @@ final class ThumbnailCache: @unchecked Sendable {
             if let img = validatedDiskImage(at: diskURL) {
                 cache.setObject(img, forKey: key, cost: img.byteSize)
                 result = img
+                // Backfills the accent-color sidecar for a cover cached before this feature
+                // existed -- without this, every pre-existing thumbnail would need an eviction
+                // just to ever get an accent color.
+                if accentColorFromCache(comicId: comicId) == nil { saveAccentColor(for: comicId, from: img) }
             } else {
                 try? FileManager.default.removeItem(at: diskURL)
                 let img = extract(from: filePath)
@@ -77,6 +89,7 @@ final class ThumbnailCache: @unchecked Sendable {
                     if stillCurrent {
                         cache.setObject(thumb, forKey: key, cost: thumb.byteSize)
                         save(thumb, to: diskURL)
+                        saveAccentColor(for: comicId, from: thumb)
                     }
                 }
                 result = thumb
@@ -99,6 +112,45 @@ final class ThumbnailCache: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Mirrors `thumbnail(for:completion:)` -- the accent color is computed alongside the
+    /// thumbnail itself (see `saveAccentColor`), so getting it just means waiting for whatever
+    /// already produces or fetches that thumbnail, then reading the color back out of cache.
+    func accentColor(for comic: Comic, completion: @escaping (Color?) -> Void) {
+        if let cached = accentColorFromCache(comicId: comic.id) { completion(cached); return }
+        thumbnail(for: comic) { [weak self] _ in
+            completion(self?.accentColorFromCache(comicId: comic.id))
+        }
+    }
+
+    func accentColorFromCache(comicId: Int64) -> Color? {
+        accentColorLock.lock()
+        if let cached = accentColors[comicId] { accentColorLock.unlock(); return cached }
+        if noAccentColorIds.contains(comicId) { accentColorLock.unlock(); return nil }
+        accentColorLock.unlock()
+        let url = coversDir.appendingPathComponent("\(comicId).color")
+        guard let hex = try? String(contentsOf: url, encoding: .utf8), let color = Color(hex: hex) else {
+            accentColorLock.lock(); noAccentColorIds.insert(comicId); accentColorLock.unlock()
+            return nil
+        }
+        accentColorLock.lock(); accentColors[comicId] = color; accentColorLock.unlock()
+        return color
+    }
+
+    private func saveAccentColor(for comicId: Int64, from image: PlatformImage) {
+        guard let color = image.averageColor(), let hex = color.toHexString() else { return }
+        accentColorLock.lock(); accentColors[comicId] = color; noAccentColorIds.remove(comicId); accentColorLock.unlock()
+        let url = coversDir.appendingPathComponent("\(comicId).color")
+        try? hex.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func evictAccentColor(_ comicId: Int64) {
+        accentColorLock.lock()
+        accentColors.removeValue(forKey: comicId)
+        noAccentColorIds.remove(comicId)
+        accentColorLock.unlock()
+        try? FileManager.default.removeItem(at: coversDir.appendingPathComponent("\(comicId).color"))
     }
 
     func thumbnailFromCache(comicId: Int64) -> PlatformImage? {
@@ -152,6 +204,7 @@ final class ThumbnailCache: @unchecked Sendable {
         cache.removeObject(forKey: NSNumber(value: comicId))
         let url = coversDir.appendingPathComponent("\(comicId).jpg")
         try? FileManager.default.removeItem(at: url)
+        evictAccentColor(comicId)
     }
 
     func clearAll() {
@@ -159,8 +212,11 @@ final class ThumbnailCache: @unchecked Sendable {
         globalGeneration += 1
         inflightLock.unlock()
         cache.removeAllObjects()
+        accentColorLock.lock(); accentColors.removeAll(); noAccentColorIds.removeAll(); accentColorLock.unlock()
         if let files = try? FileManager.default.contentsOfDirectory(at: coversDir, includingPropertiesForKeys: nil) {
-            for file in files where file.pathExtension == "jpg" { try? FileManager.default.removeItem(at: file) }
+            for file in files where file.pathExtension == "jpg" || file.pathExtension == "color" {
+                try? FileManager.default.removeItem(at: file)
+            }
         }
     }
 
@@ -177,6 +233,7 @@ final class ThumbnailCache: @unchecked Sendable {
         let diskURL = coversDir.appendingPathComponent("\(comicId).jpg")
         save(resized, to: diskURL)
         cache.removeObject(forKey: NSNumber(value: comicId))
+        saveAccentColor(for: comicId, from: resized)
     }
 
     func saveCustomGroupCover(groupName: String, publisher: String, imageURL: URL) -> String? {

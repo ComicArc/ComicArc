@@ -219,7 +219,9 @@ struct iPadReaderView: View {
             .onEnded { _ in
                 lastScale = scale
                 if scale <= 1.05 {
-                    withAnimation(.spring()) { scale = 1; offset = .zero }
+                    // Matches the Mac reader's identical zoom-reset snap (ReaderView.swift),
+                    // rather than a bare, uncalibrated `.spring()`.
+                    withAnimation(Design.springGentle) { scale = 1; offset = .zero }
                     lastScale = 1
                     lastOffset = .zero
                 }

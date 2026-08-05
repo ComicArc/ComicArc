@@ -764,10 +764,8 @@ private struct iPadComicTile: View {
             Group {
                 if let img = thumbnail {
                     Image(platformImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .clipped()
+                        .comicCoverStyle()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Design.cardBg
                         .overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))
@@ -815,7 +813,7 @@ private struct iPadComicHero: View {
         HStack(alignment: .top, spacing: 20) {
             Group {
                 if let img = thumbnail {
-                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fit)
+                    Image(platformImage: img).comicCoverStyle()
                 } else {
                     RoundedRectangle(cornerRadius: Design.cardCorner)
                         .fill(Color.secondary.opacity(0.15))

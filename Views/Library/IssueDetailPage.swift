@@ -7,12 +7,17 @@ struct IssueDetailPage: View {
 
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.fileService) private var fileService
+    @Environment(\.readerNamespace) private var readerNamespace
 
     @State private var current:        Comic
     @State private var tags:           [Tag]    = []
     @State private var newTagText:     String   = ""
     @State private var newTagCategory: TagCategory = .custom
     @State private var thumbnail:      PlatformImage? = nil
+    /// This comic's own cover-driven accent -- scoped to just this page's cover glow/wash, never
+    /// written into `Design`/`AppTheme`'s global palette, which stays the stable "home base" look
+    /// everywhere else in the app.
+    @State private var accentColor:    Color? = nil
     @State private var showingEdit:    Bool     = false
     @State private var showMetadataInspector: Bool = false
     @State private var reviewDraft:    String   = ""
@@ -21,6 +26,11 @@ struct IssueDetailPage: View {
     @State private var missingIssues:  [String] = []
     @State private var showPagePicker: Bool     = false
     @State private var coverChangeError: String?
+
+    // Named instead of repeating the literal at both the image and its placeholder-fallback
+    // sibling below -- the image's own frame also fixes the exact bounds `heroGeometry` captures
+    // for the reader morph, so it can't simply be dropped in favor of the outer one alone.
+    private let coverSize = CGSize(width: 256, height: 384)
 
     init(comic: Comic, onBack: @escaping () -> Void) {
         self.comic  = comic
@@ -50,6 +60,7 @@ struct IssueDetailPage: View {
         .onChange(of: comic) { _, c in
             current = c
             thumbnail = nil
+            accentColor = nil
             loadData()
         }
         .sheet(isPresented: $showingEdit, onDismiss: { loadData() }) {
@@ -153,7 +164,9 @@ struct IssueDetailPage: View {
             Group {
                 if let img = thumbnail {
                     Image(platformImage: img)
-                        .resizable().aspectRatio(contentMode: .fit)
+                        .comicCoverStyle()
+                        .frame(width: coverSize.width, height: coverSize.height)
+                        .heroGeometry(id: current.id, in: readerNamespace)
                 } else {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Design.cardBg)
@@ -170,9 +183,9 @@ struct IssueDetailPage: View {
                         }
                 }
             }
-            .frame(width: 256, height: 372)
+            .frame(width: coverSize.width, height: coverSize.height)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.55), radius: 24, x: 0, y: 10)
+            .shadow(color: (accentColor ?? .black).opacity(accentColor != nil ? 0.4 : 0.55), radius: 24, x: 0, y: 10)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Design.borderColor, lineWidth: 1)
@@ -241,7 +254,15 @@ struct IssueDetailPage: View {
         }
         .padding(40)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Design.navBackground.opacity(0.4))
+        .background(
+            // A faint wash of this comic's own cover color behind its detail page -- the same
+            // "now playing" ambient-tint idea, scoped to just this one column so it never
+            // competes with the neutral home-base look everywhere else in the app.
+            ZStack {
+                Design.navBackground.opacity(0.4)
+                if let accentColor { accentColor.opacity(0.16) }
+            }
+        )
     }
 
     private func iconAction(icon: String, color: Color, label: String, action: @escaping () -> Void) -> some View {
@@ -509,6 +530,10 @@ struct IssueDetailPage: View {
         ThumbnailCache.shared.thumbnail(for: current) { img in
             guard comicId == self.current.id else { return }
             self.thumbnail = img
+        }
+        ThumbnailCache.shared.accentColor(for: current) { color in
+            guard comicId == self.current.id else { return }
+            withAnimation(Design.springGentle) { self.accentColor = color }
         }
         Task.detached(priority: .userInitiated) {
             let t   = DatabaseManager.shared.tags(for: comicId)

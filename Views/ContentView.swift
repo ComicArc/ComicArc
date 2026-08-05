@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showTutorial = false
     @State private var showRenameFiles = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @Namespace private var readerNamespace
 
     var body: some View {
         ZStack {
@@ -35,7 +36,7 @@ struct ContentView: View {
 
             if let comic = vm.readerComic {
                 ReaderView(comic: comic, initialPage: vm.readerInitialPage) {
-                    withAnimation(.easeInOut(duration: 0.25)) { vm.closeReader() }
+                    vm.closeReader()
                 } onOpenComic: { next in
                     vm.openReader(next)
                 }
@@ -106,7 +107,8 @@ struct ContentView: View {
         // visually breaking this app's fixed-width card grids and toolbars.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .frame(minWidth: 960, minHeight: 640)
-        .animation(.easeInOut(duration: 0.2), value: vm.readerComic?.id)
+        .environment(\.readerNamespace, readerNamespace)
+        .animation(Design.springGentle, value: vm.readerComic?.id)
         .onChange(of: vm.readerComic?.id) { _, newId in
             withAnimation(.easeInOut(duration: 0.25)) {
                 columnVisibility = newId != nil ? .detailOnly : .all
@@ -578,6 +580,11 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("ComicArc")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if vm.readingStreak > 0 {
+                streakIndicator
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if !vm.isLibraryAvailable {
@@ -596,6 +603,20 @@ struct SidebarView: View {
         .sheet(isPresented: $showAllTags) {
             AllTagsView().environmentObject(vm)
         }
+    }
+
+    /// Ambient, always-visible-while-browsing echo of the same number Stats/Year in Review
+    /// already show -- pinned above the scrollable sidebar content (not just the first row in
+    /// it) specifically so it stays put while scrolling through Publishers/Tags/Discover.
+    private var streakIndicator: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "flame.fill").foregroundStyle(.orange)
+            Text("\(vm.readingStreak)-day streak").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(.orange.opacity(0.08))
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

@@ -57,7 +57,22 @@ struct ReaderView: View {
     @State private var dismissedNextIssuePrompt = false
 
     @Environment(\.windowService) private var windowService
+    @Environment(\.readerNamespace) private var readerNamespace
     @FocusState private var isFocused: Bool
+
+    /// A brief hero layer that grows from wherever this comic's cover was on screen (a grid card
+    /// or IssueDetailPage) into the reader, then fades to reveal the real paginated content
+    /// underneath -- and the reverse on close. Not tied to whether the first page has actually
+    /// finished decoding: that page is loading in parallel regardless, and gating this on it
+    /// would mean a slow page turns "cover morph" into "cover hangs there," which reads as
+    /// broken rather than as ordinary loading time.
+    @State private var heroCoverImage: PlatformImage?
+    @State private var showHeroCover = true
+    @State private var isClosing = false
+
+    @State private var showFinishToast = false
+    @State private var didShowFinishToast = false
+    @State private var showSeriesComplete = false
 
     @State private var currentPage:      Int
     @State private var sessionStartPage: Int
@@ -141,6 +156,16 @@ struct ReaderView: View {
                 pageContent
                     .colorEffect(colorFilter)
 
+                if showHeroCover, let heroCoverImage {
+                    Image(platformImage: heroCoverImage)
+                        .comicCoverStyle()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black)
+                        .heroGeometry(id: comic.id, in: readerNamespace, isSource: false)
+                        .transition(.opacity)
+                        .zIndex(5)
+                }
+
                 VStack(spacing: 0) {
                     if showTopBar {
                         topBar
@@ -171,6 +196,16 @@ struct ReaderView: View {
                         }
                     }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                if showFinishToast {
+                    VStack {
+                        Spacer()
+                        finishToast
+                            .padding(.bottom, 100)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .allowsHitTesting(false)
                 }
             }
             .onContinuousHover { phase in
@@ -212,7 +247,7 @@ struct ReaderView: View {
         .onKeyPress(.downArrow)  { nextPage(); return .handled }
         .onKeyPress(.escape) {
             if autoplay { autoplay = false; return .handled }
-            onClose(); return .handled
+            handleClose(); return .handled
         }
         .onKeyPress(KeyEquivalent("a")) { toggleAutoplay(); return .handled }
         .onKeyPress(KeyEquivalent("d")) { doublePage.toggle(); return .handled }
@@ -232,6 +267,7 @@ struct ReaderView: View {
             // the bookmarks list itself only changes via toggleBookmark()/loadBookmarks(),
             // never as a side effect of simply turning pages.
             isBookmarked = bookmarks.contains { $0.page == currentPage }
+            showFinishToastIfNeeded()
         }
         .onChange(of: fitModeRaw)      { _, _ in saveSeriesPrefs() }
         .onChange(of: rtl)             { _, _ in saveSeriesPrefs() }
@@ -242,13 +278,13 @@ struct ReaderView: View {
             // stop it rather than leaving a stuck "playing" icon with a frozen countdown.
             if newValue, autoplay { autoplay = false; countdownProgress = 0 }
         }
-        .onKeyPress(KeyEquivalent("w"), action: { onClose(); return .handled })
+        .onKeyPress(KeyEquivalent("w"), action: { handleClose(); return .handled })
         .onKeyPress(KeyEquivalent("f")) {
             windowService.toggleFullScreen()
             return .handled
         }
         .background(
-            Button("") { onClose() }
+            Button("") { handleClose() }
                 .keyboardShortcut("w", modifiers: .command)
                 .opacity(0).frame(width: 0, height: 0)
         )
@@ -258,6 +294,14 @@ struct ReaderView: View {
             scheduleHide()
             windowService.enterImmersiveMode()
             loadNextIssue()
+            // Cache-only: this exact cover was almost certainly just on screen (a grid card or
+            // IssueDetailPage) a moment ago, so this is normally an instant hit, not a fresh
+            // decode -- matches the hero layer's own job of bridging that already-loaded image
+            // into the reader, not doing new work.
+            heroCoverImage = ThumbnailCache.shared.thumbnailFromCache(comicId: comic.id)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                withAnimation(Design.springGentle) { showHeroCover = false }
+            }
         }
         .onDisappear {
             saveProgress(); logSession(); hideTask?.cancel()
@@ -270,12 +314,61 @@ struct ReaderView: View {
         .onReceive(NotificationCenter.default.publisher(for: .triggerPrint)) { _ in printCurrentPage() }
         .sheet(isPresented: $showShortcuts) { shortcutsSheet }
         .sheet(isPresented: $showBookmarks) { bookmarksPanel }
+        .sheet(isPresented: $showSeriesComplete) {
+            SeriesCompleteView(publisher: comic.publisher, series: comic.series)
+        }
         // Always dark, regardless of the user's app theme: the reader chrome (topBar/bottomBar)
         // uses hardcoded white icons/text over .ultraThinMaterial. Materials pick up a lighter
         // tint under a .light color scheme, which ContentView applies app-wide for the Sepia
         // theme -- that would wash the toolbar toward white-on-white right where the fixed
         // white controls need the darkest, highest-contrast variant of the material.
         .preferredColorScheme(.dark)
+    }
+
+    /// Every internal trigger that ends a reading session (Escape, ⌘W, the close button) calls
+    /// this instead of `onClose()` directly -- brings the hero-cover layer back first so there's
+    /// something for the matched-geometry shrink to actually animate, then tears the view down
+    /// once that's had a moment to play out. Calling `onClose()` immediately instead would remove
+    /// this view before any of that could be seen.
+    private func handleClose() {
+        guard !isClosing else { return }
+        isClosing = true
+        withAnimation(Design.springGentle) { showHeroCover = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { onClose() }
+    }
+
+    /// Fires once per reader session (not once ever -- reopening an already-finished comic and
+    /// reaching the last page again is a legitimate reread, not a bug to suppress) the moment a
+    /// page turn lands on the comic's actual last page. Checks `currentPage` directly rather than
+    /// `comic.isFinished`, since `comic` is this session's original snapshot and never reflects
+    /// the progress this same session is making.
+    private func showFinishToastIfNeeded() {
+        guard !didShowFinishToast, comic.pageCount > 1, currentPage >= comic.pageCount - 1 else { return }
+        didShowFinishToast = true
+        withAnimation(Design.easeFast) { showFinishToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation(Design.easeFast) { showFinishToast = false }
+        }
+        // Must save first: checkSeriesComplete() queries every comic's live progress straight
+        // from the DB, and this comic's own row won't reflect the page just reached until this
+        // writes it -- without it, a series' very last issue would always look one issue short
+        // of complete on the read that actually finishes it.
+        saveProgress()
+        checkSeriesComplete()
+    }
+
+    /// "Complete" is library-relative: every issue currently on disk for this (publisher, series)
+    /// has been read, not a claim the real-world series has ended (nothing in the schema tracks
+    /// that, and most series a user reads are ongoing anyway). Requires more than one issue --
+    /// finishing a single one-shot isn't a series milestone.
+    private func checkSeriesComplete() {
+        let pub = comic.publisher, ser = comic.series
+        Task.detached(priority: .utility) {
+            let siblings = DatabaseManager.shared.allComics(publisher: pub, series: ser)
+            guard siblings.count > 1, siblings.allSatisfy(\.isFinished) else { return }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await MainActor.run { showSeriesComplete = true }
+        }
     }
 
     private func scheduleHide() {
@@ -368,6 +461,32 @@ struct ReaderView: View {
 
     private var isOnLastPage: Bool { comic.pageCount > 0 && currentPage >= comic.pageCount - 1 }
 
+    private var finishToast: some View {
+        HStack(spacing: 10) {
+            // The one deliberately bouncy flourish near the reader itself -- transient chrome
+            // celebrating a real moment, not the page content, which stays undistracted. Owns its
+            // own @State since this view only exists while showFinishToast is already true --
+            // animating `.scaleEffect(showFinishToast ? ... )` here would never see a change fire.
+            FinishToastIcon()
+            Text("Finished!")
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .background(.black.opacity(0.75), in: Capsule())
+    }
+
+    private struct FinishToastIcon: View {
+        @State private var scale: CGFloat = 0.01
+        var body: some View {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.green)
+                .scaleEffect(scale)
+                .onAppear { withAnimation(Design.springBouncy) { scale = 1 } }
+        }
+    }
+
     private func upNextCard(_ next: Comic) -> some View {
         HStack(spacing: 12) {
             MiniComicCard(comic: next)
@@ -404,7 +523,7 @@ struct ReaderView: View {
 
     private var topBar: some View {
         HStack {
-            Button { onClose() } label: {
+            Button { handleClose() } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title2).foregroundStyle(.white.opacity(0.85))
             }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Combine
 import CoreSpotlight
 import UserNotifications
@@ -89,6 +90,10 @@ final class LibraryViewModel: ObservableObject {
     // excluding any series already represented in the liked set (that's readNextSuggestions'
     // job, not this one's).
     @Published var recommendations: [Comic] = []
+    /// Ambient, always-visible-while-browsing streak indicator (sidebar), distinct from the same
+    /// number already shown in Stats/Year in Review -- refreshed on its own cadence via
+    /// `refreshReadingStreak()` rather than piggybacking on a full `loadStats()` reload.
+    @Published var readingStreak: Int = 0
     @Published var destination: AppDestination = .library
     @Published var selectedSeries:    String? = nil
     @Published var searchText:        String = ""
@@ -225,6 +230,14 @@ final class LibraryViewModel: ObservableObject {
         return .characters
     }
 
+    /// Which way `browseLevel` just changed -- read by `LibraryBrowserView` to pick a matching
+    /// slide direction for its transition (forward: drilling in, content enters from the
+    /// trailing edge; backward: `navigateBack()`, content enters from the leading edge instead).
+    /// Not something `browseLevel` itself can infer, since it's just a snapshot of the current
+    /// state with no memory of how it got there.
+    enum BrowseNavigationDirection { case forward, backward }
+    private(set) var browseNavigationDirection: BrowseNavigationDirection = .forward
+
     var db: DatabaseManager { .shared }
     var watcher: FileWatcher?
     var searchCancellable: AnyCancellable?
@@ -304,6 +317,7 @@ final class LibraryViewModel: ObservableObject {
         refreshDuplicates()
         refreshOnThisDay()
         refreshRecommendations()
+        refreshReadingStreak()
 
         // Scanning at launch (and every time the app is brought back to the foreground) is
         // driven uniformly by `scenePhase == .active` in both app entry points (ComicArcMacApp,
@@ -486,6 +500,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
+        browseNavigationDirection = .forward
         let pub = activePublisher
         reloadGeneration += 1
         let gen = reloadGeneration
@@ -493,25 +508,29 @@ final class LibraryViewModel: ObservableObject {
             let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
-                self.selectedGroup = group
-                if series.count == 1 {
-                    self.selectedSeries = series[0].series
-                    self.reload()
-                } else {
-                    self.seriesGroups = series
+                withAnimation(Design.springBouncy) {
+                    self.selectedGroup = group
+                    if series.count == 1 {
+                        self.selectedSeries = series[0].series
+                    } else {
+                        self.seriesGroups = series
+                    }
                 }
+                if series.count == 1 { self.reload() }
             }
         }
     }
 
     func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
-        selectedSeries = sg.series
+        browseNavigationDirection = .forward
+        withAnimation(Design.springBouncy) { selectedSeries = sg.series }
         reload()
     }
 
     func navigateBack() {
+        browseNavigationDirection = .backward
         if selectedSeries != nil {
-            selectedSeries = nil
+            withAnimation(Design.springBouncy) { selectedSeries = nil }
             comics = []
             if let group = selectedGroup {
                 let pub = activePublisher
@@ -528,16 +547,26 @@ final class LibraryViewModel: ObservableObject {
                 loadCharacterGroups()
             }
         } else if selectedGroup != nil {
-            selectedGroup  = nil
-            selectedSeries = nil
+            withAnimation(Design.springBouncy) { selectedGroup = nil; selectedSeries = nil }
             comics         = []
             loadCharacterGroups()
         }
     }
 
-    func openReader(_ comic: Comic, atPage page: Int? = nil) { readerInitialPage = page; readerComic = comic }
-    func openReader(id: Int64, atPage page: Int? = nil) { if let c = db.comic(id: id) { readerInitialPage = page; readerComic = c } }
-    func closeReader() { readerComic = nil; readerInitialPage = nil }
+    func openReader(_ comic: Comic, atPage page: Int? = nil) {
+        withAnimation(Design.springGentle) { readerInitialPage = page; readerComic = comic }
+    }
+    func openReader(id: Int64, atPage page: Int? = nil) {
+        guard let c = db.comic(id: id) else { return }
+        withAnimation(Design.springGentle) { readerInitialPage = page; readerComic = c }
+    }
+    func closeReader() {
+        withAnimation(Design.springGentle) { readerComic = nil; readerInitialPage = nil }
+        // A reading session just ended -- today may now be the first day of a new streak, or
+        // extended an existing one, and the sidebar's ambient indicator should reflect that
+        // without waiting for the next launch.
+        refreshReadingStreak()
+    }
 
     func startWatcher() {
         let roots = libraryPaths

@@ -11,7 +11,9 @@ struct ComicCard: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.fileService) private var fileService
+    @Environment(\.readerNamespace) private var readerNamespace
     @State private var thumbnail: PlatformImage?
+    @State private var accentColor: Color?
     @State private var isHovered = false
     @State private var showMetadataInspector = false
 
@@ -22,7 +24,7 @@ struct ComicCard: View {
             ZStack(alignment: .bottom) {
                 cover
                     .frame(width: cardWidth, height: cardHeight)
-                    .comicCardStyle()
+                    .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
                 if comic.isStarted && !comic.isFinished {
                     progressStrip
@@ -106,13 +108,9 @@ struct ComicCard: View {
         ZStack {
             Design.cardBg
             if let img = thumbnail {
-                // Real comic covers run taller/narrower than this card's shape, so filling it
-                // always crops something -- anchored to the top (not centered) so that crop
-                // always comes off the bottom (usually just art) instead of the top (the
-                // title/logo, almost always the most identifying part of a cover).
-                Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: cardWidth, height: cardHeight, alignment: .top)
-                    .clipped()
+                Image(platformImage: img).comicCoverStyle()
+                    .frame(width: cardWidth, height: cardHeight)
+                    .heroGeometry(id: comic.id, in: readerNamespace)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(.secondary)
@@ -206,5 +204,6 @@ struct ComicCard: View {
 
     private func loadThumbnail() {
         ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
+        ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
     }
 }

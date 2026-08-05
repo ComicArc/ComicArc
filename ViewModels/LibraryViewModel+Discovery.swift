@@ -18,6 +18,13 @@ extension LibraryViewModel {
         }
     }
 
+    func refreshReadingStreak() {
+        Task.detached(priority: .utility) { [db] in
+            let streak = db.currentReadingStreak()
+            await MainActor.run { self.readingStreak = streak }
+        }
+    }
+
     /// Pure, no-network, no-ML recommendation heuristic: weight tags/publisher/writer by how
     /// often they appear among comics rated >= 4, then score every unread comic from a DIFFERENT
     /// series by how much overlap it has with that taste profile. A tag match counts for more

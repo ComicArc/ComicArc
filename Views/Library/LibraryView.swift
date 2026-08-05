@@ -16,15 +16,26 @@ struct LibraryBrowserView: View {
         return max(1, Int((gridWidth + density.spacing) / itemStride))
     }
 
+    /// Drilling in slides new content in from the trailing edge; `navigateBack()` reverses it --
+    /// mirrors `vm.browseNavigationDirection`, which the view model sets right before it changes
+    /// `browseLevel`.
+    private var browseTransition: AnyTransition {
+        let forward = vm.browseNavigationDirection == .forward
+        return .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             LibraryFilterBar()
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             switch vm.browseLevel {
-            case .characters:   CharacterGroupGridView()
-            case .seriesGroups: SeriesGroupGridView()
-            case .issues:       LibraryGridView()
+            case .characters:   CharacterGroupGridView().transition(browseTransition)
+            case .seriesGroups: SeriesGroupGridView().transition(browseTransition)
+            case .issues:       LibraryGridView().transition(browseTransition)
             }
         }
         .background(
@@ -311,9 +322,7 @@ struct OnThisDayShelf: View {
 
 struct OnThisDayCard: View {
     let entry: DiaryEntry
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnail: PlatformImage?
-    @State private var isHovered = false
 
     private var yearsAgo: Int {
         let loggedYear = Int(entry.loggedAt.prefix(4)) ?? Calendar.current.component(.year, from: Date())
@@ -325,9 +334,8 @@ struct OnThisDayCard: View {
             ZStack {
                 Design.cardBg
                 if let img = thumbnail {
-                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                        .frame(width: 90, height: 130, alignment: .top)
-                        .clipped()
+                    Image(platformImage: img).comicCoverStyle()
+                        .frame(width: 90, height: 130)
                 } else {
                     Image(systemName: "book.closed").foregroundStyle(.secondary)
                 }
@@ -344,9 +352,7 @@ struct OnThisDayCard: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(Design.brandGold)
         }
-        .scaleEffect(isHovered && !reduceMotion ? 1.04 : 1.0)
-        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
-        .onHover { isHovered = $0 }
+        .hoverLift(scale: 1.04)
         .onAppear { ThumbnailCache.shared.thumbnail(for: entry.comic) { thumbnail = $0 } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(entry.comic.title)
@@ -388,18 +394,15 @@ struct RecommendedShelf: View {
 
 struct RecommendedCard: View {
     let comic: Comic
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnail: PlatformImage?
-    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ZStack {
                 Design.cardBg
                 if let img = thumbnail {
-                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                        .frame(width: 90, height: 130, alignment: .top)
-                        .clipped()
+                    Image(platformImage: img).comicCoverStyle()
+                        .frame(width: 90, height: 130)
                 } else {
                     Image(systemName: "book.closed").foregroundStyle(.secondary)
                 }
@@ -416,9 +419,7 @@ struct RecommendedCard: View {
                 .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
                 .frame(width: 90, alignment: .leading)
         }
-        .scaleEffect(isHovered && !reduceMotion ? 1.04 : 1.0)
-        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
-        .onHover { isHovered = $0 }
+        .hoverLift(scale: 1.04)
         .onAppear { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(comic.title)
@@ -431,9 +432,7 @@ struct RecommendedCard: View {
 struct ShelfCard: View {
     let comic: Comic
     @EnvironmentObject var vm: LibraryViewModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnail: PlatformImage?
-    @State private var isHovered = false
     @State private var showMetadataInspector = false
 
     var body: some View {
@@ -442,9 +441,8 @@ struct ShelfCard: View {
                 ZStack {
                     Design.cardBg
                     if let img = thumbnail {
-                        Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                            .frame(width: 90, height: 130, alignment: .top)
-                            .clipped()
+                        Image(platformImage: img).comicCoverStyle()
+                            .frame(width: 90, height: 130)
                     } else {
                         Image(systemName: "book.closed").foregroundStyle(.secondary)
                     }
@@ -471,9 +469,7 @@ struct ShelfCard: View {
             Text("p. \(comic.progress + 1)/\(comic.pageCount)")
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         }
-        .scaleEffect(isHovered && !reduceMotion ? 1.04 : 1.0)
-        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
-        .onHover { isHovered = $0 }
+        .hoverLift(scale: 1.04)
         .onAppear { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
         .contextMenu {
             Button("Continue Reading") { vm.readerComic = comic }
@@ -802,9 +798,7 @@ private struct GroupCard: View {
     let placeholderIcon: String
     let placeholderIconSize: CGFloat
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var thumbnail: PlatformImage?
-    @State private var isHovered = false
     @AppStorage("progressFormat") private var progressFormatRaw = ProgressFormat.fraction.rawValue
 
     private var progressFormat: ProgressFormat { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction }
@@ -847,9 +841,7 @@ private struct GroupCard: View {
                     .frame(width: Design.groupCardWidth, alignment: .leading)
             }
         }
-        .scaleEffect(isHovered && !reduceMotion ? 1.03 : 1.0)
-        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
-        .onHover { isHovered = $0 }
+        .hoverLift()
         .onAppear { loadThumbnail() }
     }
 
@@ -858,12 +850,8 @@ private struct GroupCard: View {
         ZStack {
             Design.cardBg
             if let img = thumbnail {
-                // Anchored to the top, not centered -- real comic covers run taller/narrower
-                // than this card's shape, so filling it always crops something, and the top
-                // (title/logo) is almost always more identifying than whatever's at the bottom.
-                Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: Design.groupCardWidth, height: Design.groupCardHeight, alignment: .top)
-                    .clipped()
+                Image(platformImage: img).comicCoverStyle()
+                    .frame(width: Design.groupCardWidth, height: Design.groupCardHeight)
             } else {
                 LinearGradient(colors: [Design.brandBlue, Design.brandBlue.opacity(0.5)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)

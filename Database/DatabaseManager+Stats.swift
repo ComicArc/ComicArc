@@ -17,10 +17,7 @@ extension DatabaseManager {
             """)
             let runsCount = scalarInt("SELECT COUNT(*) FROM runs")
 
-            let streakDates = rows("SELECT DISTINCT date(last_read) FROM reading_progress ORDER BY date(last_read) DESC") {
-                colText($0, 0) ?? ""
-            }
-            let streak = computeStreak(dates: streakDates)
+            let streak = computeStreak(dates: streakDates())
 
             let activityMap = readingActivityMap(days: 365)
 
@@ -50,6 +47,27 @@ extension DatabaseManager {
         }
     }
 
+    /// Same streak definition `loadStats()` uses, without paying for everything else it computes
+    /// -- for callers (the sidebar's ambient streak indicator) that just want this one number
+    /// refreshed on its own, more often than a full stats reload is worth doing.
+    func currentReadingStreak() -> Int {
+        queue.sync { computeStreak(dates: streakDates()) }
+    }
+
+    // Not queue.sync'd itself -- `queue` is a serial DispatchQueue, so this must stay a plain
+    // unwrapped helper (matching `readingActivityMap(days:)`'s convention below) to be safely
+    // callable from inside another already-`queue.sync`'d block without deadlocking.
+    //
+    // 'localtime': last_read is stored as CURRENT_TIMESTAMP (UTC) -- bucketing by the raw
+    // UTC date would split/merge reading days across a boundary that has nothing to do
+    // with the user's actual calendar day (e.g. for US timezones, UTC midnight falls in
+    // the evening local time, right in the middle of a normal reading session).
+    private func streakDates() -> [String] {
+        rows("""
+            SELECT DISTINCT date(last_read, 'localtime') FROM reading_progress ORDER BY date(last_read, 'localtime') DESC
+            """) { colText($0, 0) ?? "" }
+    }
+
     func monthlyCollectionGrowth(months: Int) -> [GrowthPoint] {
         let raw = rows("""
             SELECT strftime('%Y-%m', added_at) as ym, COUNT(*)
@@ -72,16 +90,27 @@ extension DatabaseManager {
         return points
     }
 
+    // Parses a plain "yyyy-MM-dd" produced by one of this file's own `date(..., 'localtime')`
+    // queries -- must assume the *local* timezone (`Calendar.current`'s own, the implicit
+    // default when none is set), not UTC. Parsing a local calendar day as if it were UTC and
+    // then re-bucketing the result through `Calendar.current.startOfDay` silently shifts it by a
+    // day for anyone west of UTC, which broke `computeStreak`'s "is the most recent read today or
+    // yesterday" anchor check specifically (verified: a read logged 1 day ago stopped counting as
+    // a live streak at all). `longestStreak` below isn't affected either way -- it only compares
+    // consecutive parsed days to each other, so a uniform shift cancels out.
     static let yyyyMMddFormatter: DateFormatter = {
         let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"
-        fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.timeZone = TimeZone(identifier: "UTC")
+        fmt.locale = Locale(identifier: "en_US_POSIX")
         return fmt
     }()
 
+    // 'localtime': same reasoning as streakDates() above -- this feeds the Stats heatmap, whose
+    // Swift-side lookup keys are built from a local-timezone Calendar, so the SQL side must bucket
+    // by local calendar day too or the two silently disagree near a UTC day boundary.
     func readingActivityMap(days: Int) -> [String: Int] {
         var map: [String: Int] = [:]
         let rows = self.rows("""
-            SELECT date(last_read) as d, COUNT(*) FROM reading_progress
+            SELECT date(last_read, 'localtime') as d, COUNT(*) FROM reading_progress
             WHERE last_read >= date('now', '-\(days) days')
             GROUP BY d
         """) { (colText($0, 0) ?? "", colInt($0, 1)) }
@@ -219,7 +248,8 @@ extension DatabaseManager {
                 "SELECT COUNT(*) FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND is_reread = 1", args: [yearStr])
 
             let distinctDays: [String] = rows(
-                "SELECT DISTINCT date(read_at) as d FROM reading_history WHERE strftime('%Y', read_at) = ?", args: [yearStr]) { colText($0, 0) ?? "" }
+                "SELECT DISTINCT date(read_at, 'localtime') as d FROM reading_history WHERE strftime('%Y', read_at) = ?",
+                args: [yearStr]) { colText($0, 0) ?? "" }
             let longestStreakDays = longestStreak(dates: distinctDays)
 
             let busiestMonthNum = rows("""

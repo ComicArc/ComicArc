@@ -278,9 +278,8 @@ struct RunListCard: View {
     @ViewBuilder
     private var coverThumbnail: some View {
         if let path = run.coverImagePath, let img = PlatformImage.fromFile(path) {
-            Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .clipped()
+            Image(platformImage: img).comicCoverStyle()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ZStack {
                 Design.surfaceBg
@@ -624,9 +623,7 @@ struct RunItemRow: View {
 
             Group {
                 if let img = thumbnail {
-                    Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .clipped()
+                    Image(platformImage: img).comicCoverStyle()
                 } else {
                     Color.secondary.opacity(0.1)
                         .overlay(
