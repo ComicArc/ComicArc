@@ -442,7 +442,7 @@ final class LibraryScanner: @unchecked Sendable {
         let destURL = sourceURL.deletingPathExtension().appendingPathExtension("cbz")
         guard !FileManager.default.fileExists(atPath: destURL.path) else { return .failure(.destinationExists) }
 
-        guard let archive = try? Archive(url: destURL, accessMode: .create) else { return .failure(.zipWriteFailed) }
+        guard let archive = try? Archive(url: destURL, accessMode: .create, pathEncoding: nil) else { return .failure(.zipWriteFailed) }
         do {
             for file in entryFiles {
                 try archive.addEntry(with: file.lastPathComponent, relativeTo: file.deletingLastPathComponent(),
@@ -502,7 +502,7 @@ final class LibraryScanner: @unchecked Sendable {
     /// schema, not app-only concepts like ratings/tags/reading-order overrides.
     func writeComicInfoBack(comic: Comic) -> Result<Void, ComicInfoWriteError> {
         guard comic.filePath.lowercased().hasSuffix(".cbz") else { return .failure(.notACBZ) }
-        guard let archive = try? Archive(url: URL(fileURLWithPath: comic.filePath), accessMode: .update) else {
+        guard let archive = try? Archive(url: URL(fileURLWithPath: comic.filePath), accessMode: .update, pathEncoding: nil) else {
             return .failure(.archiveOpenFailed)
         }
 

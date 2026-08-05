@@ -62,8 +62,14 @@ struct AddComicsToCollectionView: View {
         }
         .frame(width: 520, height: 520)
         .task {
-            let (comics, existing) = await Task.detached(priority: .userInitiated) {
-                (DatabaseManager.shared.allComics(), alreadyInCollection())
+            // `alreadyInCollection()` reads state the caller already has in memory (cheap,
+            // main-actor-isolated) -- only the full-library fetch needs to be off-main. Calling
+            // the closure from inside `Task.detached` was the actual cause of the "main
+            // actor-isolated property accessed from outside the actor" warning, since
+            // `alreadyInCollection` itself is bound to this main-actor-isolated view.
+            let existing = alreadyInCollection()
+            let comics = await Task.detached(priority: .userInitiated) {
+                DatabaseManager.shared.allComics()
             }.value
             allComics   = comics.map { (comic: $0, searchKey: "\($0.title) \($0.series)".lowercased()) }
             existingIds = existing
