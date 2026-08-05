@@ -23,7 +23,7 @@ struct FavoriteMomentsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("FAVORITE MOMENTS")
+                Text("HIGHLIGHTS")
                     .font(.system(size: 20, weight: .black))
                     .foregroundStyle(Design.brandGold)
                     .kerning(1.5)
@@ -34,24 +34,13 @@ struct FavoriteMomentsView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if moments.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "star.circle")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No favorite moments yet.")
-                        .foregroundStyle(.secondary)
-                    Text("While reading, open Bookmarks and tap the star on any page worth revisiting.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center).frame(maxWidth: 320)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(
+                    icon: "star.circle",
+                    title: "No Highlights Yet",
+                    message: "While reading, open Bookmarks and tap the star on any page worth revisiting."
+                )
             } else if filteredMoments.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No matching moments.")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No Matching Highlights")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -102,12 +91,12 @@ struct FavoriteMomentsView: View {
         .contentShape(Rectangle())
         .onTapGesture { vm.openReader(moment.comic, atPage: moment.bookmark.page) }
         .contextMenu {
-            Button("Remove from Favorite Moments") { remove(moment) }
+            Button("Remove from Highlights") { remove(moment) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(moment.comic.title), page \(moment.bookmark.page + 1)")
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Remove from Favorite Moments") { remove(moment) }
+        .accessibilityAction(named: "Remove from Highlights") { remove(moment) }
     }
 
     private func remove(_ moment: FavoriteMoment) {

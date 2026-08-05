@@ -14,6 +14,7 @@ struct ContentView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.windowService) private var windowService
     @Environment(\.fileService)   private var fileService
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @AppStorage("tutorialSeen") private var tutorialSeen = false
     @State private var showTutorial = false
@@ -51,7 +52,7 @@ struct ContentView: View {
 
             if showTutorial {
                 TutorialView {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) {
                         showTutorial = false
                         tutorialSeen = true
                     }
@@ -82,8 +83,8 @@ struct ContentView: View {
                 .allowsHitTesting(false)
             }
         }
-        .animation(Design.springGentle, value: vm.pendingUndo?.message)
-        .animation(Design.springGentle, value: vm.importProgress)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.pendingUndo?.message)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.importProgress)
         .alert(
             "Import Complete",
             isPresented: Binding(
@@ -108,9 +109,9 @@ struct ContentView: View {
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .frame(minWidth: 960, minHeight: 640)
         .environment(\.readerNamespace, readerNamespace)
-        .animation(Design.springGentle, value: vm.readerComic?.id)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.readerComic?.id)
         .onChange(of: vm.readerComic?.id) { _, newId in
-            withAnimation(.easeInOut(duration: 0.25)) {
+            withAnimation(Design.motion(.easeInOut(duration: 0.25), reduce: reduceMotion)) {
                 columnVisibility = newId != nil ? .detailOnly : .all
             }
         }

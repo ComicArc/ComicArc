@@ -10,7 +10,7 @@ enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
         case .runs:               return "Reading Paths"
         case .diary:               return "Diary"
         case .tierLists:           return "Tier Lists"
-        case .favoriteMoments:     return "Favorite Moments"
+        case .favoriteMoments:     return "Highlights"
         case .stats:               return "Statistics"
         case .history:             return "History"
         case .duplicates:          return "Possible Duplicates"

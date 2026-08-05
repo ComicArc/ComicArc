@@ -58,7 +58,17 @@ struct ReaderView: View {
 
     @Environment(\.windowService) private var windowService
     @Environment(\.readerNamespace) private var readerNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @FocusState private var isFocused: Bool
+
+    @State private var accentColor: Color?
+    private var backdropColor: Color {
+        Design.deepBackdropTint(accentColor,
+                                 increaseContrast: colorSchemeContrast == .increased,
+                                 differentiateWithoutColor: differentiateWithoutColor)
+    }
 
     /// A brief hero layer that grows from wherever this comic's cover was on screen (a grid card
     /// or IssueDetailPage) into the reader, then fades to reveal the real paginated content
@@ -151,7 +161,7 @@ struct ReaderView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .top) {
-                Color.black.ignoresSafeArea()
+                backdropColor.ignoresSafeArea()
 
                 pageContent
                     .colorEffect(colorFilter)
@@ -213,7 +223,7 @@ struct ReaderView: View {
                     cursorPosition = loc
                     let nearTop    = loc.y < 100
                     let nearBottom = loc.y > geo.size.height - 120
-                    withAnimation(Design.easeFast) {
+                    withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) {
                         if nearTop || toolbarLocked { showTopBar = true }
                         if nearBottom || toolbarLocked { showBottomBar = true }
                     }
@@ -222,7 +232,7 @@ struct ReaderView: View {
             }
 
             .onTapGesture(count: 2) {
-                withAnimation(Design.springGentle) {
+                withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) {
                     if isZoomed {
                         steadyZoom = 1; panOffset = .zero
                     } else {
@@ -254,7 +264,7 @@ struct ReaderView: View {
         .onKeyPress(KeyEquivalent("b")) { toggleBookmark(); return .handled }
         .onKeyPress(KeyEquivalent("r")) { rtl.toggle(); return .handled }
         .onKeyPress(KeyEquivalent("?")) { showShortcuts.toggle(); return .handled }
-        .onKeyPress(KeyEquivalent("g")) { withAnimation(Design.easeFast) { showFilmstrip.toggle() }; return .handled }
+        .onKeyPress(KeyEquivalent("g")) { withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showFilmstrip.toggle() }; return .handled }
         .onKeyPress(.home) { currentPage = 0; saveProgress(); return .handled }
         .onKeyPress(.end)  { currentPage = max(0, comic.pageCount - 1); saveProgress(); return .handled }
         .onKeyPress(KeyEquivalent("=")) { zoomIn(); return .handled }
@@ -299,8 +309,9 @@ struct ReaderView: View {
             // decode -- matches the hero layer's own job of bridging that already-loaded image
             // into the reader, not doing new work.
             heroCoverImage = ThumbnailCache.shared.thumbnailFromCache(comicId: comic.id)
+            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-                withAnimation(Design.springGentle) { showHeroCover = false }
+                withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { showHeroCover = false }
             }
         }
         .onDisappear {
@@ -333,7 +344,7 @@ struct ReaderView: View {
     private func handleClose() {
         guard !isClosing else { return }
         isClosing = true
-        withAnimation(Design.springGentle) { showHeroCover = true }
+        withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { showHeroCover = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { onClose() }
     }
 
@@ -345,9 +356,9 @@ struct ReaderView: View {
     private func showFinishToastIfNeeded() {
         guard !didShowFinishToast, comic.pageCount > 1, currentPage >= comic.pageCount - 1 else { return }
         didShowFinishToast = true
-        withAnimation(Design.easeFast) { showFinishToast = true }
+        withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showFinishToast = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            withAnimation(Design.easeFast) { showFinishToast = false }
+            withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showFinishToast = false }
         }
         // Must save first: checkSeriesComplete() queries every comic's live progress straight
         // from the DB, and this comic's own row won't reflect the page just reached until this
@@ -374,11 +385,11 @@ struct ReaderView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         guard !toolbarLocked else {
-            withAnimation(Design.easeFast) { showTopBar = true; showBottomBar = true }
+            withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showTopBar = true; showBottomBar = true }
             return
         }
         let w = DispatchWorkItem { [self] in
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(Design.motion(.easeOut(duration: 0.25), reduce: reduceMotion)) {
                 showTopBar    = false
                 showBottomBar = false
             }
@@ -412,7 +423,7 @@ struct ReaderView: View {
                     .onEnded { val in
                         steadyZoom = min(5, max(0.5, steadyZoom * val.magnification))
                         if steadyZoom <= 1.05 {
-                            withAnimation(Design.springGentle) { steadyZoom = 1; panOffset = .zero }
+                            withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { steadyZoom = 1; panOffset = .zero }
                         }
                     }
             )
@@ -432,18 +443,18 @@ struct ReaderView: View {
                     }
             )
             .onTapGesture { }
-            .animation(Design.springSnappy, value: currentZoom)
+            .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: currentZoom)
         }
     }
 
-    private func zoomIn()  { withAnimation { steadyZoom = min(5, steadyZoom * 1.25) } }
+    private func zoomIn()  { withAnimation(Design.motion(.default, reduce: reduceMotion)) { steadyZoom = min(5, steadyZoom * 1.25) } }
     private func zoomOut() {
-        withAnimation {
+        withAnimation(Design.motion(.default, reduce: reduceMotion)) {
             steadyZoom = max(0.5, steadyZoom / 1.25)
             if steadyZoom <= 1.05 { steadyZoom = 1; panOffset = .zero }
         }
     }
-    private func resetZoom() { withAnimation { steadyZoom = 1; panOffset = .zero } }
+    private func resetZoom() { withAnimation(Design.motion(.default, reduce: reduceMotion)) { steadyZoom = 1; panOffset = .zero } }
 
     private var autoplayBar: some View {
         VStack {
@@ -478,12 +489,13 @@ struct ReaderView: View {
 
     private struct FinishToastIcon: View {
         @State private var scale: CGFloat = 0.01
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         var body: some View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
                 .foregroundStyle(.green)
                 .scaleEffect(scale)
-                .onAppear { withAnimation(Design.springBouncy) { scale = 1 } }
+                .onAppear { withAnimation(Design.motion(Design.springBouncy, reduce: reduceMotion)) { scale = 1 } }
         }
     }
 
@@ -502,7 +514,7 @@ struct ReaderView: View {
                 .buttonStyle(GoldCapsuleStyle())
 
             Button {
-                withAnimation(Design.easeFast) { dismissedNextIssuePrompt = true }
+                withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { dismissedNextIssuePrompt = true }
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption).foregroundStyle(.white.opacity(0.6))
@@ -641,7 +653,7 @@ struct ReaderView: View {
                 .accessibilityLabel("Keyboard shortcuts")
                 .help("Keyboard Shortcuts (?)")
 
-                Button { withAnimation(Design.easeFast) { showFilmstrip.toggle() } } label: {
+                Button { withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showFilmstrip.toggle() } } label: {
                     Image(systemName: "square.grid.3x3.fill")
                         .font(.title2)
                         .foregroundStyle(showFilmstrip ? Design.brandGold : .white.opacity(0.85))
@@ -769,7 +781,7 @@ struct ReaderView: View {
             }
             .onAppear { proxy.scrollTo(currentPage, anchor: .center) }
             .onChange(of: currentPage) { _, page in
-                withAnimation { proxy.scrollTo(page, anchor: .center) }
+                withAnimation(Design.motion(.default, reduce: reduceMotion)) { proxy.scrollTo(page, anchor: .center) }
             }
         }
         .frame(height: 108)
@@ -818,8 +830,8 @@ struct ReaderView: View {
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(bm.isFavorite ? Design.brandGold : .secondary)
-                            .help(bm.isFavorite ? "Remove from Favorite Moments" : "Add to Favorite Moments")
-                            .accessibilityLabel(bm.isFavorite ? "Remove from favorite moments" : "Add to favorite moments")
+                            .help(bm.isFavorite ? "Remove from Highlights" : "Add to Highlights")
+                            .accessibilityLabel(bm.isFavorite ? "Remove from highlights" : "Add to highlights")
                             Button("Go") {
                                 currentPage = bm.page
                                 showBookmarks = false
@@ -1014,6 +1026,7 @@ struct PagedModeView: View {
     @State private var imageLeft:  PlatformImage?
     @State private var imageRight: PlatformImage?
     @State private var isLoading  = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isSpreadPage: Bool {
         guard let img = imageLeft else { return false }
@@ -1029,6 +1042,7 @@ struct PagedModeView: View {
 
                 if isLoading {
                     ProgressView().tint(.white)
+                        .transition(.opacity)
                 } else if effectiveDoublePage, let left = imageLeft {
                     HStack(spacing: 1) {
                         if rtl {
@@ -1039,8 +1053,12 @@ struct PagedModeView: View {
                             if let right = imageRight { pageImage(right, size: geo.size) }
                         }
                     }
+                    .id(currentPage)
+                    .transition(.opacity)
                 } else if let img = imageLeft {
                     pageImage(img, size: geo.size)
+                        .id(currentPage)
+                        .transition(.opacity)
                 } else {
                     // A real dead end before this: no explanation, no way forward except backing
                     // out of the reader entirely -- one bad page (a flaky external drive, a
@@ -1054,6 +1072,7 @@ struct PagedModeView: View {
                         Button("Retry") { loadPage(currentPage) }
                             .buttonStyle(.bordered)
                     }
+                    .transition(.opacity)
                 }
             }
         }
@@ -1109,15 +1128,24 @@ struct PagedModeView: View {
         isLoading = true
         imageLeft = nil; imageRight = nil
         PageCache.shared.load(comic: comic, page: page) { img in
-
             guard page == self.currentPage else { return }
-            self.imageLeft  = img
-            self.isLoading  = false
-            self.isSpread   = self.isSpreadPage
+            // A real page-turn transition -- previously an instant/jarring image swap with no
+            // `.transition`/`withAnimation` at all, the one place Mac's paged mode read as less
+            // finished than iPad's free native TabView swipe. Wrapping the mutation itself
+            // (rather than an `.animation(value:)` keyed off `currentPage`) is what actually
+            // catches this, since the real content change lands here, one async hop later than
+            // the `currentPage` assignment that triggered it.
+            withAnimation(Design.motion(Design.easeStandard, reduce: self.reduceMotion)) {
+                self.imageLeft  = img
+                self.isLoading  = false
+            }
+            self.isSpread = self.isSpreadPage
             if self.effectiveDoublePage && page + 1 < self.comic.pageCount {
                 PageCache.shared.load(comic: self.comic, page: page + 1) { img2 in
                     guard page == self.currentPage else { return }
-                    self.imageRight = img2
+                    withAnimation(Design.motion(Design.easeStandard, reduce: self.reduceMotion)) {
+                        self.imageRight = img2
+                    }
                 }
             }
         }

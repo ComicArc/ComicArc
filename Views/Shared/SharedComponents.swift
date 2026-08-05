@@ -4,6 +4,7 @@ struct ShimmerCard: View {
     var width: CGFloat = 140
     var height: CGFloat = 200
     @State private var animating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         RoundedRectangle(cornerRadius: Design.cardCorner)
@@ -16,6 +17,9 @@ struct ShimmerCard: View {
             )
             .frame(width: width, height: height)
             .onAppear {
+                // A repeatForever sweep is exactly the kind of motion Reduce Motion exists to
+                // suppress -- leave the gradient in its resting position instead of animating it.
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                     animating = true
                 }

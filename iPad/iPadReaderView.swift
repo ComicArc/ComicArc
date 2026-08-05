@@ -7,9 +7,34 @@ struct iPadReaderView: View {
     let onClose: () -> Void
 
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.readerNamespace) private var readerNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @FocusState private var isFocused: Bool
     @State private var currentPage: Int
+    @State private var sessionStartPage: Int
     @State private var showBars = true
     @State private var hideTask: Task<Void, Never>?
+
+    @State private var accentColor: Color?
+    private var backdropColor: Color {
+        Design.deepBackdropTint(accentColor,
+                                 increaseContrast: colorSchemeContrast == .increased,
+                                 differentiateWithoutColor: differentiateWithoutColor)
+    }
+
+    // Same hero cover-morph the Mac reader uses (`ReaderView.swift`) -- grows from wherever this
+    // comic's cover was on screen into the reader, then fades to reveal the real page underneath,
+    // and reverses on close. Needs `iPadRootView` to present this view in the same view hierarchy
+    // as the library (not a `.fullScreenCover`) and inject a real `readerNamespace` for the
+    // `matchedGeometryEffect` to actually connect across the two.
+    @State private var heroCoverImage: PlatformImage?
+    @State private var showHeroCover = true
+    @State private var isClosing = false
+
+    @State private var didShowFinishToast = false
+    @State private var showSeriesComplete = false
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -45,7 +70,9 @@ struct iPadReaderView: View {
         // Clamp both bounds: page_count can change after progress was saved (metadata refresh,
         // or a revival at the same path with a different file), and a stale out-of-range
         // progress would otherwise land the reader on a blank page with no way to reach it.
-        _currentPage = State(initialValue: min(max(0, comic.progress), max(0, comic.pageCount - 1)))
+        let clampedPage = min(max(0, comic.progress), max(0, comic.pageCount - 1))
+        _currentPage = State(initialValue: clampedPage)
+        _sessionStartPage = State(initialValue: clampedPage)
         let prefs = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
         _scrollMode = State(initialValue: prefs?.scrollMode ?? UserDefaults.standard.bool(forKey: "scrollMode"))
         _rtl = State(initialValue: prefs?.rtl ?? UserDefaults.standard.bool(forKey: "readingDirectionRTL"))
@@ -73,12 +100,28 @@ struct iPadReaderView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            backdropColor.ignoresSafeArea()
 
-            if scrollMode {
+            if pageCount == 0 {
+                // Previously: `ForEach(0..<pageCount, ...)` over an empty range rendered nothing
+                // at all -- a silent black screen with no explanation, unlike the Mac reader's
+                // graceful "Couldn't load page 1" fallback. Same underlying cause (a genuinely
+                // corrupt or empty archive), same visible treatment now on both platforms.
+                unavailablePlaceholder
+            } else if scrollMode {
                 scrollReader
             } else {
                 pageReader
+            }
+
+            if showHeroCover, let heroCoverImage {
+                Image(platformImage: heroCoverImage)
+                    .comicCoverStyle()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                    .heroGeometry(id: comic.id, in: readerNamespace, isSource: false)
+                    .transition(.opacity)
+                    .zIndex(5)
             }
 
             overlayControls
@@ -100,11 +143,35 @@ struct iPadReaderView: View {
                     .onChange(of: geo.size.width) { _, w in viewWidth = w }
             }
         )
+        .accessibilityLabel("Comic reader — \(comic.title), page \(currentPage + 1) of \(pageCount)")
+        .accessibilityHint("Double-tap to zoom. Swipe to navigate pages.")
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(.leftArrow)  { rtl ? nextPage() : prevPage(); return .handled }
+        .onKeyPress(.rightArrow) { rtl ? prevPage() : nextPage(); return .handled }
+        .onKeyPress(.upArrow)    { prevPage(); return .handled }
+        .onKeyPress(.downArrow)  { nextPage(); return .handled }
+        .onKeyPress(.home) { currentPage = 0; saveProgress(); return .handled }
+        .onKeyPress(.end)  { currentPage = max(0, pageCount - 1); saveProgress(); return .handled }
+        .onKeyPress(.escape) { handleClose(); return .handled }
+        .onKeyPress(KeyEquivalent("w")) { handleClose(); return .handled }
+        .onKeyPress(KeyEquivalent("a")) { guard !scrollMode else { return .ignored }; autoplay.toggle(); if !autoplay { countdownProgress = 0 }; return .handled }
+        .onKeyPress(KeyEquivalent("b")) { toggleBookmark(); return .handled }
+        .onKeyPress(KeyEquivalent("r")) { rtl.toggle(); return .handled }
+        .onKeyPress(KeyEquivalent("g")) { withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { showFilmstrip.toggle() }; return .handled }
         .statusBarHidden(!showBars)
         .persistentSystemOverlays(showBars ? .visible : .hidden)
-        .onAppear { scheduleHide(); loadNextIssue(); loadBookmarks() }
+        .onAppear {
+            isFocused = true
+            scheduleHide(); loadNextIssue(); loadBookmarks()
+            heroCoverImage = ThumbnailCache.shared.thumbnailFromCache(comicId: comic.id)
+            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { showHeroCover = false }
+            }
+        }
         .onDisappear {
-            saveProgress()
+            saveProgress(); logSession()
 
             PageCache.shared.evict(comicId: comic.id)
         }
@@ -113,11 +180,76 @@ struct iPadReaderView: View {
             if phase != .active { saveProgress() }
         }
         .task(id: "\(autoplay)-\(currentPage)") { await runAutoplay() }
-        .onChange(of: currentPage) { _, _ in loadBookmarks() }
+        .onChange(of: currentPage) { _, _ in
+            loadBookmarks()
+            showFinishToastIfNeeded()
+        }
         .onChange(of: scrollMode) { _, _ in saveSeriesPrefs() }
         .onChange(of: rtl) { _, _ in saveSeriesPrefs() }
         .onChange(of: fitModeRaw) { _, _ in saveSeriesPrefs() }
         .sheet(isPresented: $showBookmarks) { bookmarksSheet }
+        .sheet(isPresented: $showSeriesComplete) {
+            SeriesCompleteView(publisher: comic.publisher, series: comic.series)
+        }
+    }
+
+    private func nextPage() {
+        guard currentPage < pageCount - 1 else { return }
+        currentPage += 1
+    }
+
+    private func prevPage() {
+        guard currentPage > 0 else { return }
+        currentPage -= 1
+    }
+
+    /// Same hero-reverse-then-close sequence as the Mac reader (`ReaderView.handleClose()`):
+    /// brings the hero-cover layer back so there's something for the matched-geometry shrink to
+    /// animate, then tears the view down once that's had a moment to play out.
+    private func handleClose() {
+        guard !isClosing else { return }
+        isClosing = true
+        withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { showHeroCover = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { onClose() }
+    }
+
+    private var unavailablePlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle).foregroundStyle(.secondary)
+            Text("This Comic Couldn't Be Read")
+                .font(.headline).foregroundStyle(.white)
+            Text("It may be corrupted or empty. Try rescanning your library from Settings.")
+                .font(.callout).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            Button("Close") { handleClose() }
+                .buttonStyle(.bordered)
+        }
+    }
+
+    /// Mirrors `ReaderView.showFinishToastIfNeeded()`'s series-complete trigger (minus the Mac-only
+    /// finish toast itself, which isn't part of this pass's scope) -- fires once per session, the
+    /// moment a page turn lands on the comic's actual last page.
+    private func showFinishToastIfNeeded() {
+        guard !didShowFinishToast, pageCount > 1, currentPage >= pageCount - 1 else { return }
+        didShowFinishToast = true
+        saveProgress()
+        checkSeriesComplete()
+    }
+
+    private func checkSeriesComplete() {
+        let pub = comic.publisher, ser = comic.series
+        Task.detached(priority: .utility) {
+            let siblings = DatabaseManager.shared.allComics(publisher: pub, series: ser)
+            guard siblings.count > 1, siblings.allSatisfy(\.isFinished) else { return }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await MainActor.run { showSeriesComplete = true }
+        }
+    }
+
+    private func logSession() {
+        DatabaseManager.shared.logReadingSession(comicId: comic.id, pageStart: min(sessionStartPage, currentPage), pageEnd: max(sessionStartPage, currentPage))
     }
 
     private var pageReader: some View {
@@ -139,7 +271,7 @@ struct iPadReaderView: View {
         .gesture(pinchGesture)
         .gesture(dragGesture)
         .onChange(of: currentPage) { _, _ in
-            withAnimation(.easeOut(duration: 0.15)) { scale = 1; offset = .zero }
+            withAnimation(Design.motion(.easeOut(duration: 0.15), reduce: reduceMotion)) { scale = 1; offset = .zero }
             // Reset the gesture baselines too, not just the animated scale/offset -- otherwise
             // zooming on this page, then swiping to the next page without zooming back out,
             // leaves the next pinch/drag starting from the *previous* page's zoomed baseline.
@@ -158,6 +290,11 @@ struct iPadReaderView: View {
                     ReaderPageView(comic: comic, pageIndex: idx, fitMode: fitMode)
                         .frame(maxWidth: .infinity)
                         .colorEffect(colorFilter)
+                        // Previously only `pageReader`'s `TabView` selection tracked `currentPage`
+                        // -- scroll mode never updated it, so progress silently stopped saving the
+                        // moment a user switched to continuous scroll. Matches the Mac reader's
+                        // identical `ScrollPageView.onAppear` pattern.
+                        .onAppear { currentPage = idx; saveProgress() }
                 }
             }
         }
@@ -201,11 +338,11 @@ struct iPadReaderView: View {
                 let x = value.location.x
                 let width = viewWidth > 0 ? viewWidth : UIScreen.main.bounds.width
                 if x < width * 0.25 {
-                    if currentPage > 0 { currentPage -= 1 }
+                    prevPage()
                 } else if x > width * 0.75 {
-                    if currentPage < pageCount - 1 { currentPage += 1 }
+                    nextPage()
                 } else {
-                    withAnimation(.easeInOut(duration: 0.2)) { showBars.toggle() }
+                    withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { showBars.toggle() }
                     if showBars { scheduleHide() } else { hideTask?.cancel() }
                 }
             }
@@ -221,7 +358,7 @@ struct iPadReaderView: View {
                 if scale <= 1.05 {
                     // Matches the Mac reader's identical zoom-reset snap (ReaderView.swift),
                     // rather than a bare, uncalibrated `.spring()`.
-                    withAnimation(Design.springGentle) { scale = 1; offset = .zero }
+                    withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { scale = 1; offset = .zero }
                     lastScale = 1
                     lastOffset = .zero
                 }
@@ -258,8 +395,8 @@ struct iPadReaderView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: showBars)
-        .animation(.easeInOut(duration: 0.2), value: showFilmstrip)
+        .animation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion), value: showBars)
+        .animation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion), value: showFilmstrip)
     }
 
     private var filmstrip: some View {
@@ -283,7 +420,7 @@ struct iPadReaderView: View {
             }
             .onAppear { proxy.scrollTo(currentPage, anchor: .center) }
             .onChange(of: currentPage) { _, page in
-                withAnimation { proxy.scrollTo(page, anchor: .center) }
+                withAnimation(Design.motion(.default, reduce: reduceMotion)) { proxy.scrollTo(page, anchor: .center) }
             }
         }
         .frame(height: 100)
@@ -294,7 +431,7 @@ struct iPadReaderView: View {
 
     private var topBar: some View {
         HStack {
-            Button(action: onClose) {
+            Button(action: handleClose) {
                 Image(systemName: "xmark")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
@@ -354,7 +491,7 @@ struct iPadReaderView: View {
             }
             .accessibilityLabel("Reader Settings")
 
-            Button(action: { withAnimation { showFilmstrip.toggle() } }) {
+            Button(action: { withAnimation(Design.motion(.default, reduce: reduceMotion)) { showFilmstrip.toggle() } }) {
                 Image(systemName: "square.grid.3x3.fill")
                     .font(.title3)
                     .foregroundStyle(showFilmstrip ? Design.brandGold : .white)
@@ -420,7 +557,7 @@ struct iPadReaderView: View {
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                withAnimation(.easeOut(duration: 0.25)) { showBars = false }
+                withAnimation(Design.motion(.easeOut(duration: 0.25), reduce: reduceMotion)) { showBars = false }
             }
         }
     }
@@ -447,6 +584,7 @@ struct iPadReaderView: View {
     private func advanceToNextIssue() {
         guard let nextIssue else { return }
         saveProgress()
+        logSession()
         vm.openReader(nextIssue)
     }
 
@@ -467,7 +605,7 @@ struct iPadReaderView: View {
                 .buttonStyle(GoldCapsuleStyle())
 
             Button {
-                withAnimation(.easeOut(duration: 0.2)) { dismissedNextIssuePrompt = true }
+                withAnimation(Design.motion(.easeOut(duration: 0.2), reduce: reduceMotion)) { dismissedNextIssuePrompt = true }
             } label: {
                 Image(systemName: "xmark").font(.caption).foregroundStyle(.white.opacity(0.6))
             }

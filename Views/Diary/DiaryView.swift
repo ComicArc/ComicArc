@@ -36,23 +36,13 @@ struct DiaryView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if entries.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "star.bubble")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No diary entries yet.")
-                        .foregroundStyle(.secondary)
-                    Text("Rate or review a comic to start your diary.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(
+                    icon: "star.bubble",
+                    title: "No Diary Entries Yet",
+                    message: "Rate or review a comic to start your diary."
+                )
             } else if filteredEntries.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No matching entries.")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No Matching Entries")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
