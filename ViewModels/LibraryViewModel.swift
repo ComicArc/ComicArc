@@ -508,7 +508,9 @@ final class LibraryViewModel: ObservableObject {
             let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
-                withAnimation(Design.springBouncy) {
+                // springGentle, not springBouncy -- a bouncy overshoot on every drill-down read as
+                // the library "shaking" on navigation, same complaint as the hover-lift jitter.
+                withAnimation(Design.springGentle) {
                     self.selectedGroup = group
                     if series.count == 1 {
                         self.selectedSeries = series[0].series
@@ -523,14 +525,14 @@ final class LibraryViewModel: ObservableObject {
 
     func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
         browseNavigationDirection = .forward
-        withAnimation(Design.springBouncy) { selectedSeries = sg.series }
+        withAnimation(Design.springGentle) { selectedSeries = sg.series }
         reload()
     }
 
     func navigateBack() {
         browseNavigationDirection = .backward
         if selectedSeries != nil {
-            withAnimation(Design.springBouncy) { selectedSeries = nil }
+            withAnimation(Design.springGentle) { selectedSeries = nil }
             comics = []
             if let group = selectedGroup {
                 let pub = activePublisher
@@ -547,7 +549,7 @@ final class LibraryViewModel: ObservableObject {
                 loadCharacterGroups()
             }
         } else if selectedGroup != nil {
-            withAnimation(Design.springBouncy) { selectedGroup = nil; selectedSeries = nil }
+            withAnimation(Design.springGentle) { selectedGroup = nil; selectedSeries = nil }
             comics         = []
             loadCharacterGroups()
         }

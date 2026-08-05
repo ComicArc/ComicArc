@@ -141,6 +141,10 @@ struct IssueDetailPage: View {
                 Label("Open in Reader", systemImage: "book.fill")
             }
             .goldButton()
+            // Same ambient-glow technique already used on the cover image itself -- a soft echo of
+            // this issue's own color under the primary action, not a restyle of the button (gold
+            // stays gold, the app-wide "this is the primary action" signal).
+            .shadow(color: (accentColor ?? .clear).opacity(0.45), radius: 14, x: 0, y: 4)
         }
         .padding(.horizontal, 28).padding(.vertical, 14)
         .background(Design.navBackground)
@@ -541,7 +545,12 @@ struct IssueDetailPage: View {
             let tl  = DatabaseManager.shared.tierListsContaining(comicId: comicId)
             let mi  = DatabaseManager.shared.missingIssueNumbers(series: series, publisher: pub)
             await MainActor.run {
-                tags = t; appearsInRuns = r; appearsInTierLists = tl; missingIssues = mi
+                // These four feed conditionally-rendered sections (tags row, supplementary
+                // gap/runs/tier-lists/notes strip) that otherwise pop into existence the instant
+                // this async load resolves, shoving the rest of the page down with no transition.
+                withAnimation(Design.easeStandard) {
+                    tags = t; appearsInRuns = r; appearsInTierLists = tl; missingIssues = mi
+                }
             }
         }
     }

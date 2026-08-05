@@ -67,7 +67,9 @@ struct ComicCard: View {
             }
         }
         .scaleEffect(isHovered && !reduceMotion ? 1.03 : 1.0)
-        .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
+        // Plain ease, not a spring -- a spring's overshoot/settle wobble reads as a shake when
+        // onHover fires repeatedly while the cursor moves across a grid of covers.
+        .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isHovered)
         .overlay(
             RoundedRectangle(cornerRadius: Design.cardCorner + 2)
                 .stroke(
@@ -77,6 +79,10 @@ struct ComicCard: View {
                     lineWidth: 2.5
                 )
                 .frame(width: cardWidth + 5, height: cardHeight + 5)
+                // Entering/leaving bulk-select mode (or selecting/deselecting) previously cut this
+                // ring in and out instantly -- same "no spring, just ease" rule as the hover fix.
+                .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isBulkSelected)
+                .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isSelected)
         )
         .onHover { isHovered = $0 }
         // Both tap counts attached at the same view level via `.exclusively(before:)` instead of

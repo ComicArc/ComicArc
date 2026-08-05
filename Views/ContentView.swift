@@ -252,16 +252,11 @@ struct ContentView: View {
     }
 
     private var runsPlaceholder: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "list.bullet.rectangle")
-                .font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("Select a Reading Path")
-                .font(.title3.bold()).foregroundStyle(.secondary)
-            Text("Group comics into reading paths to track multi-series arcs.")
-                .font(.subheadline).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "list.bullet.rectangle",
+            title: "Select a Reading Path",
+            message: "Group comics into reading paths to track multi-series arcs."
+        )
         .background(Design.appBackground)
     }
 
@@ -282,16 +277,11 @@ struct ContentView: View {
     }
 
     private var tierListsPlaceholder: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "square.stack.3d.up")
-                .font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("Select a Tier List")
-                .font(.title3.bold()).foregroundStyle(.secondary)
-            Text("Rank your comics into S/A/B/C/D/F tiers by dragging them between rows.")
-                .font(.subheadline).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "square.stack.3d.up",
+            title: "Select a Tier List",
+            message: "Rank your comics into S/A/B/C/D/F tiers by dragging them between rows."
+        )
         .background(Design.appBackground)
     }
 
