@@ -40,7 +40,6 @@ enum GridDensity: String, CaseIterable {
 }
 
 enum Design {
-
     static let cardWidth:       CGFloat = 172
     static let cardHeight:      CGFloat = 258
     static let groupCardWidth:  CGFloat = 220
@@ -50,6 +49,23 @@ enum Design {
     static let groupCardHeight: CGFloat = 330
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
+
+    /// A shared spacing/corner-radius scale -- lets new code reach for `Design.Spacing.md` instead
+    /// of guessing at another one-off magic number, without forcing a mechanical rewrite of every
+    /// existing `.padding(_, 12)` call site (most of which are fine as plain literals already).
+    enum Spacing {
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 24
+    }
+
+    enum Radius {
+        static let sm: CGFloat = 4
+        static let md: CGFloat = 8
+        static let lg: CGFloat = 12
+    }
 
     static var appBackground: Color { AppTheme.current.palette.appBackground }
     static var navBackground: Color { AppTheme.current.palette.navBackground }
@@ -131,15 +147,111 @@ enum ProgressFormat: String, CaseIterable {
 }
 
 extension View {
-    func comicCardStyle() -> some View {
-        self
+    /// `accentColor`/`isHovered` are opt-in -- every call site that doesn't pass them gets the
+    /// exact same flat black shadow as before. Only a hovered card with a known accent color
+    /// (currently just `ComicCard`) gets a glow tinted from that comic's own cover, never the
+    /// resting/unhovered state, so grids never look tinted while just sitting there.
+    func comicCardStyle(accentColor: Color? = nil, isHovered: Bool = false) -> some View {
+        let tint = isHovered ? accentColor : nil
+        return self
             .clipShape(Rectangle())
-            .shadow(color: .black.opacity(0.45), radius: 8, x: 0, y: 4)
+            .shadow(color: tint?.opacity(0.5) ?? .black.opacity(0.45),
+                    radius: tint != nil ? 12 : 8, x: 0, y: tint != nil ? 6 : 4)
     }
 
     func goldButton() -> some View {
         self
             .buttonStyle(GoldCapsuleStyle())
+    }
+
+    /// The hover-scale micro-interaction every card type in the library uses (`ComicCard`,
+    /// `GroupCard`, and the shelf cards) -- previously the identical `@State isHovered` +
+    /// `.scaleEffect` + `.animation` + `.onHover` triad copy-pasted at each call site. Owns its
+    /// own hover state, so a call site just needs this one modifier, nothing else.
+    func hoverLift(scale: CGFloat = 1.03) -> some View {
+        modifier(HoverLiftModifier(scale: scale))
+    }
+}
+
+extension View {
+    /// The card chrome repeated across Stats' `DashboardCard`, and now the recap-sheet tiles/rows
+    /// below (`RecapStatTile`, `RecapHighlightRow`, both `YearInReviewView` and
+    /// `SeriesCompleteView` share these) -- one definition instead of the same background/clip/
+    /// overlay chain copy-pasted at each.
+    func dashboardCardStyle(padding: CGFloat = 20) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Design.cardBg)
+            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+            .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
+    }
+}
+
+/// Shared by both recap sheets (`YearInReviewView`, `SeriesCompleteView`) -- previously an
+/// identical `statTile(_:value:icon:)` copy-pasted in each, differing only in whether the icon
+/// tint was a fixed color or the series' own accent color.
+struct RecapStatTile: View {
+    let label: String
+    let value: String
+    let icon: String
+    var tint: Color = Design.brandGold
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon).font(.system(size: 16, weight: .semibold)).foregroundStyle(tint)
+            Text(value).font(.system(size: 24, weight: .black)).lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).kerning(0.5)
+        }
+        .dashboardCardStyle(padding: 16)
+    }
+}
+
+/// Shared by both recap sheets -- previously an identical `highlightRow(icon:label:value:detail:)`
+/// copy-pasted in each.
+struct RecapHighlightRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    var detail: String? = nil
+    var tint: Color = Design.brandGold
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.title3).foregroundStyle(tint).frame(width: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(value).font(.subheadline.weight(.semibold)).lineLimit(1)
+            }
+            Spacer()
+            if let detail {
+                Text(detail).font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .dashboardCardStyle(padding: 14)
+    }
+}
+
+extension Image {
+    /// The one standard way a comic's own cover art is displayed anywhere in the app: the full
+    /// image, always -- never cropped to force-fill a card's box. Callers still supply their own
+    /// `.frame(...)` for the box size; a cover whose real aspect ratio doesn't match that box
+    /// simply letterboxes/pillarboxes within it rather than losing part of the artwork.
+    func comicCoverStyle() -> some View {
+        self.resizable().aspectRatio(contentMode: .fit)
+    }
+}
+
+private struct HoverLiftModifier: ViewModifier {
+    let scale: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isHovered && !reduceMotion ? scale : 1.0)
+            .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
+            .onHover { isHovered = $0 }
     }
 }
 
@@ -223,7 +335,7 @@ struct PublisherBadge: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(Design.publisherColor(publisher))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.sm))
             .shadow(color: Design.publisherColor(publisher).opacity(0.3), radius: 4, x: 0, y: 2)
     }
 }

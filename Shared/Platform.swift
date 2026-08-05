@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import ImageIO
+import CoreImage
 
 // A handful of real-world scanned/uncompressed comic pages come through at absurd pixel
 // dimensions (raw scanner output dropped into a CBZ with no resave) that would otherwise decode
@@ -26,12 +27,33 @@ private func safeCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
     return CGImageSourceCreateThumbnailAtIndex(source, 0, opts as CFDictionary)
 }
 
+// Reused across every averageColor() call rather than allocated fresh each time -- CIContext
+// construction is the expensive part of this pipeline, and this one carries no per-image state.
+private let averageColorContext = CIContext(options: [.workingColorSpace: NSNull()])
+
+/// Shared by both platforms' `averageColor()` -- a comic's cover-driven accent color, sampled
+/// once via CIAreaAverage (collapses the whole image to a single pixel) rather than manually
+/// walking raw bitmap bytes. Runs against an already-decoded, already-thumbnail-sized `CGImage`
+/// (see `ThumbnailCache`), never a full-resolution page.
+private func computeAverageColor(from cgImage: CGImage) -> Color? {
+    let ciImage = CIImage(cgImage: cgImage)
+    guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
+        kCIInputImageKey: ciImage,
+        kCIInputExtentKey: CIVector(cgRect: ciImage.extent)
+    ]), let outputImage = filter.outputImage else { return nil }
+
+    var bitmap = [UInt8](repeating: 0, count: 4)
+    averageColorContext.render(outputImage, toBitmap: &bitmap, rowBytes: 4,
+                    bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+
+    return Color(red: Double(bitmap[0]) / 255, green: Double(bitmap[1]) / 255, blue: Double(bitmap[2]) / 255)
+}
+
 #if os(macOS)
 import AppKit
 public typealias PlatformImage = NSImage
 
 extension NSImage {
-
     static func resized(source: NSImage, to target: CGSize) -> NSImage? {
         guard let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let src = CGSize(width: cg.width, height: cg.height)
@@ -54,6 +76,11 @@ extension NSImage {
     }
     static func fromFile(_ path: String) -> NSImage? { NSImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> NSImage? { NSImage(contentsOf: url) }
+
+    func averageColor() -> Color? {
+        guard let cg = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        return computeAverageColor(from: cg)
+    }
 
     func platformJPEGData(compressionFactor: CGFloat = 0.85) -> Data? {
         guard let cg = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
@@ -104,6 +131,11 @@ extension UIImage {
     static func fromFile(_ path: String) -> UIImage? { UIImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> UIImage? { guard let data = try? Data(contentsOf: url) else { return nil }; return UIImage(data: data) }
 
+    func averageColor() -> Color? {
+        guard let cg = cgImage else { return nil }
+        return computeAverageColor(from: cg)
+    }
+
     func platformJPEGData(compressionFactor: CGFloat = 0.85) -> Data? {
         jpegData(compressionQuality: compressionFactor)
     }
@@ -135,6 +167,7 @@ extension Image {
         self.init(uiImage: platformImage)
         #endif
     }
+
 }
 
 enum OnboardingGate {

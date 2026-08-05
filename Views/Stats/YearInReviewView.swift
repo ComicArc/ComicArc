@@ -10,6 +10,7 @@ struct YearInReviewView: View {
     @State private var selectedYear: Int = Calendar.current.component(.year, from: Date())
     @State private var stats: DatabaseManager.YearInReviewStats?
     @State private var isLoading = true
+    @State private var shareCardURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -26,23 +27,26 @@ struct YearInReviewView: View {
                         heroCard(stats)
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                            statTile("PAGES READ", value: "\(stats.pagesRead)", icon: "book.pages", tint: Design.brandBlue)
-                            statTile("DAY STREAK", value: "\(stats.longestStreakDays)", icon: "flame.fill", tint: .orange)
-                            statTile("REREADS", value: "\(stats.rereadCount)", icon: "arrow.counterclockwise", tint: Design.brandGold)
-                            statTile("RATED", value: stats.averageRating.map { String(format: "%.1f★", $0) } ?? "—",
-                                     icon: "star.fill", tint: .yellow)
+                            RecapStatTile(label: "PAGES READ", value: "\(stats.pagesRead)", icon: "book.pages", tint: Design.brandBlue)
+                            RecapStatTile(label: "DAY STREAK", value: "\(stats.longestStreakDays)", icon: "flame.fill", tint: .orange)
+                            RecapStatTile(label: "REREADS", value: "\(stats.rereadCount)", icon: "arrow.counterclockwise", tint: Design.brandGold)
+                            RecapStatTile(label: "RATED", value: stats.averageRating.map { String(format: "%.1f★", $0) } ?? "—",
+                                          icon: "star.fill", tint: .yellow)
                         }
 
                         if let top = stats.topSeries {
-                            highlightRow(icon: "books.vertical.fill", label: "Most-Read Series",
-                                         value: top.name, detail: "\(top.count) issue\(top.count == 1 ? "" : "s")")
+                            RecapHighlightRow(icon: "books.vertical.fill", label: "Most-Read Series",
+                                               value: top.name, detail: "\(top.count) issue\(top.count == 1 ? "" : "s")",
+                                               tint: Design.brandGold)
                         }
                         if let pub = stats.topPublisher {
-                            highlightRow(icon: "building.columns.fill", label: "Most-Read Publisher",
-                                         value: pub.name, detail: "\(pub.count) issue\(pub.count == 1 ? "" : "s")")
+                            RecapHighlightRow(icon: "building.columns.fill", label: "Most-Read Publisher",
+                                               value: pub.name, detail: "\(pub.count) issue\(pub.count == 1 ? "" : "s")",
+                                               tint: Design.brandGold)
                         }
                         if let month = stats.busiestMonthLabel {
-                            highlightRow(icon: "calendar", label: "Busiest Month", value: month, detail: nil)
+                            RecapHighlightRow(icon: "calendar", label: "Busiest Month", value: month, detail: nil,
+                                               tint: Design.brandGold)
                         }
 
                         if !stats.topRated.isEmpty {
@@ -76,6 +80,15 @@ struct YearInReviewView: View {
                 }
             }
             Spacer()
+            if let shareCardURL {
+                ShareLink(item: shareCardURL, preview: SharePreview("\(selectedYear) in Review")) {
+                    Image(systemName: "square.and.arrow.up.on.square")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Share as Image")
+                .padding(.trailing, 4)
+            }
             Button("Done") { dismiss() }.keyboardShortcut(.escape)
         }
         .padding(20)
@@ -96,38 +109,7 @@ struct YearInReviewView: View {
         .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
     }
 
-    private func statTile(_ label: String, value: String, icon: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: icon).font(.system(size: 16, weight: .semibold)).foregroundStyle(tint)
-            Text(value).font(.system(size: 24, weight: .black)).lineLimit(1).minimumScaleFactor(0.6)
-            Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).kerning(0.5)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Design.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
-        .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
-    }
-
-    private func highlightRow(icon: String, label: String, value: String, detail: String?) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.title3).foregroundStyle(Design.brandGold).frame(width: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.caption).foregroundStyle(.secondary)
-                Text(value).font(.subheadline.weight(.semibold)).lineLimit(1)
-            }
-            Spacer()
-            if let detail {
-                Text(detail).font(.caption).foregroundStyle(.tertiary)
-            }
-        }
-        .padding(14)
-        .background(Design.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
-        .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
-    }
-
-    private func topRatedSection(_ topRated: [(title: String, rating: Int)]) -> some View {
+    private func topRatedSection(_ topRated: [(comicId: Int64, title: String, rating: Int)]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("TOP RATED").font(.system(size: 12, weight: .black)).foregroundStyle(.secondary).kerning(1.2)
             VStack(spacing: 0) {
@@ -187,8 +169,35 @@ struct YearInReviewView: View {
 
     private func loadStats() async {
         let year = selectedYear
-        stats = await Task.detached(priority: .userInitiated) {
+        shareCardURL = nil
+        let result = await Task.detached(priority: .userInitiated) {
             DatabaseManager.shared.yearInReview(year: year)
         }.value
+        stats = result
+
+        // Covers for the share card specifically: topRated comics were rated sometime over the
+        // whole year, not necessarily viewed recently, so (unlike Tier Lists/Reading Paths, whose
+        // item cards are on-screen right before Share is tapped) the thumbnail cache is often
+        // cold here -- worth a small background fetch rather than settling for empty covers on
+        // the one recap screen most likely to actually get shared.
+        let ids = result.topRated.map(\.comicId)
+        let images = await Task.detached(priority: .utility) {
+            ids.compactMap { id -> PlatformImage? in
+                guard let comic = DatabaseManager.shared.comic(id: id) else { return nil }
+                return ThumbnailCache.shared.thumbnailSync(for: comic)
+            }
+        }.value
+        guard selectedYear == year else { return }
+        let card = ShareCardView(
+            title: "\(year) in Review",
+            subtitle: "\(result.issuesRead) issue\(result.issuesRead == 1 ? "" : "s") read",
+            covers: images,
+            stats: [
+                ("Pages", "\(result.pagesRead)"),
+                ("Streak", "\(result.longestStreakDays)d"),
+                ("Rereads", "\(result.rereadCount)")
+            ]
+        )
+        shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "YearInReview-\(year).png")
     }
 }

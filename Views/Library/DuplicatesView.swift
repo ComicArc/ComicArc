@@ -32,22 +32,27 @@ struct DuplicatesView: View {
     }
 
     var body: some View {
+        // Hoisted so each is filtered once per render instead of once per reference below --
+        // both are re-derived from `vm.duplicateGroups` on every access since they're computed
+        // properties.
+        let groups = filteredGroups
+        let identicalGroups = hashIdenticalGroups
         Group {
             if vm.duplicateGroups.isEmpty {
                 emptyState
-            } else if filteredGroups.isEmpty {
+            } else if groups.isEmpty {
                 noMatchesState
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
-                        if !hashIdenticalGroups.isEmpty {
-                            safeResolveHeader
+                        if !identicalGroups.isEmpty {
+                            safeResolveHeader(count: identicalGroups.count)
                         }
                         // Keyed by the group's own content (comic ids), not positional offset --
                         // if a group resolves/rescans while this view is visible, an offset-keyed
                         // ForEach would match the wrong data onto an already-initialized row's
                         // @State, leaving it showing the previous group's now-stale content.
-                        ForEach(filteredGroups, id: \.self) { group in
+                        ForEach(groups, id: \.self) { group in
                             if let first = group.first {
                                 // The GCD-verified canonical name, not just whichever comic in the
                                 // group happens to be first -- a duplicate group is by definition
@@ -65,7 +70,7 @@ struct DuplicatesView: View {
         .background(Design.appBackground)
         .navigationTitle("Possible Duplicates")
         .confirmationDialog(
-            "Resolve \(hashIdenticalGroups.count) safe duplicate group\(hashIdenticalGroups.count == 1 ? "" : "s")?",
+            "Resolve \(identicalGroups.count) safe duplicate group\(identicalGroups.count == 1 ? "" : "s")?",
             isPresented: $showResolveSafeConfirm,
             titleVisibility: .visible
         ) {
@@ -82,11 +87,11 @@ struct DuplicatesView: View {
         }
     }
 
-    private var safeResolveHeader: some View {
+    private func safeResolveHeader(count: Int) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "checkmark.seal.fill").foregroundStyle(Design.brandGold)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(hashIdenticalGroups.count) group\(hashIdenticalGroups.count == 1 ? "" : "s") are exact duplicate files")
+                Text("\(count) group\(count == 1 ? "" : "s") are exact duplicate files")
                     .font(.subheadline.bold())
                 Text("Same file, byte-for-byte -- safe to auto-resolve, keeping one copy of each.")
                     .font(.caption).foregroundStyle(.secondary)

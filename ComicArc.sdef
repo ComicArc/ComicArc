@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="ComicArc Terminology">
+    <suite name="ComicArc Suite" code="CmAr" description="Commands for automating ComicArc from AppleScript.">
+        <command name="scan library" code="CmArScLb"
+                  description="Scans your ComicArc library folders for new, changed, or removed comics.">
+            <cocoa class="ScanLibraryScriptCommand"/>
+        </command>
+        <command name="resync library" code="CmArRsLb"
+                  description="Fully rescans your ComicArc library, re-checking metadata and reading order for every comic, not just new files.">
+            <cocoa class="ResyncLibraryScriptCommand"/>
+        </command>
+        <command name="show continue reading" code="CmArShCr"
+                  description="Opens ComicArc to your in-progress comics.">
+            <cocoa class="ShowContinueReadingScriptCommand"/>
+        </command>
+    </suite>
+</dictionary>

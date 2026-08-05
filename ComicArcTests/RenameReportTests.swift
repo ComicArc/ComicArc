@@ -2,7 +2,6 @@ import Testing
 @testable import ComicArc
 
 struct RenameReportTests {
-
     @Test func allZeroWhenNothingHappened() {
         let report = RenameReport.summarize(succeeded: 0, unchanged: 0, skipped: 0, failedStaging: [], failedFinal: [])
         #expect(report.succeeded == 0)

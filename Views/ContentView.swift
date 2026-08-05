@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showTutorial = false
     @State private var showRenameFiles = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @Namespace private var readerNamespace
 
     var body: some View {
         ZStack {
@@ -35,7 +36,7 @@ struct ContentView: View {
 
             if let comic = vm.readerComic {
                 ReaderView(comic: comic, initialPage: vm.readerInitialPage) {
-                    withAnimation(.easeInOut(duration: 0.25)) { vm.closeReader() }
+                    vm.closeReader()
                 } onOpenComic: { next in
                     vm.openReader(next)
                 }
@@ -106,7 +107,8 @@ struct ContentView: View {
         // visually breaking this app's fixed-width card grids and toolbars.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .frame(minWidth: 960, minHeight: 640)
-        .animation(.easeInOut(duration: 0.2), value: vm.readerComic?.id)
+        .environment(\.readerNamespace, readerNamespace)
+        .animation(Design.springGentle, value: vm.readerComic?.id)
         .onChange(of: vm.readerComic?.id) { _, newId in
             withAnimation(.easeInOut(duration: 0.25)) {
                 columnVisibility = newId != nil ? .detailOnly : .all
@@ -366,11 +368,10 @@ struct ContentView: View {
             }
         } else {
             Button { vm.scan() } label: {
-
                 Label("Scan", systemImage: "magnifyingglass")
             }
             .help("Scan library folders for new comics (⇧⌘R)")
-            .disabled(vm.libraryPaths.isEmpty)
+            .disabled(vm.libraryPaths.isEmpty || vm.isResyncing)
         }
     }
 
@@ -437,6 +438,8 @@ struct SidebarView: View {
     @State private var dropTargetPublisher: String?
     @State private var showAllTags = false
     @State private var showMoreDiscover = false
+    @State private var renamingSavedView: SavedLibraryView?
+    @State private var renameSavedViewDraft = ""
 
     // The Discover section is a lot to take in on day one (up to 9 items) with nothing
     // distinguishing daily-use items from deep-tracking extras -- these three are the ones a
@@ -506,13 +509,21 @@ struct SidebarView: View {
                 }
             }
 
+            if !vm.savedViews.isEmpty {
+                Section("Saved Views") {
+                    ForEach(vm.savedViews) { view in
+                        savedViewRow(view)
+                    }
+                }
+            }
 
             Section("Discover") {
-                ForEach(visibleDiscoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
+                let discoverItems = visibleDiscoverItems
+                ForEach(discoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
                     navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
                 }
 
-                let moreItems = visibleDiscoverItems.filter { !coreDiscoverItems.contains($0) }
+                let moreItems = discoverItems.filter { !coreDiscoverItems.contains($0) }
                 if !moreItems.isEmpty {
                     DisclosureGroup(isExpanded: $showMoreDiscover) {
                         ForEach(moreItems) { discoverItem in
@@ -569,6 +580,11 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("ComicArc")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if vm.readingStreak > 0 {
+                streakIndicator
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if !vm.isLibraryAvailable {
@@ -589,14 +605,63 @@ struct SidebarView: View {
         }
     }
 
+    /// Ambient, always-visible-while-browsing echo of the same number Stats/Year in Review
+    /// already show -- pinned above the scrollable sidebar content (not just the first row in
+    /// it) specifically so it stays put while scrolling through Publishers/Tags/Discover.
+    private var streakIndicator: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "flame.fill").foregroundStyle(.orange)
+            Text("\(vm.readingStreak)-day streak").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(.orange.opacity(0.08))
+        .accessibilityElement(children: .combine)
+    }
+
     @ViewBuilder
+    private func savedViewRow(_ view: SavedLibraryView) -> some View {
+        Button {
+            vm.applySavedView(view)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: view.icon).frame(width: 16)
+                Text(view.name)
+                Spacer()
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Rename…") {
+                renamingSavedView = view
+                renameSavedViewDraft = view.name
+            }
+            Button("Delete", role: .destructive) { vm.deleteSavedView(id: view.id) }
+        }
+        .accessibilityLabel(view.name)
+        .accessibilityAddTraits(.isButton)
+        .alert("Rename Saved View", isPresented: Binding(
+            get: { renamingSavedView?.id == view.id },
+            set: { active in if !active { renamingSavedView = nil } }
+        )) {
+            TextField("Name", text: $renameSavedViewDraft)
+            Button("Save") {
+                let trimmed = renameSavedViewDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { vm.renameSavedView(id: view.id, to: trimmed) }
+                renamingSavedView = nil
+            }
+            Button("Cancel", role: .cancel) { renamingSavedView = nil }
+        }
+    }
+
     private func navRow(_ label: String,
                         icon: String? = nil,
                         publisherColor: Color? = nil,
                         item: AppDestination,
                         trailingText: String? = nil) -> some View {
         Button {
-
             if case .publisher(let p) = item, case .publisher(let cur) = vm.destination, p == cur {
                 vm.select(.library)
             } else {

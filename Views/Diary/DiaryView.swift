@@ -16,12 +16,8 @@ struct DiaryView: View {
         }
     }
 
-    // loggedAt is stored as CURRENT_TIMESTAMP (UTC) -- grouping by its raw date substring would
-    // split/merge entries on a UTC midnight boundary that has nothing to do with the user's
-    // actual calendar day (e.g. a US-timezone reading session in the evening can straddle UTC
-    // midnight and get split across two day headers), hence localDayKey's timezone conversion.
     private var grouped: [(date: String, entries: [DiaryEntry])] {
-        Dictionary(grouping: filteredEntries) { Self.localDayKey(from: $0.loggedAt) }
+        Dictionary(grouping: filteredEntries) { DayGroupingFormatters.localDayKey(from: $0.loggedAt) }
             .sorted { $0.key > $1.key }
             .map { (date: $0.key, entries: $0.value) }
     }
@@ -168,46 +164,11 @@ struct DiaryView: View {
         isLoading = false
     }
 
-    // Explicitly `nonisolated`: these are read-only after initialization (DateFormatter is safe
-    // to use concurrently once configured), and `localDayKey` is called from inside the
-    // Task.detached in load() above -- without `nonisolated`, these static members are inferred
-    // MainActor-isolated (like the rest of this View type), producing a real compiler warning
-    // for calling a main-actor-isolated method from that nonisolated background context.
-    nonisolated private static let utcParser: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        return f
-    }()
-
-    nonisolated private static let localDayKeyFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    private static let localTimeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    nonisolated private static func localDayKey(from iso: String) -> String {
-        guard let d = utcParser.date(from: iso) else { return String(iso.prefix(10)) }
-        return localDayKeyFormatter.string(from: d)
-    }
-
     private func formattedGroupDate(_ iso: String) -> String {
-        guard let d = Self.localDayKeyFormatter.date(from: iso) else { return iso }
-        let out = DateFormatter()
-        out.dateStyle = .full
-        return out.string(from: d).uppercased()
+        DayGroupingFormatters.formattedGroupDate(iso)
     }
 
     private func shortTime(_ iso: String) -> String {
-        guard let d = Self.utcParser.date(from: iso) else { return "" }
-        return Self.localTimeFormatter.string(from: d)
+        DayGroupingFormatters.shortTime(iso)
     }
 }

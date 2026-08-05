@@ -30,13 +30,7 @@ struct MiniComicCard: View {
     var body: some View {
         Group {
             if let img = thumbnail {
-                // This card's own size comes from whatever `.frame(width:height:)` the call site
-                // applies externally, so there's no fixed size to anchor here -- `.top` alignment
-                // still biases the crop toward preserving the top (title/logo) over the bottom
-                // once that external frame is applied.
-                Image(platformImage: img).resizable().aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .clipped()
+                Image(platformImage: img).comicCoverStyle()
             } else {
                 Color.secondary.opacity(0.1)
                     .overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))

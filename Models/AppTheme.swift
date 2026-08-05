@@ -39,7 +39,6 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 brandGold:     Color(red: 0.918, green: 0.659, blue: 0.082)
             )
         case .pureBlack:
-
             return Palette(
                 appBackground: .black,
                 navBackground: Color(red: 0.03, green: 0.03, blue: 0.03),
@@ -80,7 +79,6 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 brandGold:     Color(red: 0.906, green: 0.769, blue: 0.290)
             )
         case .sepia:
-
             return Palette(
                 appBackground: Color(red: 0.949, green: 0.918, blue: 0.851),
                 navBackground: Color(red: 0.925, green: 0.890, blue: 0.812),
