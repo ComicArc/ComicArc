@@ -67,6 +67,15 @@ enum Design {
         static let lg: CGFloat = 12
     }
 
+    /// Named large-display styles for the handful of spots hand-rolling `.font(.system(size: N))`
+    /// at similar-but-not-identical sizes (recap hero numbers, empty-state icons) -- one definition
+    /// each instead of several slightly different ad hoc sizes.
+    enum Typography {
+        static let heroNumber    = Font.system(size: 64, weight: .black, design: .rounded)
+        static let heroSeal      = Font.system(size: 40, weight: .regular)
+        static let emptyStateIcon = Font.system(size: 52, weight: .regular)
+    }
+
     static var appBackground: Color { AppTheme.current.palette.appBackground }
     static var navBackground: Color { AppTheme.current.palette.navBackground }
     static var cardBg:        Color { AppTheme.current.palette.cardBg }
@@ -150,13 +159,16 @@ extension View {
     /// `accentColor`/`isHovered` are opt-in -- every call site that doesn't pass them gets the
     /// exact same flat black shadow as before. Only a hovered card with a known accent color
     /// (currently just `ComicCard`) gets a glow tinted from that comic's own cover, never the
-    /// resting/unhovered state, so grids never look tinted while just sitting there.
+    /// resting/unhovered state, so grids never look tinted while just sitting there. The thin edge
+    /// ring rides along with the same tint so hover reads as "this cover's color", not just a
+    /// generic glow behind it.
     func comicCardStyle(accentColor: Color? = nil, isHovered: Bool = false) -> some View {
         let tint = isHovered ? accentColor : nil
         return self
             .clipShape(Rectangle())
             .shadow(color: tint?.opacity(0.5) ?? .black.opacity(0.45),
                     radius: tint != nil ? 12 : 8, x: 0, y: tint != nil ? 6 : 4)
+            .overlay(Rectangle().stroke(tint?.opacity(0.6) ?? .clear, lineWidth: 1.5))
     }
 
     func goldButton() -> some View {
@@ -185,6 +197,66 @@ extension View {
             .background(Design.cardBg)
             .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
             .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
+    }
+
+    /// One elevation step above `dashboardCardStyle` -- `surfaceBg` instead of `cardBg`, plus a
+    /// visible shadow, for the handful of spots (hero sections, modal chrome) that want to read as
+    /// raised above the surrounding cards rather than flush with them.
+    func elevatedCardStyle(padding: CGFloat = 20) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Design.surfaceBg)
+            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+            .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 16, x: 0, y: 8)
+    }
+}
+
+/// One shared empty-state presentation -- previously 5+ near-identical icon/title/message VStacks
+/// (`LibraryView` ×3, `YearInReviewView`, `ContentView`'s Runs/Tier Lists placeholders), each with
+/// its own slightly different spacing/font/opacity choices. Landing on an empty section now gets a
+/// small fade + scale-up on appear (`easeStandard`, not a spring -- matches the "no bounce" rule
+/// established for hover/navigation motion) instead of an instant, inert cut.
+struct EmptyStateView<Action: View>: View {
+    let icon: String
+    let title: String
+    var message: String? = nil
+    var iconFont: Font = Design.Typography.emptyStateIcon
+    var messageWidth: CGFloat = 340
+    @ViewBuilder var action: () -> Action
+
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(iconFont)
+                .foregroundStyle(.quaternary)
+            Text(title)
+                .font(.title3.bold())
+                .foregroundStyle(.secondary)
+            if let message {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: messageWidth)
+            }
+            action()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+        .scaleEffect(appeared || reduceMotion ? 1 : 0.96)
+        .opacity(appeared || reduceMotion ? 1 : 0)
+        .onAppear { withAnimation(Design.easeStandard) { appeared = true } }
+    }
+}
+
+extension EmptyStateView where Action == EmptyView {
+    init(icon: String, title: String, message: String? = nil, iconFont: Font = Design.Typography.emptyStateIcon, messageWidth: CGFloat = 340) {
+        self.init(icon: icon, title: title, message: message, iconFont: iconFont, messageWidth: messageWidth, action: { EmptyView() })
     }
 }
 
@@ -250,7 +322,10 @@ private struct HoverLiftModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scaleEffect(isHovered && !reduceMotion ? scale : 1.0)
-            .animation(Design.motion(Design.springSnappy, reduce: reduceMotion), value: isHovered)
+            // A spring here (even a "snappy" one) overshoots and settles with a visible
+            // wobble -- across a grid where onHover fires rapidly as the cursor crosses card
+            // after card, that reads as the whole grid shaking. A plain ease has zero overshoot.
+            .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isHovered)
             .onHover { isHovered = $0 }
     }
 }

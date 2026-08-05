@@ -541,6 +541,7 @@ struct CharacterGroupGridView: View {
                                     .stroke(Design.brandGold, lineWidth: 2.5)
                                     .opacity(isTarget ? 1 : 0)
                                     .allowsHitTesting(false)
+                                    .animation(Design.easeFast, value: isTarget)
                             )
                     }
                 }
@@ -562,20 +563,17 @@ struct CharacterGroupGridView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "books.vertical.fill")
-                .font(.system(size: 64)).foregroundStyle(.secondary)
-            Text("No Comics").font(.title2.bold())
-            Text(vm.libraryPaths.isEmpty
-                 ? "Set your library folder(s) in Settings"
-                 : "Scan your library to get started")
-                .foregroundStyle(.secondary)
+        EmptyStateView(
+            icon: "books.vertical.fill",
+            title: "No Comics",
+            message: vm.libraryPaths.isEmpty
+                ? "Set your library folder(s) in Settings"
+                : "Scan your library to get started"
+        ) {
             if !vm.libraryPaths.isEmpty {
                 Button("Scan Library") { vm.scan() }.buttonStyle(.borderedProminent)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 }
 
@@ -645,6 +643,7 @@ struct SeriesGroupGridView: View {
                     .stroke(Design.brandGold, lineWidth: 2.5)
                     .opacity(isTarget ? 1 : 0)
                     .allowsHitTesting(false)
+                    .animation(Design.easeFast, value: isTarget)
             )
     }
 
@@ -654,29 +653,30 @@ struct SeriesGroupGridView: View {
     /// should render flat with no header in that case, matching every library that's just 1-3
     /// folder levels deep.
     private var folderGroupBuckets: [(label: String, groups: [DatabaseManager.SeriesGroup])] {
-        var order: [String] = []
         var buckets: [String: [DatabaseManager.SeriesGroup]] = [:]
         for sg in vm.seriesGroups {
             let label = (sg.folderGroup?.isEmpty == false) ? sg.folderGroup! : "Other"
-            if buckets[label] == nil { order.append(label) }
             buckets[label, default: []].append(sg)
         }
-        return order.map { (label: $0, groups: buckets[$0] ?? []) }
+        // Previously ordered by whichever label's first series happened to sort earliest
+        // overall (e.g. "Batman (Modern)" could land before "Batman (Classic)" just because
+        // some 2016-dated issue alphabetized ahead of an annual) -- sort the labels themselves
+        // instead, so folder-group headers read in a predictable order. "Other" (comics with no
+        // real on-disk group) always trails, regardless of where it'd fall alphabetically.
+        let realLabels = buckets.keys.filter { $0 != "Other" }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let labels = buckets["Other"] != nil ? realLabels + ["Other"] : realLabels
+        return labels.map { (label: $0, groups: buckets[$0] ?? []) }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "square.stack.3d.up.slash")
-                .font(.system(size: 56)).foregroundStyle(.secondary)
-            Text("No Series Here").font(.title2.bold())
-            Text("The comics that were here have been moved, renamed, or removed.")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button("Back") { vm.navigateBack() }
-                .buttonStyle(.borderedProminent)
+        EmptyStateView(
+            icon: "square.stack.3d.up.slash",
+            title: "No Series Here",
+            message: "The comics that were here have been moved, renamed, or removed."
+        ) {
+            Button("Back") { vm.navigateBack() }.buttonStyle(.borderedProminent)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 }
 
@@ -931,6 +931,7 @@ struct LibraryGridView: View {
                                 .stroke(Design.brandGold, lineWidth: 2.5)
                                 .opacity(isTarget ? 1 : 0)
                                 .allowsHitTesting(false)
+                                .animation(Design.easeFast, value: isTarget)
                         )
                     }
                 }
@@ -958,23 +959,10 @@ struct LibraryGridView: View {
         .padding(Design.gridSpacing)
     }
 
-    @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: emptyIcon)
-                .font(.system(size: 52))
-                .foregroundStyle(.tertiary)
-            Text(emptyTitle)
-                .font(.title3.bold())
-            Text(emptyMessage)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 340)
+        EmptyStateView(icon: emptyIcon, title: emptyTitle, message: emptyMessage) {
             emptyAction
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 
     private var emptyIcon: String {

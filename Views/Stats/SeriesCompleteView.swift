@@ -82,7 +82,7 @@ struct SeriesCompleteView: View {
     private var heroCard: some View {
         VStack(spacing: 8) {
             Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 40))
+                .font(Design.Typography.heroSeal)
                 .foregroundStyle(accentColor ?? Design.brandGold)
             Text(series)
                 .font(.system(size: 24, weight: .black, design: .rounded))

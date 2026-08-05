@@ -29,22 +29,27 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var palette: Palette {
         switch self {
         case .dark:
+            // Previously a distinctly navy-tinted black (blue channel ran noticeably ahead of
+            // red/green, more so at each lighter step) that read closer to a dashboard than a
+            // premium reader. Flattened toward neutral charcoal -- still a hair cooler than
+            // `graphite` so the two remain distinguishable -- and widened the app/nav/card/surface
+            // steps so elevation reads more clearly.
             return Palette(
-                appBackground: Color(red: 0.046, green: 0.048, blue: 0.074),
-                navBackground: Color(red: 0.065, green: 0.068, blue: 0.102),
-                cardBg:        Color(red: 0.088, green: 0.092, blue: 0.132),
-                surfaceBg:     Color(red: 0.108, green: 0.114, blue: 0.162),
-                borderColor:   Color.white.opacity(0.09),
+                appBackground: Color(red: 0.055, green: 0.057, blue: 0.072),
+                navBackground: Color(red: 0.078, green: 0.081, blue: 0.098),
+                cardBg:        Color(red: 0.104, green: 0.108, blue: 0.128),
+                surfaceBg:     Color(red: 0.132, green: 0.137, blue: 0.158),
+                borderColor:   Color.white.opacity(0.12),
                 brandBlue:     Color(red: 0.149, green: 0.396, blue: 0.733),
                 brandGold:     Color(red: 0.918, green: 0.659, blue: 0.082)
             )
         case .pureBlack:
             return Palette(
                 appBackground: .black,
-                navBackground: Color(red: 0.03, green: 0.03, blue: 0.03),
-                cardBg:        Color(red: 0.06, green: 0.06, blue: 0.06),
-                surfaceBg:     Color(red: 0.09, green: 0.09, blue: 0.09),
-                borderColor:   Color.white.opacity(0.10),
+                navBackground: Color(red: 0.035, green: 0.035, blue: 0.035),
+                cardBg:        Color(red: 0.075, green: 0.075, blue: 0.075),
+                surfaceBg:     Color(red: 0.115, green: 0.115, blue: 0.115),
+                borderColor:   Color.white.opacity(0.13),
                 brandBlue:     Color(red: 0.149, green: 0.396, blue: 0.733),
                 brandGold:     Color(red: 0.918, green: 0.659, blue: 0.082)
             )
@@ -54,7 +59,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
                 navBackground: Color(red: 0.175, green: 0.175, blue: 0.182),
                 cardBg:        Color(red: 0.205, green: 0.205, blue: 0.213),
                 surfaceBg:     Color(red: 0.235, green: 0.235, blue: 0.245),
-                borderColor:   Color.white.opacity(0.12),
+                borderColor:   Color.white.opacity(0.14),
                 brandBlue:     Color(red: 0.416, green: 0.647, blue: 0.902),
                 brandGold:     Color(red: 0.87, green: 0.73, blue: 0.42)
             )

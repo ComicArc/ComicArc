@@ -97,7 +97,7 @@ struct YearInReviewView: View {
     private func heroCard(_ stats: DatabaseManager.YearInReviewStats) -> some View {
         VStack(spacing: 8) {
             Text("\(stats.issuesRead)")
-                .font(.system(size: 64, weight: .black, design: .rounded))
+                .font(Design.Typography.heroNumber)
                 .foregroundStyle(Design.brandGold)
             Text("issues read in \(stats.year)")
                 .font(.headline).foregroundStyle(.secondary)
@@ -139,21 +139,21 @@ struct YearInReviewView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "calendar.badge.clock").font(.system(size: 48)).foregroundStyle(.quaternary)
-            Text("No Reading Activity Yet").font(.headline).foregroundStyle(.secondary)
-            Text("Read a few issues and come back -- your recap builds itself from there.")
-                .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).frame(maxWidth: 320)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "calendar.badge.clock",
+            title: "No Reading Activity Yet",
+            message: "Read a few issues and come back -- your recap builds itself from there.",
+            iconFont: .system(size: 48),
+            messageWidth: 320
+        )
     }
 
     private var noDataForYearState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "calendar.badge.clock").font(.system(size: 48)).foregroundStyle(.quaternary)
-            Text("No Reading Activity in \(String(selectedYear))").font(.headline).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "calendar.badge.clock",
+            title: "No Reading Activity in \(String(selectedYear))",
+            iconFont: .system(size: 48)
+        )
     }
 
     private func load() async {
