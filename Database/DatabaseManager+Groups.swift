@@ -16,7 +16,7 @@ extension DatabaseManager {
     func reorderPublishers(orderedPublishers: [String]) {
         guard !orderedPublishers.isEmpty else { return }
         queue.sync {
-            inTransaction {
+            _ = inTransaction {
                 runBatch("INSERT OR REPLACE INTO publisher_order (publisher, position) VALUES (?,?)",
                          rows: orderedPublishers.enumerated().map { [$0.element, $0.offset] })
             }
@@ -237,7 +237,7 @@ extension DatabaseManager {
     func reorderSeriesGroups(groupName: String, publisher: String, orderedSeries: [String]) {
         guard !orderedSeries.isEmpty else { return }
         queue.sync {
-            inTransaction {
+            _ = inTransaction {
                 runBatch("INSERT OR REPLACE INTO series_order (group_name, publisher, series, position) VALUES (?,?,?,?)",
                          rows: orderedSeries.enumerated().map { [groupName, publisher, $0.element, $0.offset] })
             }
@@ -247,7 +247,7 @@ extension DatabaseManager {
     func reorderCharacterGroups(publisher: String, orderedGroupNames: [String]) {
         guard !orderedGroupNames.isEmpty else { return }
         queue.sync {
-            inTransaction {
+            _ = inTransaction {
                 runBatch("INSERT OR REPLACE INTO character_order (group_name, publisher, position) VALUES (?,?,?)",
                          rows: orderedGroupNames.enumerated().map { [$0.element, publisher, $0.offset] })
             }

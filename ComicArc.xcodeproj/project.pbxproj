@@ -149,7 +149,6 @@
 		B00000000000000000000010 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* StatsView.swift */; };
 		B00000000000000000000011 /* RunsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* RunsView.swift */; };
 		B00000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* Assets.xcassets */; };
-		B00000000000000000000013 /* icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* icon.icns */; };
 		B00000000000000000000020 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* OnboardingView.swift */; };
 		B00000000000000000000021 /* ReadingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* ReadingHistoryView.swift */; };
 		B00000000000000000000023 /* IssueDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* IssueDetailPage.swift */; };
@@ -405,7 +404,6 @@
 		A00000000000000000000010 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* RunsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunsView.swift; sourceTree = "<group>"; };
 		A00000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A00000000000000000000013 /* icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = assets/icon.icns; sourceTree = "<group>"; };
 		A00000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A00000000000000000000015 /* ComicArcMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ComicArcMac.entitlements; sourceTree = "<group>"; };
 		A00000000000000000000016 /* ComicArc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComicArc.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -593,7 +591,6 @@
 				C00000000000000000000008 /* ViewModels */,
 				C00000000000000000000009 /* Views */,
 				A00000000000000000000012 /* Assets.xcassets */,
-				A00000000000000000000013 /* icon.icns */,
 				A00000000000000000000014 /* Info.plist */,
 				A00000000000000000000026 /* PrivacyInfo.xcprivacy */,
 				A00000000000000000000015 /* ComicArcMac.entitlements */,
@@ -951,6 +948,7 @@
 			buildPhases = (
 				F10000000000000000000008 /* Sources */,
 				F10000000000000000000009 /* Frameworks */,
+				C8C9273EF2100F606D2D9E33 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -1067,13 +1065,19 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C8C9273EF2100F606D2D9E33 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D00000000000000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000012 /* Assets.xcassets in Resources */,
 				B00000000000000000000026 /* PrivacyInfo.xcprivacy in Resources */,
-				B00000000000000000000013 /* icon.icns in Resources */,
 				675D9D73AFA267D9FAC32641 /* ComicArc.sdef in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

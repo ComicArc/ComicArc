@@ -1,8 +1,5 @@
 import Foundation
-import Combine
-import CoreSpotlight
 import UserNotifications
-import os
 
 extension LibraryViewModel {
     func resyncLibrary() {
@@ -53,7 +50,12 @@ extension LibraryViewModel {
                     // The corruption-recovery safety net (DatabaseManager.recoverIfCorrupted)
                     // previously only had a backup from launch time -- a scan is exactly the kind
                     // of session that adds a lot of new, otherwise-unbacked-up data.
-                    if state.added > 0 { Task.detached(priority: .utility) { self.db.refreshBackup() } }
+                    // Calls the singleton directly rather than through `self.db` -- `self` is
+                    // main-actor-isolated, and reaching through it from inside `Task.detached`
+                    // (which runs off the main actor) is exactly the isolation crossing Swift 6
+                    // flags; `DatabaseManager.shared` itself is a plain thread-safe singleton with
+                    // its own internal serial queue, so it doesn't need `self` at all here.
+                    if state.added > 0 { Task.detached(priority: .utility) { DatabaseManager.shared.refreshBackup() } }
                 }
             }
         }
@@ -76,8 +78,12 @@ extension LibraryViewModel {
                 case .unsupportedFormat:
                     failures.append((url.lastPathComponent, "Unsupported file type"))
                 }
-                let done = i + 1
-                await MainActor.run { self?.importProgress = ImportProgress(done: done, total: urls.count) }
+                // Direct `await`-ed calls to small @MainActor methods, passing plain Sendable
+                // values as arguments -- rather than the previous `await MainActor.run { self?...
+                // }` closures, which reached back into this detached task's `weak self` and
+                // mutable locals from inside a separately-dispatched closure, exactly the
+                // isolation crossing Swift 6's strict concurrency checking flags.
+                await self?.setImportProgress(done: i + 1, total: urls.count)
             }
             await self?.reload()
             await self?.refreshDuplicates()
@@ -86,16 +92,24 @@ extension LibraryViewModel {
             let newComics = DatabaseManager.shared.comics(withPaths: paths)
             if !newComics.isEmpty { ThumbnailCache.shared.prewarm(comics: newComics) }
 
-            await MainActor.run {
-                self?.importProgress = nil
-                // A single successful, ordinary import with nothing to flag isn't worth
-                // interrupting the user over -- only surface the summary when there's something
-                // to report (any failure) or the batch was large enough that silent completion
-                // would leave real doubt about whether it actually worked.
-                if !failures.isEmpty || urls.count > 1 {
-                    self?.lastImportSummary = ImportSummary(added: added, skipped: skipped, failures: failures)
-                }
-            }
+            await self?.finishImport(added: added, skipped: skipped, failures: failures, totalCount: urls.count)
+        }
+    }
+
+    @MainActor
+    private func setImportProgress(done: Int, total: Int) {
+        importProgress = ImportProgress(done: done, total: total)
+    }
+
+    @MainActor
+    private func finishImport(added: Int, skipped: Int, failures: [(name: String, reason: String)], totalCount: Int) {
+        importProgress = nil
+        // A single successful, ordinary import with nothing to flag isn't worth interrupting the
+        // user over -- only surface the summary when there's something to report (any failure) or
+        // the batch was large enough that silent completion would leave real doubt about whether
+        // it actually worked.
+        if !failures.isEmpty || totalCount > 1 {
+            lastImportSummary = ImportSummary(added: added, skipped: skipped, failures: failures)
         }
     }
 

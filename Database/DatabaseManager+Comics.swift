@@ -381,7 +381,7 @@ extension DatabaseManager {
     func updateProgress(_ updates: [(comicId: Int64, page: Int)]) {
         guard !updates.isEmpty else { return }
         queue.sync {
-            inTransaction {
+            _ = inTransaction {
                 runBatch("""
                     INSERT INTO reading_progress (comic_id, current_page, last_read)
                     VALUES (?, ?, datetime('now'))
@@ -577,8 +577,9 @@ extension DatabaseManager {
                     let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
                     for (id, row) in rows(
                         "SELECT id, publisher, series FROM comics WHERE id IN (\(placeholders)) AND meta_edited = 0",
-                        args: chunk.map { $0 as Any? }
-                    ) { s in (colInt64(s, 0), (pub: colText(s, 1) ?? "", ser: colText(s, 2) ?? "")) } {
+                        args: chunk.map { $0 as Any? },
+                        map: { s in (colInt64(s, 0), (pub: colText(s, 1) ?? "", ser: colText(s, 2) ?? "")) }
+                    ) {
                         current[id] = row
                     }
                 }

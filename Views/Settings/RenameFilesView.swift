@@ -359,8 +359,12 @@ private struct RenameResultsView: View {
                                                    reason: "Couldn't move it back: \(error.localizedDescription)"))
                 }
             }
+            // Snapshotting to a `let` right before crossing to the main actor -- `failures` is
+            // still a mutable local from the loop above, and capturing it directly in this
+            // closure is exactly the kind of mutable-var-across-isolation capture Swift 6 flags.
+            let finalFailures = failures
             await MainActor.run {
-                undoFailures = failures
+                undoFailures = finalFailures
                 isUndoing = false
                 undone = true
                 vm.reload()
