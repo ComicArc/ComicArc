@@ -230,14 +230,6 @@ final class LibraryViewModel: ObservableObject {
         return .characters
     }
 
-    /// Which way `browseLevel` just changed -- read by `LibraryBrowserView` to pick a matching
-    /// slide direction for its transition (forward: drilling in, content enters from the
-    /// trailing edge; backward: `navigateBack()`, content enters from the leading edge instead).
-    /// Not something `browseLevel` itself can infer, since it's just a snapshot of the current
-    /// state with no memory of how it got there.
-    enum BrowseNavigationDirection { case forward, backward }
-    private(set) var browseNavigationDirection: BrowseNavigationDirection = .forward
-
     var db: DatabaseManager { .shared }
     var watcher: FileWatcher?
     var searchCancellable: AnyCancellable?
@@ -500,7 +492,6 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
-        browseNavigationDirection = .forward
         let pub = activePublisher
         reloadGeneration += 1
         let gen = reloadGeneration
@@ -524,13 +515,11 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
-        browseNavigationDirection = .forward
         withAnimation(Design.springGentle) { selectedSeries = sg.series }
         reload()
     }
 
     func navigateBack() {
-        browseNavigationDirection = .backward
         if selectedSeries != nil {
             withAnimation(Design.springGentle) { selectedSeries = nil }
             comics = []

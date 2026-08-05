@@ -29,17 +29,18 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var palette: Palette {
         switch self {
         case .dark:
-            // Previously a distinctly navy-tinted black (blue channel ran noticeably ahead of
-            // red/green, more so at each lighter step) that read closer to a dashboard than a
-            // premium reader. Flattened toward neutral charcoal -- still a hair cooler than
-            // `graphite` so the two remain distinguishable -- and widened the app/nav/card/surface
-            // steps so elevation reads more clearly.
+            // Previously a distinctly navy-tinted, near-pitch-black (blue channel ran noticeably
+            // ahead of red/green, more so at each lighter step, at a luminance so low the tint was
+            // barely perceptible anyway). This is a decisively lighter, flatter charcoal -- still a
+            // hair cooler than `graphite` so the two remain distinguishable -- with much wider
+            // app/nav/card/surface steps so elevation actually reads at a glance instead of in
+            // theory.
             return Palette(
-                appBackground: Color(red: 0.055, green: 0.057, blue: 0.072),
-                navBackground: Color(red: 0.078, green: 0.081, blue: 0.098),
-                cardBg:        Color(red: 0.104, green: 0.108, blue: 0.128),
-                surfaceBg:     Color(red: 0.132, green: 0.137, blue: 0.158),
-                borderColor:   Color.white.opacity(0.12),
+                appBackground: Color(red: 0.075, green: 0.078, blue: 0.094),
+                navBackground: Color(red: 0.105, green: 0.109, blue: 0.128),
+                cardBg:        Color(red: 0.145, green: 0.150, blue: 0.172),
+                surfaceBg:     Color(red: 0.188, green: 0.194, blue: 0.218),
+                borderColor:   Color.white.opacity(0.16),
                 brandBlue:     Color(red: 0.149, green: 0.396, blue: 0.733),
                 brandGold:     Color(red: 0.918, green: 0.659, blue: 0.082)
             )

@@ -16,26 +16,19 @@ struct LibraryBrowserView: View {
         return max(1, Int((gridWidth + density.spacing) / itemStride))
     }
 
-    /// Drilling in slides new content in from the trailing edge; `navigateBack()` reverses it --
-    /// mirrors `vm.browseNavigationDirection`, which the view model sets right before it changes
-    /// `browseLevel`.
-    private var browseTransition: AnyTransition {
-        let forward = vm.browseNavigationDirection == .forward
-        return .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
-            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
-        )
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             LibraryFilterBar()
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
+            // Previously slid in/out directionally (trailing on drill-in, leading on
+            // navigateBack()) -- that read as an unwanted "sliding" motion, so this now just
+            // relies on the plain crossfade SwiftUI defaults to under the existing
+            // `withAnimation(Design.springGentle)` wrapping each browseLevel change.
             switch vm.browseLevel {
-            case .characters:   CharacterGroupGridView().transition(browseTransition)
-            case .seriesGroups: SeriesGroupGridView().transition(browseTransition)
-            case .issues:       LibraryGridView().transition(browseTransition)
+            case .characters:   CharacterGroupGridView()
+            case .seriesGroups: SeriesGroupGridView()
+            case .issues:       LibraryGridView()
             }
         }
         .background(
