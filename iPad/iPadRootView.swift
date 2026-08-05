@@ -3,9 +3,16 @@ import SwiftUI
 
 struct iPadRootView: View {
     @EnvironmentObject var vm: LibraryViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedComic: Comic?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showRenameFilesGlobal = false
+    // Shared with every comic cover rendered inside the split view below (`ComicCard`,
+    // `IssueDetailPage`, etc. all already read `@Environment(\.readerNamespace)`) so the reader's
+    // own hero-cover layer can `matchedGeometryEffect` against whichever cover was on screen.
+    // Previously unset on iPad -- the Mac-only reason the grid-to-reader hero morph existed only
+    // on one platform wasn't the reader itself, it was this namespace never being injected here.
+    @Namespace private var readerNamespace
 
     var body: some View {
         ZStack {
@@ -21,14 +28,23 @@ struct iPadRootView: View {
             .navigationSplitViewStyle(.balanced)
             .searchable(text: $vm.searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library…")
             .onChange(of: vm.destination) { selectedComic = nil }
+            .environment(\.readerNamespace, readerNamespace)
 
-            .fullScreenCover(item: $vm.readerComic) { comic in
+            // A same-hierarchy overlay instead of `.fullScreenCover(item:)` -- a system sheet/cover
+            // presentation is a separate view-controller-level transition that can't participate in
+            // a `matchedGeometryEffect` with the grid underneath, which is exactly why the hero
+            // cover morph (see `iPadReaderView`) could never work on iPad while this used
+            // `fullScreenCover`. Mirrors the Mac reader's identical ZStack-overlay presentation in
+            // `ContentView.swift`, a pattern already proven there.
+            if let comic = vm.readerComic {
                 iPadReaderView(comic: comic, onClose: { vm.closeReader() })
                     .environmentObject(vm)
                     // Same fix as the Mac reader: without this, swapping straight from one comic
                     // to another (e.g. advancing to the next issue) reuses this view's existing
                     // @State (currentPage, zoom, autoplay) instead of resetting it for the new comic.
                     .id(comic.id)
+                    .transition(.opacity)
+                    .zIndex(10)
             }
 
             if let action = vm.pendingUndo {
@@ -74,10 +90,10 @@ struct iPadRootView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(Design.springGentle, value: vm.pendingUndo?.message)
-        .animation(Design.springGentle, value: vm.importProgress)
-        .animation(Design.springGentle, value: vm.showScanReport)
-        .animation(Design.springGentle, value: vm.renameCandidateCount)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.pendingUndo?.message)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.importProgress)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.showScanReport)
+        .animation(Design.motion(Design.springGentle, reduce: reduceMotion), value: vm.renameCandidateCount)
         .onReceive(NotificationCenter.default.publisher(for: .triggerRenameFiles)) { _ in
             showRenameFilesGlobal = true
         }
@@ -562,7 +578,7 @@ private struct iPadContentColumn: View {
                     .navigationTitle("Tier Lists")
             case .favoriteMoments:
                 FavoriteMomentsView().environmentObject(vm)
-                    .navigationTitle("Favorite Moments")
+                    .navigationTitle("Highlights")
             case .history:
                 ReadingHistoryView().environmentObject(vm)
                     .navigationTitle("History")

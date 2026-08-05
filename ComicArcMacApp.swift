@@ -179,7 +179,7 @@ struct ComicArcApp: App {
                 Button("Statistics")     { vm.select(.stats) }   .keyboardShortcut("7", modifiers: .command)
                 Button("History")        { vm.select(.history) } .keyboardShortcut("8", modifiers: .command)
                 Button("Tier Lists")      { vm.select(.tierLists) }      .keyboardShortcut("9", modifiers: .command)
-                Button("Favorite Moments") { vm.select(.favoriteMoments) }.keyboardShortcut("0", modifiers: [.command, .shift])
+                Button("Highlights") { vm.select(.favoriteMoments) }.keyboardShortcut("0", modifiers: [.command, .shift])
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }

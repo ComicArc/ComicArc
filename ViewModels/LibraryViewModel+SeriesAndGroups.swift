@@ -82,15 +82,17 @@ extension LibraryViewModel {
 
     func clearCharacterGroupCover(group: DatabaseManager.CharacterGroup) {
         db.clearCharacterGroupCover(groupName: group.groupName, publisher: group.publisher)
+        ThumbnailCache.shared.evictGroupAccentColor(key: "chargroup_\(group.publisher)_\(group.groupName)")
         reload()
     }
 
     func setCharacterGroupCover(group: DatabaseManager.CharacterGroup, usingCoverOf comic: Comic) {
-        let safe = "chargroup_\(group.publisher)_\(group.groupName)"
-            .components(separatedBy: .init(charactersIn: "/:")).joined(separator: "_")
+        let key = "chargroup_\(group.publisher)_\(group.groupName)"
+        let safe = key.components(separatedBy: .init(charactersIn: "/:")).joined(separator: "_")
         Task.detached(priority: .userInitiated) { [db] in
             guard let path = ThumbnailCache.shared.saveCoverFromComic(comic, destinationName: safe) else { return }
             db.setCharacterGroupCover(groupName: group.groupName, publisher: group.publisher, imagePath: path)
+            ThumbnailCache.shared.evictGroupAccentColor(key: key)
             await MainActor.run { LibraryViewModel.shared.reload() }
         }
     }
@@ -98,10 +100,12 @@ extension LibraryViewModel {
     func setSeriesCoverById(series: String, publisher: String, comicId: Int64) {
         db.setSeriesCover(series: series, publisher: publisher, comicId: comicId)
         ThumbnailCache.shared.evict(comicId)
+        ThumbnailCache.shared.evictGroupAccentColor(key: "series_\(publisher)_\(series)")
         reload()
     }
     func clearSeriesCoverByName(series: String, publisher: String) {
         db.clearSeriesCover(series: series, publisher: publisher)
+        ThumbnailCache.shared.evictGroupAccentColor(key: "series_\(publisher)_\(series)")
         reload()
     }
     func renameSeries(oldName: String, publisher: String?, newName: String) {
@@ -126,10 +130,12 @@ extension LibraryViewModel {
 
     func setSeriesCover(series: String, publisher: String, usingCoverOf comic: Comic) {
         db.setSeriesCover(series: series, publisher: publisher, comicId: comic.id)
+        ThumbnailCache.shared.evictGroupAccentColor(key: "series_\(publisher)_\(series)")
         reload()
     }
     func clearSeriesCover(_ series: String, publisher: String) {
         db.clearSeriesCover(series: series, publisher: publisher)
+        ThumbnailCache.shared.evictGroupAccentColor(key: "series_\(publisher)_\(series)")
         reload()
     }
 }

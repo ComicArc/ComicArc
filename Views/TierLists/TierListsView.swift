@@ -58,27 +58,17 @@ struct TierListsListView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if tierLists.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(.system(size: 42)).foregroundStyle(.quaternary)
-                    Text("No Tier Lists Yet").font(.headline).foregroundStyle(.secondary)
-                    Text("Rank your comics into S/A/B/C/D/F tiers, like \"Best Batman Runs.\"")
-                        .font(.caption).foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 12)
+                EmptyStateView(
+                    icon: "square.stack.3d.up",
+                    title: "No Tier Lists Yet",
+                    message: "Rank your comics into S/A/B/C/D/F tiers, like \"Best Batman Runs.\""
+                ) {
                     Button("Create Tier List") { showingCreate = true }
                         .buttonStyle(.borderedProminent).tint(Design.brandGold)
                         .foregroundStyle(.black)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(20)
             } else if filteredTierLists.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 42)).foregroundStyle(.quaternary)
-                    Text("No matching tier lists.").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No Matching Tier Lists")
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
@@ -387,17 +377,15 @@ struct TierListDetailView: View {
             if itemsLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if items.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "books.vertical")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No Comics Yet").font(.headline).foregroundStyle(.secondary)
-                    Text("Add comics, then drag them between tiers to rank them.")
-                        .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                EmptyStateView(
+                    icon: "books.vertical",
+                    title: "No Comics Yet",
+                    message: "Add comics, then drag them between tiers to rank them."
+                ) {
                     Button("Add Comics") { showingAddComics = true }
                         .buttonStyle(.borderedProminent).tint(Design.brandGold)
                         .foregroundStyle(.black)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {

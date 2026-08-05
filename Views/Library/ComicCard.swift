@@ -16,6 +16,15 @@ struct ComicCard: View {
     @State private var accentColor: Color?
     @State private var isHovered = false
     @State private var showMetadataInspector = false
+    // Backs the context menu's "Add to Reading Path…"/"Add to Tier List…" new-item prompts --
+    // previously the only way to get a comic into either was opening that feature's own
+    // management screen first; this gives all six "remember this comic" features (Favorites,
+    // Highlights, Reading List, Reading Paths, Tier Lists, Diary) the same "flag from anywhere"
+    // pattern Favorites/Reading List's heart/bookmark icons already have.
+    @State private var showNewRunPrompt = false
+    @State private var newRunTitle = ""
+    @State private var showNewTierListPrompt = false
+    @State private var newTierListTitle = ""
 
     private var isBulkSelected: Bool { vm.selectedComicIds.contains(comic.id) }
 
@@ -66,10 +75,10 @@ struct ComicCard: View {
                 }
             }
         }
-        .scaleEffect(isHovered && !reduceMotion ? 1.03 : 1.0)
-        // Plain ease, not a spring -- a spring's overshoot/settle wobble reads as a shake when
-        // onHover fires repeatedly while the cursor moves across a grid of covers.
-        .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isHovered)
+        // isHovered: binds this to the shared HoverLiftModifier (same scale/ease/reduce-motion
+        // behavior every other card uses) while still exposing the boolean here, since the cover
+        // glow above (`comicCardStyle(accentColor:isHovered:)`) needs it too.
+        .hoverLift(isHovered: $isHovered)
         .overlay(
             RoundedRectangle(cornerRadius: Design.cardCorner + 2)
                 .stroke(
@@ -84,7 +93,6 @@ struct ComicCard: View {
                 .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isBulkSelected)
                 .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isSelected)
         )
-        .onHover { isHovered = $0 }
         // Both tap counts attached at the same view level via `.exclusively(before:)` instead of
         // splitting single-tap (attached by the caller, outside this view) from double-tap
         // (attached in here) across two different nodes in the hierarchy -- two independently
@@ -98,6 +106,26 @@ struct ComicCard: View {
         )
         .contextMenu { contextMenu }
         .sheet(isPresented: $showMetadataInspector) { MetadataInspectorView(comicId: comic.id) }
+        .alert("New Reading Path", isPresented: $showNewRunPrompt) {
+            TextField("Name", text: $newRunTitle)
+            Button("Create") {
+                let trimmed = newRunTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                let runId = vm.createRun(title: trimmed, description: "")
+                vm.addToRun(runId: runId, comicIds: [comic.id])
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("New Tier List", isPresented: $showNewTierListPrompt) {
+            TextField("Name", text: $newTierListTitle)
+            Button("Create") {
+                let trimmed = newTierListTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                let listId = vm.createTierList(title: trimmed, description: "")
+                vm.addToTierList(tierListId: listId, comicIds: [comic.id])
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .onAppear { loadThumbnail() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
@@ -166,6 +194,23 @@ struct ComicCard: View {
             }
             Button(comic.inReadingList ? "Remove from Reading List" : "Add to Reading List") {
                 vm.toggleReadingList(comic)
+            }
+
+            Menu("Add to Reading Path") {
+                let runs = DatabaseManager.shared.allRuns()
+                ForEach(runs) { run in
+                    Button(run.title) { vm.addToRun(runId: run.id, comicIds: [comic.id]) }
+                }
+                if !runs.isEmpty { Divider() }
+                Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
+            }
+            Menu("Add to Tier List") {
+                let tierLists = DatabaseManager.shared.allTierLists()
+                ForEach(tierLists) { list in
+                    Button(list.title) { vm.addToTierList(tierListId: list.id, comicIds: [comic.id]) }
+                }
+                if !tierLists.isEmpty { Divider() }
+                Button("New Tier List…") { newTierListTitle = ""; showNewTierListPrompt = true }
             }
 
             Divider()

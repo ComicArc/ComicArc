@@ -34,7 +34,7 @@ enum AppDestination: Hashable, Codable {
         case .runs:                 return "Reading Paths"
         case .diary:                return "Diary"
         case .tierLists:            return "Tier Lists"
-        case .favoriteMoments:      return "Favorite Moments"
+        case .favoriteMoments:      return "Highlights"
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
@@ -501,7 +501,7 @@ final class LibraryViewModel: ObservableObject {
                 guard gen == self.reloadGeneration else { return }
                 // springGentle, not springBouncy -- a bouncy overshoot on every drill-down read as
                 // the library "shaking" on navigation, same complaint as the hover-lift jitter.
-                withAnimation(Design.springGentle) {
+                withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) {
                     self.selectedGroup = group
                     if series.count == 1 {
                         self.selectedSeries = series[0].series
@@ -515,13 +515,13 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
-        withAnimation(Design.springGentle) { selectedSeries = sg.series }
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { selectedSeries = sg.series }
         reload()
     }
 
     func navigateBack() {
         if selectedSeries != nil {
-            withAnimation(Design.springGentle) { selectedSeries = nil }
+            withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { selectedSeries = nil }
             comics = []
             if let group = selectedGroup {
                 let pub = activePublisher
@@ -538,21 +538,21 @@ final class LibraryViewModel: ObservableObject {
                 loadCharacterGroups()
             }
         } else if selectedGroup != nil {
-            withAnimation(Design.springGentle) { selectedGroup = nil; selectedSeries = nil }
+            withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { selectedGroup = nil; selectedSeries = nil }
             comics         = []
             loadCharacterGroups()
         }
     }
 
     func openReader(_ comic: Comic, atPage page: Int? = nil) {
-        withAnimation(Design.springGentle) { readerInitialPage = page; readerComic = comic }
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerComic = comic }
     }
     func openReader(id: Int64, atPage page: Int? = nil) {
         guard let c = db.comic(id: id) else { return }
-        withAnimation(Design.springGentle) { readerInitialPage = page; readerComic = c }
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerComic = c }
     }
     func closeReader() {
-        withAnimation(Design.springGentle) { readerComic = nil; readerInitialPage = nil }
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerComic = nil; readerInitialPage = nil }
         // A reading session just ended -- today may now be the first day of a new streak, or
         // extended an existing one, and the sidebar's ambient indicator should reflect that
         // without waiting for the next launch.

@@ -75,6 +75,9 @@ struct LibraryFilterBar: View {
     @Environment(\.fileService) private var fileService
     @State private var confirmBulkDelete = false
     @State private var showBulkReassign = false
+    // The heading a user sees at the top of every browsing screen -- worth scaling with Dynamic
+    // Type even though most of this bar's smaller chrome text stays fixed-size.
+    @ScaledMetric(relativeTo: .title2) private var headingSize: CGFloat = 22
 
     private var displayCount: Int {
         switch vm.browseLevel {
@@ -101,11 +104,26 @@ struct LibraryFilterBar: View {
                     }
                     .buttonStyle(.plain)
                     .help("Go back (⌘[)")
+
+                    // The Continue Reading/Read Next/On This Day/Recommended shelves only ever
+                    // render at the top-level character grid -- previously the only way back to
+                    // them from several levels deep was clicking "Go back" repeatedly. One tap
+                    // back to the top of Library, not a duplicate copy of the shelves themselves.
+                    if vm.selectedSection == .library {
+                        Button { vm.select(.library) } label: {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Design.brandGold)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Back to Library home (Continue Reading, Recommended, and more)")
+                        .accessibilityLabel("Back to Library home")
+                    }
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(headingTitle)
-                        .font(.system(size: 22, weight: .black))
+                        .font(.system(size: headingSize, weight: .black))
                         .foregroundStyle(Design.textPrimary)
                         .kerning(0.5)
                         .lineLimit(1)
@@ -316,6 +334,8 @@ struct OnThisDayShelf: View {
 struct OnThisDayCard: View {
     let entry: DiaryEntry
     @State private var thumbnail: PlatformImage?
+    @State private var accentColor: Color?
+    @State private var isHovered = false
 
     private var yearsAgo: Int {
         let loggedYear = Int(entry.loggedAt.prefix(4)) ?? Calendar.current.component(.year, from: Date())
@@ -334,7 +354,9 @@ struct OnThisDayCard: View {
                 }
             }
             .frame(width: 90, height: 130)
-            .comicCardStyle()
+            // Hover-only glow, same rule as `ComicCard` -- this is a single comic's cover, not a
+            // series/character group, so it stays neutral at rest.
+            .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
             Text(entry.comic.title)
                 .font(.caption2).lineLimit(2)
@@ -345,8 +367,11 @@ struct OnThisDayCard: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(Design.brandGold)
         }
-        .hoverLift(scale: 1.04)
-        .onAppear { ThumbnailCache.shared.thumbnail(for: entry.comic) { thumbnail = $0 } }
+        .hoverLift(scale: 1.04, isHovered: $isHovered)
+        .onAppear {
+            ThumbnailCache.shared.thumbnail(for: entry.comic) { thumbnail = $0 }
+            ThumbnailCache.shared.accentColor(for: entry.comic) { accentColor = $0 }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(entry.comic.title)
         .accessibilityValue(yearsAgo == 1 ? "Read 1 year ago today" : "Read \(yearsAgo) years ago today")
@@ -388,6 +413,8 @@ struct RecommendedShelf: View {
 struct RecommendedCard: View {
     let comic: Comic
     @State private var thumbnail: PlatformImage?
+    @State private var accentColor: Color?
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -401,7 +428,7 @@ struct RecommendedCard: View {
                 }
             }
             .frame(width: 90, height: 130)
-            .comicCardStyle()
+            .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
             Text(comic.title)
                 .font(.caption2).lineLimit(2)
@@ -412,8 +439,11 @@ struct RecommendedCard: View {
                 .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
                 .frame(width: 90, alignment: .leading)
         }
-        .hoverLift(scale: 1.04)
-        .onAppear { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
+        .hoverLift(scale: 1.04, isHovered: $isHovered)
+        .onAppear {
+            ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
+            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(comic.title)
         .accessibilityValue("From \(comic.series), recommended based on your ratings")
@@ -427,6 +457,8 @@ struct ShelfCard: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var thumbnail: PlatformImage?
     @State private var showMetadataInspector = false
+    @State private var accentColor: Color?
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -441,7 +473,7 @@ struct ShelfCard: View {
                     }
                 }
                 .frame(width: 90, height: 130)
-                .comicCardStyle()
+                .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
                 if !comic.isFinished {
                     ZStack(alignment: .leading) {
@@ -462,8 +494,11 @@ struct ShelfCard: View {
             Text("p. \(comic.progress + 1)/\(comic.pageCount)")
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         }
-        .hoverLift(scale: 1.04)
-        .onAppear { ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 } }
+        .hoverLift(scale: 1.04, isHovered: $isHovered)
+        .onAppear {
+            ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
+            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
+        }
         .contextMenu {
             Button("Continue Reading") { vm.readerComic = comic }
             Divider()
@@ -580,7 +615,13 @@ struct SeriesGroupGridView: View {
                                     spacing: Design.gridSpacing)]
     var body: some View {
         ScrollView {
-            if vm.seriesGroups.isEmpty {
+            if vm.isLoading && vm.seriesGroups.isEmpty {
+                // Previously this branched straight to `emptyState` while loading too -- a slow
+                // series-grid load would flash "No Series Here" (an error-sounding message) before
+                // the real data arrived, instead of a neutral loading state like the other two
+                // grids (`CharacterGroupGridView`/`LibraryGridView`) already have.
+                skeletonGrid
+            } else if vm.seriesGroups.isEmpty {
                 emptyState
             } else if folderGroupBuckets.count <= 1 {
                 // The common case (1-3 level folder layout, no in-between grouping folder) --
@@ -662,6 +703,18 @@ struct SeriesGroupGridView: View {
         return labels.map { (label: $0, groups: buckets[$0] ?? []) }
     }
 
+    private var skeletonGrid: some View {
+        LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
+            ForEach(0..<8, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 6) {
+                    ShimmerCard(width: Design.groupCardWidth, height: Design.groupCardHeight)
+                    ShimmerCard(width: Design.groupCardWidth * 0.7, height: 10)
+                }
+            }
+        }
+        .padding(Design.gridSpacing)
+    }
+
     private var emptyState: some View {
         EmptyStateView(
             icon: "square.stack.3d.up.slash",
@@ -683,7 +736,8 @@ struct CharacterGroupCard: View {
         GroupCard(title: group.groupName, subtitle: group.publisher,
                   count: group.count, finished: group.finished, started: group.started,
                   coverId: group.coverId, coverImagePath: group.coverImagePath,
-                  placeholderIcon: "books.vertical.fill", placeholderIconSize: 48)
+                  placeholderIcon: "books.vertical.fill", placeholderIconSize: 48,
+                  identityKey: "chargroup_\(group.publisher)_\(group.groupName)")
         .contextMenu {
             Button("Choose Existing Cover…") { showCoverPicker = true }
             Button("Custom Image…") { pickCoverImage() }
@@ -724,7 +778,8 @@ struct SeriesGroupCard: View {
         GroupCard(title: group.series, subtitle: nil,
                   count: group.count, finished: group.finished, started: group.started,
                   coverId: group.coverId, coverImagePath: group.coverImagePath,
-                  placeholderIcon: "book.fill", placeholderIconSize: 40)
+                  placeholderIcon: "book.fill", placeholderIconSize: 40,
+                  identityKey: "series_\(group.publisher)_\(group.series)")
         .contextMenu {
             Button("Open Series") { vm.drillIntoSeries(group) }
             Button("Manage Series…") {
@@ -790,20 +845,39 @@ private struct GroupCard: View {
     var coverImagePath: String? = nil
     let placeholderIcon: String
     let placeholderIconSize: CGFloat
+    // Stable identity key ("chargroup_<publisher>_<group>" / "series_<publisher>_<series>",
+    // matching `ThumbnailCache`'s existing custom-cover naming) this group's own "identity
+    // color" is cached under -- lets the whole card carry a bit of its own color at rest, the
+    // "maximal art-driven" browsing treatment `ComicCard` deliberately doesn't get.
+    let identityKey: String
 
     @State private var thumbnail: PlatformImage?
+    @State private var identityColor: Color?
     @AppStorage("progressFormat") private var progressFormatRaw = ProgressFormat.fraction.rawValue
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var progressFormat: ProgressFormat { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction }
+    private var restingTint: Color? {
+        Design.atmosphericTint(identityColor,
+                                increaseContrast: colorSchemeContrast == .increased,
+                                differentiateWithoutColor: differentiateWithoutColor)
+    }
+    private var scrimColor: Color {
+        Design.scrimTint(identityColor,
+                          increaseContrast: colorSchemeContrast == .increased,
+                          differentiateWithoutColor: differentiateWithoutColor)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
                 coverImage
                     .frame(width: Design.groupCardWidth, height: Design.groupCardHeight)
-                    .comicCardStyle()
+                    .comicCardStyle(restingTint: restingTint)
 
-                LinearGradient(colors: [.clear, .black.opacity(0.82)],
+                LinearGradient(colors: [.clear, scrimColor.opacity(0.82)],
                                startPoint: .center, endPoint: .bottom)
                     .frame(width: Design.groupCardWidth, height: Design.groupCardHeight)
                     .clipShape(Rectangle())
@@ -835,6 +909,7 @@ private struct GroupCard: View {
             }
         }
         .hoverLift()
+        .animation(Design.motion(Design.easeStandard, reduce: reduceMotion), value: identityColor)
         .onAppear { loadThumbnail() }
     }
 
@@ -855,6 +930,8 @@ private struct GroupCard: View {
     }
 
     private func loadThumbnail() {
+        ThumbnailCache.shared.groupAccentColor(key: identityKey, coverImagePath: coverImagePath,
+                                                representativeComicId: coverId) { identityColor = $0 }
         if let path = coverImagePath, let img = PlatformImage.fromFile(path) {
             thumbnail = img
             return
@@ -1127,13 +1204,14 @@ struct FilterPicker: View {
 
 struct DensityPicker: View {
     @AppStorage("gridDensity") private var densityRaw = GridDensity.regular.rawValue
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(GridDensity.allCases, id: \.rawValue) { d in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { densityRaw = d.rawValue }
+                    withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { densityRaw = d.rawValue }
                 } label: {
                     Image(systemName: d.icon)
                         .font(.system(size: 11))

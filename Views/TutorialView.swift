@@ -29,7 +29,7 @@ private extension TStep {
         case .sidebar:
             return TStepInfo(icon: "sidebar.left",
                 title: "The Sidebar",
-                body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Statistics, and History under Discover. Tap More for the deeper tracking tools — Diary, Tier Lists, Favorite Moments — plus anything that shows up automatically when there's something to review, like a possible duplicate.",
+                body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Statistics, and History under Discover. Tap More for the deeper tracking tools — Diary, Tier Lists, Highlights — plus anything that shows up automatically when there's something to review, like a possible duplicate.",
                 spot: .sidebar, above: false)
 
         case .library:
@@ -58,8 +58,8 @@ private extension TStep {
 
         case .diaryTierListsAndMoments:
             return TStepInfo(icon: "text.book.closed.fill",
-                title: "Diary, Tier Lists & Favorite Moments",
-                body: "Rate or review any comic and it's automatically logged in your Diary, rereads included. Tier Lists let you rank comics into S/A/B/C/D/F tiers — think \"Best Vertigo Runs.\" Star a bookmark in the reader to save it as a Favorite Moment, browsable later as its own gallery. And Statistics includes a Year in Review recap once you've been reading a while.",
+                title: "Diary, Tier Lists & Highlights",
+                body: "Rate or review any comic and it's automatically logged in your Diary, rereads included. Tier Lists let you rank comics into S/A/B/C/D/F tiers — think \"Best Vertigo Runs.\" Star a bookmark in the reader to save it as a Highlight, browsable later as its own gallery. And Statistics includes a Year in Review recap once you've been reading a while.",
                 spot: .sidebar, above: false)
 
         case .readingOrder:

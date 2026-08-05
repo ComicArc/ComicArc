@@ -24,6 +24,52 @@ extension Color {
         #endif
         return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
     }
+
+    /// HSB-clamps a cover-derived color into a specific saturation/brightness band -- shared by
+    /// every "cover color drives a background/wash/scrim" use case below, since an unclamped
+    /// cover average can be near-black, neon-saturated, or near-white, any of which looks broken
+    /// stretched across something bigger than a small swatch. Named presets below pick the band;
+    /// this just does the one HSB extraction they all need.
+    func clamped(saturation: ClosedRange<Double>, brightness: ClosedRange<Double>) -> Color {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        guard let c = NSColor(self).usingColorSpace(.deviceRGB) else { return self }
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #else
+        UIColor(self).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #endif
+        let clampedS = min(max(Double(s), saturation.lowerBound), saturation.upperBound)
+        let clampedB = min(max(Double(b), brightness.lowerBound), brightness.upperBound)
+        return Color(hue: Double(h), saturation: clampedS, brightness: clampedB)
+    }
+
+    /// For a whole background/header wash -- bright and saturated enough to read as deliberate
+    /// atmosphere rather than a barely-there tint.
+    func clampedForAtmosphere() -> Color { clamped(saturation: 0.30...0.65, brightness: 0.30...0.70) }
+
+    /// Much darker/lower-saturation than `clampedForAtmosphere()` -- for the reader's near-black
+    /// backdrop, which should read as "a hint of this cover's color in the dark," not an actual
+    /// colored background competing with the page art itself.
+    func clampedForDeepBackdrop() -> Color { clamped(saturation: 0.25...0.45, brightness: 0.05...0.12) }
+
+    /// Between the two above -- dark enough that white overlaid text (a `GroupCard`'s title, e.g.)
+    /// stays legible, but visibly colored rather than reading as the plain black scrim it replaces.
+    func clampedForScrim() -> Color { clamped(saturation: 0.35...0.60, brightness: 0.14...0.30) }
+
+    /// Readable label color for text/icons drawn over this color used as a background wash --
+    /// computed from perceptual luminance rather than the app's light/dark theme, since a tint's
+    /// own brightness can land either way regardless of which theme is active.
+    var readableForeground: Color {
+        var r: CGFloat = 0, g: CGFloat = 0, bch: CGFloat = 0, a: CGFloat = 0
+        #if os(macOS)
+        guard let c = NSColor(self).usingColorSpace(.deviceRGB) else { return .white }
+        r = c.redComponent; g = c.greenComponent; bch = c.blueComponent
+        #else
+        UIColor(self).getRed(&r, green: &g, blue: &bch, alpha: &a)
+        #endif
+        let luminance = 0.299 * r + 0.587 * g + 0.114 * bch
+        return luminance > 0.55 ? .black : .white
+    }
 }
 
 enum GridDensity: String, CaseIterable {
@@ -47,6 +93,9 @@ enum Design {
     // real comic covers, which run close to 2:3 -- that mismatch alone forced significantly more
     // of every cover to be cropped away than the individual issue card needed).
     static let groupCardHeight: CGFloat = 330
+    /// Same value as `Radius.card` -- kept as its own constant (not `Radius.card` inline) purely
+    /// because ~25 call sites already spell it `Design.cardCorner`; renaming all of them for a
+    /// token-location change with zero visual effect isn't worth the diff.
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
 
@@ -112,6 +161,45 @@ enum Design {
         reduce ? .default : animation
     }
 
+    /// The system Reduce Motion setting, read directly rather than via `@Environment` -- for the
+    /// handful of `withAnimation` call sites that live in a `ViewModel`/non-View type (navigation
+    /// state changes in `LibraryViewModel`), which has no SwiftUI environment to read from.
+    /// View-level code should still prefer `@Environment(\.accessibilityReduceMotion)`; this is
+    /// only for call sites that structurally can't.
+    static var systemReduceMotionEnabled: Bool {
+        #if os(macOS)
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        #else
+        UIAccessibility.isReduceMotionEnabled
+        #endif
+    }
+
+    /// Gate for the art-driven "atmosphere" surfaces (series/character headers, sidebar
+    /// highlighting, background washes) that lean on a cover's own color -- returns nil (meaning
+    /// "fall back to the neutral theme") whenever Increase Contrast or Differentiate Without
+    /// Color is on, the same reduce-to-neutral shape `motion(_:reduce:)` uses for animation.
+    /// Every call site that wants cover-derived color on anything bigger than a hover glow should
+    /// route through this rather than using a raw cache color directly.
+    static func atmosphericTint(_ color: Color?, increaseContrast: Bool, differentiateWithoutColor: Bool) -> Color? {
+        guard !increaseContrast, !differentiateWithoutColor, let color else { return nil }
+        return color.clampedForAtmosphere()
+    }
+
+    /// Same accessibility gate as `atmosphericTint`, but for the reader's near-black backdrop
+    /// specifically -- a hint of the comic's own cover color behind the page rather than flat
+    /// black, without touching the reader chrome's white icon/text contrast system at all.
+    static func deepBackdropTint(_ color: Color?, increaseContrast: Bool, differentiateWithoutColor: Bool) -> Color {
+        guard !increaseContrast, !differentiateWithoutColor, let color else { return .black }
+        return color.clampedForDeepBackdrop()
+    }
+
+    /// Same accessibility gate again, for the `GroupCard` gradient scrim -- falls back to plain
+    /// black (the scrim's original look) rather than nil, since the scrim always needs *a* color.
+    static func scrimTint(_ color: Color?, increaseContrast: Bool, differentiateWithoutColor: Bool) -> Color {
+        guard !increaseContrast, !differentiateWithoutColor, let color else { return .black }
+        return color.clampedForScrim()
+    }
+
     static func publisherColor(_ pub: String) -> Color {
         switch pub.lowercased() {
         case "dc":     return Color(red: 0.157, green: 0.420, blue: 0.886)
@@ -162,13 +250,22 @@ extension View {
     /// resting/unhovered state, so grids never look tinted while just sitting there. The thin edge
     /// ring rides along with the same tint so hover reads as "this cover's color", not just a
     /// generic glow behind it.
-    func comicCardStyle(accentColor: Color? = nil, isHovered: Bool = false) -> some View {
-        let tint = isHovered ? accentColor : nil
+    /// `restingTint` is the "maximal art-driven" resting-state counterpart to `accentColor`/
+    /// `isHovered` above -- a softer, always-on glow (not gated on hover) for cards where the
+    /// group itself (a whole series/character, not a single issue sitting in a scrolling grid)
+    /// is meant to carry a bit of its own color at rest. `ComicCard`'s existing hover-only
+    /// behavior is unchanged when `restingTint` is nil (the default), preserving the deliberate
+    /// "grids never look tinted while just sitting there" rule for individual issue covers.
+    func comicCardStyle(accentColor: Color? = nil, isHovered: Bool = false, restingTint: Color? = nil) -> some View {
+        let hoverTint = isHovered ? accentColor : nil
+        let shadowColor  = hoverTint?.opacity(0.5) ?? restingTint?.opacity(0.35) ?? .black.opacity(0.45)
+        let shadowRadius: CGFloat = hoverTint != nil ? 12 : (restingTint != nil ? 10 : 8)
+        let shadowY:      CGFloat = hoverTint != nil ? 6  : (restingTint != nil ? 5  : 4)
+        let strokeColor  = hoverTint?.opacity(0.6) ?? restingTint?.opacity(0.4) ?? .clear
         return self
             .clipShape(Rectangle())
-            .shadow(color: tint?.opacity(0.5) ?? .black.opacity(0.45),
-                    radius: tint != nil ? 12 : 8, x: 0, y: tint != nil ? 6 : 4)
-            .overlay(Rectangle().stroke(tint?.opacity(0.6) ?? .clear, lineWidth: 1.5))
+            .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
+            .overlay(Rectangle().stroke(strokeColor, lineWidth: 1.5))
     }
 
     func goldButton() -> some View {
@@ -179,9 +276,13 @@ extension View {
     /// The hover-scale micro-interaction every card type in the library uses (`ComicCard`,
     /// `GroupCard`, and the shelf cards) -- previously the identical `@State isHovered` +
     /// `.scaleEffect` + `.animation` + `.onHover` triad copy-pasted at each call site. Owns its
-    /// own hover state, so a call site just needs this one modifier, nothing else.
-    func hoverLift(scale: CGFloat = 1.03) -> some View {
-        modifier(HoverLiftModifier(scale: scale))
+    /// own hover state by default, so a plain call site just needs this one modifier, nothing
+    /// else. Pass `isHovered:` when the caller also needs the boolean itself (e.g. `ComicCard`
+    /// tinting its cover's glow from the same hover state) -- the modifier then drives that
+    /// binding instead of a private one, so there's still only one hover-tracking + animation
+    /// implementation, not two.
+    func hoverLift(scale: CGFloat = 1.03, isHovered: Binding<Bool>? = nil) -> some View {
+        modifier(HoverLiftModifier(scale: scale, externalIsHovered: isHovered))
     }
 }
 
@@ -316,8 +417,11 @@ extension Image {
 
 private struct HoverLiftModifier: ViewModifier {
     let scale: CGFloat
+    var externalIsHovered: Binding<Bool>? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovered = false
+    @State private var internalIsHovered = false
+
+    private var isHovered: Bool { externalIsHovered?.wrappedValue ?? internalIsHovered }
 
     func body(content: Content) -> some View {
         content
@@ -326,7 +430,10 @@ private struct HoverLiftModifier: ViewModifier {
             // wobble -- across a grid where onHover fires rapidly as the cursor crosses card
             // after card, that reads as the whole grid shaking. A plain ease has zero overshoot.
             .animation(Design.motion(Design.easeFast, reduce: reduceMotion), value: isHovered)
-            .onHover { isHovered = $0 }
+            .onHover { hovering in
+                if let externalIsHovered { externalIsHovered.wrappedValue = hovering }
+                else { internalIsHovered = hovering }
+            }
     }
 }
 

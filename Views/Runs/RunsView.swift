@@ -50,27 +50,17 @@ struct RunsListView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if runs.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "list.bullet.rectangle")
-                        .font(.system(size: 42)).foregroundStyle(.quaternary)
-                    Text("No Reading Paths Yet").font(.headline).foregroundStyle(.secondary)
-                    Text("Group comics into an ordered reading path to track multi-series arcs.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 12)
+                EmptyStateView(
+                    icon: "list.bullet.rectangle",
+                    title: "No Reading Paths Yet",
+                    message: "Group comics into an ordered reading path to track multi-series arcs."
+                ) {
                     Button("Create Reading Path") { showingCreate = true }
                         .buttonStyle(.borderedProminent).tint(Design.brandGold)
                         .foregroundStyle(.black)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(20)
             } else if filteredRuns.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 42)).foregroundStyle(.quaternary)
-                    Text("No matching reading paths.").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No Matching Reading Paths")
             } else {
                 ScrollView {
                     VStack(spacing: 0) {
@@ -366,17 +356,15 @@ struct RunDetailView: View {
             if itemsLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if items.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "books.vertical")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No Comics Yet").font(.headline).foregroundStyle(.secondary)
-                    Text("Add comics to build your reading path.")
-                        .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                EmptyStateView(
+                    icon: "books.vertical",
+                    title: "No Comics Yet",
+                    message: "Add comics to build your reading path."
+                ) {
                     Button("Add Comics") { showingAddComics = true }
                         .buttonStyle(.borderedProminent).tint(Design.brandGold)
                         .foregroundStyle(.black)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(items) { item in

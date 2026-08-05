@@ -36,6 +36,13 @@ final class ThumbnailCache: @unchecked Sendable {
     // distinguish "never looked up" from "looked up, nothing there".
     private var noAccentColorIds: Set<Int64> = []
 
+    // Same idea as accentColors/noAccentColorIds above, but keyed by a group's own stable string
+    // key (e.g. "chargroup_DC_Batman") instead of a single comic id -- a series/character
+    // "identity color" for the art-driven grid/header treatment, computed from the group's
+    // representative cover and surviving that representative comic changing.
+    private var groupAccentColors: [String: Color] = [:]
+    private var noGroupAccentColorIds: Set<String> = []
+
     private let coversDir: URL = {
         let dir = DatabaseManager.dataDir.appendingPathComponent("covers")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -145,6 +152,68 @@ final class ThumbnailCache: @unchecked Sendable {
         try? hex.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Series/character "identity color" -- same average-color technique as `accentColor(for:)`
+    /// above, but derived from a group's representative cover (custom cover image if one's been
+    /// set, else the group's representative comic) and cached under the group's own key so the
+    /// color is stable even if that representative comic later changes.
+    func groupAccentColor(key: String, coverImagePath: String?, representativeComicId: Int64,
+                           completion: @escaping (Color?) -> Void) {
+        if let cached = groupAccentColorFromCache(key: key) { completion(cached); return }
+        if let path = coverImagePath, let img = PlatformImage.fromFile(path) {
+            saveGroupAccentColor(key: key, from: img)
+            completion(groupAccentColorFromCache(key: key))
+            return
+        }
+        if let cached = thumbnailFromCache(comicId: representativeComicId) {
+            saveGroupAccentColor(key: key, from: cached)
+            completion(groupAccentColorFromCache(key: key))
+            return
+        }
+        guard let path = DatabaseManager.shared.filePath(forComicId: representativeComicId) else {
+            completion(nil); return
+        }
+        thumbnail(id: representativeComicId, filePath: path) { [weak self] img in
+            guard let self, let img else { completion(nil); return }
+            self.saveGroupAccentColor(key: key, from: img)
+            completion(self.groupAccentColorFromCache(key: key))
+        }
+    }
+
+    func groupAccentColorFromCache(key: String) -> Color? {
+        accentColorLock.lock()
+        if let cached = groupAccentColors[key] { accentColorLock.unlock(); return cached }
+        if noGroupAccentColorIds.contains(key) { accentColorLock.unlock(); return nil }
+        accentColorLock.unlock()
+        let url = coversDir.appendingPathComponent("\(safeGroupFileKey(key)).color")
+        guard let hex = try? String(contentsOf: url, encoding: .utf8), let color = Color(hex: hex) else {
+            accentColorLock.lock(); noGroupAccentColorIds.insert(key); accentColorLock.unlock()
+            return nil
+        }
+        accentColorLock.lock(); groupAccentColors[key] = color; accentColorLock.unlock()
+        return color
+    }
+
+    private func saveGroupAccentColor(key: String, from image: PlatformImage) {
+        guard let color = image.averageColor(), let hex = color.toHexString() else { return }
+        accentColorLock.lock(); groupAccentColors[key] = color; noGroupAccentColorIds.remove(key); accentColorLock.unlock()
+        let url = coversDir.appendingPathComponent("\(safeGroupFileKey(key)).color")
+        try? hex.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func safeGroupFileKey(_ key: String) -> String {
+        key.components(separatedBy: .init(charactersIn: "/:")).joined(separator: "_")
+    }
+
+    /// Called whenever a group's custom cover changes -- without this, the identity color
+    /// computed from the *old* cover would keep being served from cache/disk indefinitely.
+    func evictGroupAccentColor(key: String) {
+        accentColorLock.lock()
+        groupAccentColors.removeValue(forKey: key)
+        noGroupAccentColorIds.remove(key)
+        accentColorLock.unlock()
+        try? FileManager.default.removeItem(at: coversDir.appendingPathComponent("\(safeGroupFileKey(key)).color"))
+    }
+
     private func evictAccentColor(_ comicId: Int64) {
         accentColorLock.lock()
         accentColors.removeValue(forKey: comicId)
@@ -212,7 +281,10 @@ final class ThumbnailCache: @unchecked Sendable {
         globalGeneration += 1
         inflightLock.unlock()
         cache.removeAllObjects()
-        accentColorLock.lock(); accentColors.removeAll(); noAccentColorIds.removeAll(); accentColorLock.unlock()
+        accentColorLock.lock()
+        accentColors.removeAll(); noAccentColorIds.removeAll()
+        groupAccentColors.removeAll(); noGroupAccentColorIds.removeAll()
+        accentColorLock.unlock()
         if let files = try? FileManager.default.contentsOfDirectory(at: coversDir, includingPropertiesForKeys: nil) {
             for file in files where file.pathExtension == "jpg" || file.pathExtension == "color" {
                 try? FileManager.default.removeItem(at: file)
@@ -239,22 +311,20 @@ final class ThumbnailCache: @unchecked Sendable {
     func saveCustomGroupCover(groupName: String, publisher: String, imageURL: URL) -> String? {
         guard let img = PlatformImage.fromURL(imageURL),
               let resized = PlatformImage.resized(source: img, to: thumbSize) else { return nil }
-        let safe = "chargroup_\(publisher)_\(groupName)"
-            .components(separatedBy: .init(charactersIn: "/:"))
-            .joined(separator: "_")
-        let diskURL = coversDir.appendingPathComponent("\(safe).jpg")
+        let key = "chargroup_\(publisher)_\(groupName)"
+        let diskURL = coversDir.appendingPathComponent("\(safeGroupFileKey(key)).jpg")
         save(resized, to: diskURL)
+        evictGroupAccentColor(key: key)
         return diskURL.path
     }
 
     func saveCustomSeriesCover(series: String, publisher: String, imageURL: URL) -> String? {
         guard let img = PlatformImage.fromURL(imageURL),
               let resized = PlatformImage.resized(source: img, to: thumbSize) else { return nil }
-        let safe = "series_\(publisher)_\(series)"
-            .components(separatedBy: .init(charactersIn: "/:"))
-            .joined(separator: "_")
-        let diskURL = coversDir.appendingPathComponent("\(safe).jpg")
+        let key = "series_\(publisher)_\(series)"
+        let diskURL = coversDir.appendingPathComponent("\(safeGroupFileKey(key)).jpg")
         save(resized, to: diskURL)
+        evictGroupAccentColor(key: key)
         return diskURL.path
     }
 

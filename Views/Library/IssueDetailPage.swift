@@ -8,6 +8,7 @@ struct IssueDetailPage: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.fileService) private var fileService
     @Environment(\.readerNamespace) private var readerNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var current:        Comic
     @State private var tags:           [Tag]    = []
@@ -26,6 +27,16 @@ struct IssueDetailPage: View {
     @State private var missingIssues:  [String] = []
     @State private var showPagePicker: Bool     = false
     @State private var coverChangeError: String?
+    // Same "Add to Reading Path"/"Add to Tier List" cross-link `ComicCard`'s context menu has --
+    // previously this page could only ever *show* Reading Path/Tier List membership read-only
+    // (`runsSection`/`tierListsSection` below), never add to either without leaving the page.
+    @State private var showNewRunPrompt = false
+    @State private var newRunTitle = ""
+    @State private var showNewTierListPrompt = false
+    @State private var newTierListTitle = ""
+    // The one truly high-traffic piece of fixed-size display text on this page -- scales with
+    // Dynamic Type instead of staying pinned at 32pt regardless of the user's text-size setting.
+    @ScaledMetric(relativeTo: .title) private var titleSize: CGFloat = 32
 
     // Named instead of repeating the literal at both the image and its placeholder-fallback
     // sibling below -- the image's own frame also fixes the exact bounds `heroGeometry` captures
@@ -53,7 +64,7 @@ struct IssueDetailPage: View {
         .background(Design.appBackground)
         .onKeyPress(.escape) {
             guard !showingEdit else { return .ignored }
-            withAnimation(.easeInOut(duration: 0.2)) { onBack() }
+            withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { onBack() }
             return .handled
         }
         .task { loadData() }
@@ -76,6 +87,26 @@ struct IssueDetailPage: View {
                 ThumbnailCache.shared.thumbnail(for: current) { thumbnail = $0 }
             }
         }
+        .alert("New Reading Path", isPresented: $showNewRunPrompt) {
+            TextField("Name", text: $newRunTitle)
+            Button("Create") {
+                let trimmed = newRunTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                let runId = vm.createRun(title: trimmed, description: "")
+                vm.addToRun(runId: runId, comicIds: [current.id])
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("New Tier List", isPresented: $showNewTierListPrompt) {
+            TextField("Name", text: $newTierListTitle)
+            Button("Create") {
+                let trimmed = newTierListTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                let listId = vm.createTierList(title: trimmed, description: "")
+                vm.addToTierList(tierListId: listId, comicIds: [current.id])
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .alert("Couldn't Set Cover", isPresented: Binding(
             get: { coverChangeError != nil },
             set: { if !$0 { coverChangeError = nil } }
@@ -89,7 +120,7 @@ struct IssueDetailPage: View {
     private var topBar: some View {
         HStack(spacing: 12) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { onBack() }
+                withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { onBack() }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
@@ -254,6 +285,34 @@ struct IssueDetailPage: View {
                 .fixedSize()
                 .accessibilityLabel("Change Cover")
                 .accessibilityHint("Choose a page from this issue or an image file to use as the cover")
+
+                Menu {
+                    Menu("Add to Reading Path") {
+                        let runs = DatabaseManager.shared.allRuns()
+                        ForEach(runs) { run in
+                            Button(run.title) { vm.addToRun(runId: run.id, comicIds: [current.id]) }
+                        }
+                        if !runs.isEmpty { Divider() }
+                        Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
+                    }
+                    Menu("Add to Tier List") {
+                        let tierLists = DatabaseManager.shared.allTierLists()
+                        ForEach(tierLists) { list in
+                            Button(list.title) { vm.addToTierList(tierListId: list.id, comicIds: [current.id]) }
+                        }
+                        if !tierLists.isEmpty { Divider() }
+                        Button("New Tier List…") { newTierListTitle = ""; showNewTierListPrompt = true }
+                    }
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: "square.stack.3d.up").font(.system(size: 22)).foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Text("Lists").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Add to Reading Path or Tier List")
             }
         }
         .padding(40)
@@ -290,7 +349,7 @@ struct IssueDetailPage: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(current.title)
-                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .font(.system(size: titleSize, weight: .black, design: .rounded))
                     .foregroundStyle(Design.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -537,7 +596,7 @@ struct IssueDetailPage: View {
         }
         ThumbnailCache.shared.accentColor(for: current) { color in
             guard comicId == self.current.id else { return }
-            withAnimation(Design.springGentle) { self.accentColor = color }
+            withAnimation(Design.motion(Design.springGentle, reduce: self.reduceMotion)) { self.accentColor = color }
         }
         Task.detached(priority: .userInitiated) {
             let t   = DatabaseManager.shared.tags(for: comicId)
@@ -548,7 +607,7 @@ struct IssueDetailPage: View {
                 // These four feed conditionally-rendered sections (tags row, supplementary
                 // gap/runs/tier-lists/notes strip) that otherwise pop into existence the instant
                 // this async load resolves, shoving the rest of the page down with no transition.
-                withAnimation(Design.easeStandard) {
+                withAnimation(Design.motion(Design.easeStandard, reduce: self.reduceMotion)) {
                     tags = t; appearsInRuns = r; appearsInTierLists = tl; missingIssues = mi
                 }
             }
