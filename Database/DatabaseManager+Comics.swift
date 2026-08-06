@@ -68,6 +68,21 @@ extension DatabaseManager {
         }
     }
 
+    /// Mirror of `nextComic(after:)` -- same series-scoped ordering, opposite direction. Lets the
+    /// reader carry a page-turn backward across a comic boundary the same way it does forward.
+    func previousComic(before comic: Comic) -> Comic? {
+        queue.sync {
+            let orderExpr = "COALESCE(c.reading_order_position, c.position, c.id)"
+            let sql = """
+                \(comicSelect)
+                WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ?
+                  AND \(orderExpr) < (SELECT COALESCE(reading_order_position, position, id) FROM comics WHERE id = ?)
+                ORDER BY \(orderExpr) DESC, c.title DESC LIMIT 1
+                """
+            return rows(sql, args: [comic.publisher, comic.series, comic.id], map: comicRow).first
+        }
+    }
+
     struct MetadataInspectorInfo {
         let comic: Comic
         let comicType: ComicType

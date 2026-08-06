@@ -52,9 +52,14 @@ struct ReaderView: View {
     /// this whole view fresh for it (currentPage, zoom, etc. all reset), the same as opening any
     /// other comic normally.
     let onOpenComic: (Comic) -> Void
+    /// Set when this comic was opened from inside a Run's reading path. When present, next/
+    /// previous navigation is scoped to that run's ordered items instead of series order.
+    let runId: Int64?
 
     @State private var nextIssue: Comic?
-    @State private var dismissedNextIssuePrompt = false
+    @State private var previousIssue: Comic?
+    @State private var showBoundaryToast = false
+    @State private var boundaryToastText = ""
 
     @Environment(\.windowService) private var windowService
     @Environment(\.readerNamespace) private var readerNamespace
@@ -129,11 +134,12 @@ struct ReaderView: View {
                height: panOffset.height + dragOffset.height)
     }
 
-    init(comic: Comic, initialPage: Int? = nil, onClose: @escaping () -> Void,
+    init(comic: Comic, initialPage: Int? = nil, runId: Int64? = nil, onClose: @escaping () -> Void,
          onOpenComic: @escaping (Comic) -> Void) {
         self.comic        = comic
         self.onClose      = onClose
         self.onOpenComic  = onOpenComic
+        self.runId        = runId
         // Clamp both bounds: page_count can change after progress was saved (a metadata refresh
         // correcting a bad initial page count, or a revival at the same path with a different
         // file) and a stale out-of-range progress would otherwise land the reader on a blank
@@ -196,22 +202,20 @@ struct ReaderView: View {
                     autoplayBar
                 }
 
-                if isOnLastPage, !autoplay, let nextIssue, !dismissedNextIssuePrompt {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            upNextCard(nextIssue)
-                                .padding(24)
-                        }
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
                 if showFinishToast {
                     VStack {
                         Spacer()
                         finishToast
+                            .padding(.bottom, 100)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .allowsHitTesting(false)
+                }
+
+                if showBoundaryToast {
+                    VStack {
+                        Spacer()
+                        boundaryToast
                             .padding(.bottom, 100)
                     }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -470,8 +474,6 @@ struct ReaderView: View {
         .ignoresSafeArea()
     }
 
-    private var isOnLastPage: Bool { comic.pageCount > 0 && currentPage >= comic.pageCount - 1 }
-
     private var finishToast: some View {
         HStack(spacing: 10) {
             // The one deliberately bouncy flourish near the reader itself -- transient chrome
@@ -499,38 +501,23 @@ struct ReaderView: View {
         }
     }
 
-    private func upNextCard(_ next: Comic) -> some View {
-        HStack(spacing: 12) {
-            MiniComicCard(comic: next)
-                .frame(width: 46, height: 69)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Up Next").font(.caption).foregroundStyle(.white.opacity(0.6))
-                Text(next.title).font(.subheadline.bold()).foregroundStyle(.white).lineLimit(1)
-            }
-
-            Button("Continue") { advanceToNextIssue() }
-                .buttonStyle(GoldCapsuleStyle())
-
-            Button {
-                withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { dismissedNextIssuePrompt = true }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption).foregroundStyle(.white.opacity(0.6))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss")
+    /// Fires when a page-turn tries to cross a comic boundary with nowhere to go (no next/
+    /// previous comic available) -- a brief, non-interactive bump acknowledging the edge of the
+    /// library instead of stopping dead with no feedback at all.
+    private func showBoundaryToast(_ text: String) {
+        boundaryToastText = text
+        withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showBoundaryToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showBoundaryToast = false }
         }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
-        .frame(maxWidth: 360)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Up next: \(next.title)")
-        .accessibilityHint("Double-tap to continue reading")
-        .accessibilityAction { advanceToNextIssue() }
+    }
+
+    private var boundaryToast: some View {
+        Text(boundaryToastText)
+            .font(.subheadline.bold())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18).padding(.vertical, 12)
+            .background(.black.opacity(0.75), in: Capsule())
     }
 
     private var topBar: some View {
@@ -545,9 +532,31 @@ struct ReaderView: View {
 
             Spacer()
 
-            Text(comic.title)
-                .font(.headline).foregroundStyle(.white).lineLimit(1).padding(.horizontal)
-                .accessibilityLabel("Reading: \(comic.title)")
+            HStack(spacing: 10) {
+                Button { goToPreviousIssue() } label: {
+                    Image(systemName: "chevron.left.circle")
+                        .font(.title3)
+                        .foregroundStyle(previousIssue == nil ? .white.opacity(0.25) : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .disabled(previousIssue == nil)
+                .accessibilityLabel(previousIssue == nil ? "No previous comic" : "Previous comic: \(previousIssue?.title ?? "")")
+                .help(previousIssue == nil ? "No previous comic" : "Previous: \(previousIssue?.title ?? "")")
+
+                Text(comic.title)
+                    .font(.headline).foregroundStyle(.white).lineLimit(1).padding(.horizontal)
+                    .accessibilityLabel("Reading: \(comic.title)")
+
+                Button { advanceToNextIssue() } label: {
+                    Image(systemName: "chevron.right.circle")
+                        .font(.title3)
+                        .foregroundStyle(nextIssue == nil ? .white.opacity(0.25) : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .disabled(nextIssue == nil)
+                .accessibilityLabel(nextIssue == nil ? "No next comic" : "Next comic: \(nextIssue?.title ?? "")")
+                .help(nextIssue == nil ? "No next comic" : "Next: \(nextIssue?.title ?? "")")
+            }
 
             Spacer()
 
@@ -896,13 +905,31 @@ struct ReaderView: View {
         guard comic.pageCount > 0 else { return }
         let advance = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
         let target  = max(0, min(currentPage + advance, comic.pageCount - 1))
-        guard target != currentPage else { return }
+        guard target != currentPage else {
+            // Already on the last page -- turning the page again carries straight into the next
+            // comic, like flipping past the final page of a bound anthology, instead of stopping
+            // dead or waiting on a "Continue" tap.
+            if let nextIssue {
+                advanceToNextIssue()
+            } else {
+                showBoundaryToast("That's the last one")
+            }
+            return
+        }
         currentPage = target
         saveProgress()
     }
 
     private func prevPage() {
-        let step    = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
+        let step = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
+        guard currentPage > 0 else {
+            if let previousIssue {
+                goToPreviousIssue()
+            } else {
+                showBoundaryToast("That's the first one")
+            }
+            return
+        }
         currentPage = max(0, currentPage - step)
         saveProgress()
     }
@@ -945,17 +972,34 @@ struct ReaderView: View {
         DatabaseManager.shared.logReadingSession(comicId: comic.id, pageStart: min(sessionStartPage, currentPage), pageEnd: max(sessionStartPage, currentPage))
     }
 
-    /// Looks up the next issue in this series (if any) so the "Up Next" overlay and autoplay's
-    /// seamless continuation both have something to act on -- also warms its cover and first
-    /// couple pages in the background so the actual transition, whenever it happens, is instant
-    /// instead of a cold load.
+    /// Looks up the adjacent issues (if any) so a page-turn past either end of this comic has
+    /// something to carry straight into -- also warms the next one's cover and first couple pages
+    /// in the background so that transition, whenever it happens, is instant instead of a cold
+    /// load. Inside a run, "next"/"previous" are scoped to that run's ordered items; otherwise
+    /// they fall back to series order.
     private func loadNextIssue() {
         let current = comic
+        let rid = runId
         Task.detached(priority: .userInitiated) {
-            guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
-            ThumbnailCache.shared.thumbnail(for: next) { _ in }
-            PageCache.shared.prefetch(comic: next, around: 0, count: 2)
-            await MainActor.run { nextIssue = next }
+            if let rid {
+                let items = DatabaseManager.shared.runItems(runId: rid)
+                guard let idx = items.firstIndex(where: { $0.comic.id == current.id }) else { return }
+                let next = idx + 1 < items.count ? items[idx + 1].comic : nil
+                let prev = idx > 0 ? items[idx - 1].comic : nil
+                if let next {
+                    ThumbnailCache.shared.thumbnail(for: next) { _ in }
+                    PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+                }
+                await MainActor.run { nextIssue = next; previousIssue = prev }
+            } else {
+                let next = DatabaseManager.shared.nextComic(after: current)
+                let prev = DatabaseManager.shared.previousComic(before: current)
+                if let next {
+                    ThumbnailCache.shared.thumbnail(for: next) { _ in }
+                    PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+                }
+                await MainActor.run { nextIssue = next; previousIssue = prev }
+            }
         }
     }
 
@@ -964,6 +1008,13 @@ struct ReaderView: View {
         saveProgress()
         logSession()
         onOpenComic(nextIssue)
+    }
+
+    private func goToPreviousIssue() {
+        guard let previousIssue else { return }
+        saveProgress()
+        logSession()
+        onOpenComic(previousIssue)
     }
 
     private func runAutoplay() async {
@@ -991,6 +1042,7 @@ struct ReaderView: View {
                 advanceToNextIssue()
             } else {
                 autoplay = false
+                showBoundaryToast("That's the last one")
             }
         }
     }

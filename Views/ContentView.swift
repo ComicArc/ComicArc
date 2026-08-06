@@ -36,10 +36,10 @@ struct ContentView: View {
             .navigationSplitViewStyle(.balanced)
 
             if let comic = vm.readerComic {
-                ReaderView(comic: comic, initialPage: vm.readerInitialPage) {
+                ReaderView(comic: comic, initialPage: vm.readerInitialPage, runId: vm.readerRunId) {
                     vm.closeReader()
                 } onOpenComic: { next in
-                    vm.openReader(next)
+                    vm.openReader(next, runId: vm.readerRunId)
                 }
                 // Ties this view's identity to the comic itself rather than just to the `if`
                 // branch -- without it, a future reassignment of readerComic straight from one

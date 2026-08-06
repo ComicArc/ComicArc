@@ -463,7 +463,7 @@ struct RunDetailView: View {
                 HStack(spacing: 6) {
                     if let comic = firstUnfinished {
                         Button {
-                            LibraryViewModel.shared.openReader(comic)
+                            LibraryViewModel.shared.openReader(comic, runId: run.id)
                         } label: {
                             Label(items.contains { $0.comic.isStarted } ? "Resume" : "Start Reading",
                                   systemImage: "play.fill")
@@ -670,7 +670,7 @@ struct RunItemRow: View {
         }
         .padding(.vertical, 6)
         .contextMenu {
-            Button("Open") { LibraryViewModel.shared.openReader(item.comic) }
+            Button("Open") { LibraryViewModel.shared.openReader(item.comic, runId: runId) }
             Divider()
             if item.comic.isFinished {
                 Button("Mark as Unread") {
