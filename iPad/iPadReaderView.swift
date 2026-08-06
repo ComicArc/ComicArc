@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct iPadReaderView: View {
     let comic: Comic
+    let runId: Int64?
     let onClose: () -> Void
 
     @EnvironmentObject var vm: LibraryViewModel
@@ -50,7 +51,9 @@ struct iPadReaderView: View {
 
     @State private var viewWidth: CGFloat = 0
     @State private var nextIssue: Comic?
+    @State private var previousIssue: Comic?
     @State private var dismissedNextIssuePrompt = false
+    @State private var showEndOfRun = false
 
     // Parity with the Mac reader -- these previously existed only there, leaving the platform
     // most people actually read on with a noticeably thinner reader.
@@ -64,8 +67,9 @@ struct iPadReaderView: View {
     private var fitMode: FitMode { FitMode(rawValue: fitModeRaw) ?? .fitPage }
     private var colorFilter: ColorFilter { ColorFilter(rawValue: colorFilterRaw) ?? .none }
 
-    init(comic: Comic, onClose: @escaping () -> Void) {
+    init(comic: Comic, runId: Int64? = nil, onClose: @escaping () -> Void) {
         self.comic = comic
+        self.runId = runId
         self.onClose = onClose
         // Clamp both bounds: page_count can change after progress was saved (metadata refresh,
         // or a revival at the same path with a different file), and a stale out-of-range
@@ -126,10 +130,20 @@ struct iPadReaderView: View {
 
             overlayControls
 
-            if isOnLastPage, !autoplay, let nextIssue, !dismissedNextIssuePrompt {
+            if isOnLastPage, !autoplay, let nextIssue, runId == nil, !dismissedNextIssuePrompt {
                 VStack {
                     Spacer()
                     upNextCard(nextIssue)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if showEndOfRun {
+                VStack {
+                    Spacer()
+                    endOfRunCard
                         .padding(.horizontal, 20)
                         .padding(.bottom, 28)
                 }
@@ -236,6 +250,23 @@ struct iPadReaderView: View {
         didShowFinishToast = true
         saveProgress()
         checkSeriesComplete()
+        advanceInRunIfNeeded()
+    }
+
+    /// Mirrors the Mac reader's identical run auto-advance (`ReaderView.advanceInRunIfNeeded()`):
+    /// finishing an issue inside a run carries straight into the next one instead of waiting on a
+    /// tap, only pausing (via `endOfRunCard`) once there's nowhere left to go. Steps aside while
+    /// autoplay is running since that already owns its own end-of-content transition.
+    private func advanceInRunIfNeeded() {
+        guard runId != nil, !autoplay else { return }
+        if nextIssue != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                guard isOnLastPage, !isClosing else { return }
+                advanceToNextIssue()
+            }
+        } else {
+            withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { showEndOfRun = true }
+        }
     }
 
     private func checkSeriesComplete() {
@@ -440,10 +471,34 @@ struct iPadReaderView: View {
             }
             .accessibilityLabel("Close Reader")
             Spacer()
-            Text(comic.title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(1)
+            HStack(spacing: 8) {
+                if runId != nil {
+                    Button(action: goToPreviousInRun) {
+                        Image(systemName: "chevron.left.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(previousIssue == nil ? .white.opacity(0.25) : .white.opacity(0.85))
+                            .frame(minWidth: 32, minHeight: 32)
+                    }
+                    .disabled(previousIssue == nil)
+                    .accessibilityLabel(previousIssue == nil ? "No previous comic in this run" : "Previous comic in run: \(previousIssue?.title ?? "")")
+                }
+
+                Text(comic.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                if runId != nil {
+                    Button(action: advanceToNextIssue) {
+                        Image(systemName: "chevron.right.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(nextIssue == nil ? .white.opacity(0.25) : .white.opacity(0.85))
+                            .frame(minWidth: 32, minHeight: 32)
+                    }
+                    .disabled(nextIssue == nil)
+                    .accessibilityLabel(nextIssue == nil ? "No next comic in this run" : "Next comic in run: \(nextIssue?.title ?? "")")
+                }
+            }
             Spacer()
             Text("\(currentPage + 1) / \(pageCount)")
                 .font(.caption)
@@ -573,11 +628,24 @@ struct iPadReaderView: View {
     /// something ready to act on instead of a cold load.
     private func loadNextIssue() {
         let current = comic
+        let rid = runId
         Task.detached(priority: .userInitiated) {
-            guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
-            ThumbnailCache.shared.thumbnail(for: next) { _ in }
-            PageCache.shared.prefetch(comic: next, around: 0, count: 2)
-            await MainActor.run { nextIssue = next }
+            if let rid {
+                let items = DatabaseManager.shared.runItems(runId: rid)
+                guard let idx = items.firstIndex(where: { $0.comic.id == current.id }) else { return }
+                let next = idx + 1 < items.count ? items[idx + 1].comic : nil
+                let prev = idx > 0 ? items[idx - 1].comic : nil
+                if let next {
+                    ThumbnailCache.shared.thumbnail(for: next) { _ in }
+                    PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+                }
+                await MainActor.run { nextIssue = next; previousIssue = prev }
+            } else {
+                guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
+                ThumbnailCache.shared.thumbnail(for: next) { _ in }
+                PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+                await MainActor.run { nextIssue = next }
+            }
         }
     }
 
@@ -585,7 +653,14 @@ struct iPadReaderView: View {
         guard let nextIssue else { return }
         saveProgress()
         logSession()
-        vm.openReader(nextIssue)
+        vm.openReader(nextIssue, runId: runId)
+    }
+
+    private func goToPreviousInRun() {
+        guard let previousIssue else { return }
+        saveProgress()
+        logSession()
+        vm.openReader(previousIssue, runId: runId)
     }
 
     private func upNextCard(_ next: Comic) -> some View {
@@ -621,6 +696,35 @@ struct iPadReaderView: View {
         .accessibilityAction { advanceToNextIssue() }
     }
 
+    private var endOfRunCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "flag.checkered.circle.fill")
+                .font(.title2)
+                .foregroundStyle(Design.brandGold)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("End of Run").font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text("You've finished every comic in this run.")
+                    .font(.subheadline.bold()).foregroundStyle(.white)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                withAnimation(Design.motion(.easeOut(duration: 0.2), reduce: reduceMotion)) { showEndOfRun = false }
+            } label: {
+                Image(systemName: "xmark").font(.caption).foregroundStyle(.white.opacity(0.6))
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("End of run: you've finished every comic in this run.")
+    }
+
     private func runAutoplay() async {
         guard autoplay, !scrollMode else { return }
         let steps = 60
@@ -643,6 +747,9 @@ struct iPadReaderView: View {
                 advanceToNextIssue()
             } else {
                 autoplay = false
+                if runId != nil {
+                    withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { showEndOfRun = true }
+                }
             }
         }
     }

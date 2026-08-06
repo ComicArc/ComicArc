@@ -37,7 +37,7 @@ struct iPadRootView: View {
             // `fullScreenCover`. Mirrors the Mac reader's identical ZStack-overlay presentation in
             // `ContentView.swift`, a pattern already proven there.
             if let comic = vm.readerComic {
-                iPadReaderView(comic: comic, onClose: { vm.closeReader() })
+                iPadReaderView(comic: comic, runId: vm.readerRunId, onClose: { vm.closeReader() })
                     .environmentObject(vm)
                     // Same fix as the Mac reader: without this, swapping straight from one comic
                     // to another (e.g. advancing to the next issue) reuses this view's existing

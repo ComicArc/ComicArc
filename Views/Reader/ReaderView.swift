@@ -52,9 +52,16 @@ struct ReaderView: View {
     /// this whole view fresh for it (currentPage, zoom, etc. all reset), the same as opening any
     /// other comic normally.
     let onOpenComic: (Comic) -> Void
+    /// Set when this comic was opened from inside a Run's reading path. When present, next/
+    /// previous navigation is scoped to that run's ordered items instead of series order, and
+    /// finishing a comic advances straight into the next one rather than waiting on a "Continue"
+    /// tap -- a run is meant to read as one continuous sitting.
+    let runId: Int64?
 
     @State private var nextIssue: Comic?
+    @State private var previousIssue: Comic?
     @State private var dismissedNextIssuePrompt = false
+    @State private var showEndOfRun = false
 
     @Environment(\.windowService) private var windowService
     @Environment(\.readerNamespace) private var readerNamespace
@@ -129,11 +136,12 @@ struct ReaderView: View {
                height: panOffset.height + dragOffset.height)
     }
 
-    init(comic: Comic, initialPage: Int? = nil, onClose: @escaping () -> Void,
+    init(comic: Comic, initialPage: Int? = nil, runId: Int64? = nil, onClose: @escaping () -> Void,
          onOpenComic: @escaping (Comic) -> Void) {
         self.comic        = comic
         self.onClose      = onClose
         self.onOpenComic  = onOpenComic
+        self.runId        = runId
         // Clamp both bounds: page_count can change after progress was saved (a metadata refresh
         // correcting a bad initial page count, or a revival at the same path with a different
         // file) and a stale out-of-range progress would otherwise land the reader on a blank
@@ -196,12 +204,24 @@ struct ReaderView: View {
                     autoplayBar
                 }
 
-                if isOnLastPage, !autoplay, let nextIssue, !dismissedNextIssuePrompt {
+                if isOnLastPage, !autoplay, let nextIssue, runId == nil, !dismissedNextIssuePrompt {
                     VStack {
                         Spacer()
                         HStack {
                             Spacer()
                             upNextCard(nextIssue)
+                                .padding(24)
+                        }
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                if showEndOfRun {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            endOfRunCard
                                 .padding(24)
                         }
                     }
@@ -366,6 +386,24 @@ struct ReaderView: View {
         // of complete on the read that actually finishes it.
         saveProgress()
         checkSeriesComplete()
+        advanceInRunIfNeeded()
+    }
+
+    /// Reading a Run is meant to feel like one continuous sitting, not a series of "Continue?"
+    /// confirmations -- finishing an issue inside one carries straight into the next issue in
+    /// that run. Only pauses (showing `endOfRunCard` instead) once there's genuinely nowhere
+    /// left to go. Autoplay already owns its own end-of-content transition (`runAutoplay()`), so
+    /// this steps aside while it's running to avoid double-advancing.
+    private func advanceInRunIfNeeded() {
+        guard runId != nil, !autoplay else { return }
+        if nextIssue != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                guard isOnLastPage, !isClosing else { return }
+                advanceToNextIssue()
+            }
+        } else {
+            withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showEndOfRun = true }
+        }
     }
 
     /// "Complete" is library-relative: every issue currently on disk for this (publisher, series)
@@ -533,6 +571,36 @@ struct ReaderView: View {
         .accessibilityAction { advanceToNextIssue() }
     }
 
+    private var endOfRunCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "flag.checkered.circle.fill")
+                .font(.title2)
+                .foregroundStyle(Design.brandGold)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("End of Run").font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text("You've finished every comic in this run.")
+                    .font(.subheadline.bold()).foregroundStyle(.white)
+            }
+
+            Button {
+                withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showEndOfRun = false }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption).foregroundStyle(.white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
+        .frame(maxWidth: 360)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("End of run: you've finished every comic in this run.")
+    }
+
     private var topBar: some View {
         HStack {
             Button { handleClose() } label: {
@@ -545,9 +613,35 @@ struct ReaderView: View {
 
             Spacer()
 
-            Text(comic.title)
-                .font(.headline).foregroundStyle(.white).lineLimit(1).padding(.horizontal)
-                .accessibilityLabel("Reading: \(comic.title)")
+            HStack(spacing: 10) {
+                if runId != nil {
+                    Button { goToPreviousInRun() } label: {
+                        Image(systemName: "chevron.left.circle")
+                            .font(.title3)
+                            .foregroundStyle(previousIssue == nil ? .white.opacity(0.25) : .white.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(previousIssue == nil)
+                    .accessibilityLabel(previousIssue == nil ? "No previous comic in this run" : "Previous comic in run: \(previousIssue?.title ?? "")")
+                    .help(previousIssue == nil ? "First comic in this run" : "Previous: \(previousIssue?.title ?? "")")
+                }
+
+                Text(comic.title)
+                    .font(.headline).foregroundStyle(.white).lineLimit(1).padding(.horizontal)
+                    .accessibilityLabel("Reading: \(comic.title)")
+
+                if runId != nil {
+                    Button { advanceToNextIssue() } label: {
+                        Image(systemName: "chevron.right.circle")
+                            .font(.title3)
+                            .foregroundStyle(nextIssue == nil ? .white.opacity(0.25) : .white.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(nextIssue == nil)
+                    .accessibilityLabel(nextIssue == nil ? "No next comic in this run" : "Next comic in run: \(nextIssue?.title ?? "")")
+                    .help(nextIssue == nil ? "Last comic in this run" : "Next: \(nextIssue?.title ?? "")")
+                }
+            }
 
             Spacer()
 
@@ -945,17 +1039,31 @@ struct ReaderView: View {
         DatabaseManager.shared.logReadingSession(comicId: comic.id, pageStart: min(sessionStartPage, currentPage), pageEnd: max(sessionStartPage, currentPage))
     }
 
-    /// Looks up the next issue in this series (if any) so the "Up Next" overlay and autoplay's
-    /// seamless continuation both have something to act on -- also warms its cover and first
+    /// Looks up the next issue (if any) so the "Up Next" overlay, run navigation, and autoplay's
+    /// seamless continuation all have something to act on -- also warms its cover and first
     /// couple pages in the background so the actual transition, whenever it happens, is instant
-    /// instead of a cold load.
+    /// instead of a cold load. Inside a run, "next"/"previous" are scoped to that run's ordered
+    /// items rather than series order.
     private func loadNextIssue() {
         let current = comic
+        let rid = runId
         Task.detached(priority: .userInitiated) {
-            guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
-            ThumbnailCache.shared.thumbnail(for: next) { _ in }
-            PageCache.shared.prefetch(comic: next, around: 0, count: 2)
-            await MainActor.run { nextIssue = next }
+            if let rid {
+                let items = DatabaseManager.shared.runItems(runId: rid)
+                guard let idx = items.firstIndex(where: { $0.comic.id == current.id }) else { return }
+                let next = idx + 1 < items.count ? items[idx + 1].comic : nil
+                let prev = idx > 0 ? items[idx - 1].comic : nil
+                if let next {
+                    ThumbnailCache.shared.thumbnail(for: next) { _ in }
+                    PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+                }
+                await MainActor.run { nextIssue = next; previousIssue = prev }
+            } else {
+                guard let next = DatabaseManager.shared.nextComic(after: current) else { return }
+                ThumbnailCache.shared.thumbnail(for: next) { _ in }
+                PageCache.shared.prefetch(comic: next, around: 0, count: 2)
+                await MainActor.run { nextIssue = next }
+            }
         }
     }
 
@@ -964,6 +1072,13 @@ struct ReaderView: View {
         saveProgress()
         logSession()
         onOpenComic(nextIssue)
+    }
+
+    private func goToPreviousInRun() {
+        guard let previousIssue else { return }
+        saveProgress()
+        logSession()
+        onOpenComic(previousIssue)
     }
 
     private func runAutoplay() async {
@@ -991,6 +1106,9 @@ struct ReaderView: View {
                 advanceToNextIssue()
             } else {
                 autoplay = false
+                if runId != nil {
+                    withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showEndOfRun = true }
+                }
             }
         }
     }

@@ -165,6 +165,10 @@ final class LibraryViewModel: ObservableObject {
     /// init. `openReader(_:atPage:)`'s `nil` default means every ordinary open already resets
     /// this, so it can't leak a stale page onto the next comic.
     @Published var readerInitialPage: Int? = nil
+    /// Set alongside `readerComic` when opening a comic from inside a Run's reading path, so the
+    /// reader can offer run-scoped next/previous navigation instead of (or alongside) its normal
+    /// series-based one. Carried forward automatically as the reader advances within the same run.
+    @Published var readerRunId:       Int64? = nil
     @Published var readerComic:       Comic? = nil {
         didSet {
             // The reader is presented as a ZStack overlay in ContentView, not a navigation push,
@@ -544,15 +548,15 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func openReader(_ comic: Comic, atPage page: Int? = nil) {
-        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerComic = comic }
+    func openReader(_ comic: Comic, atPage page: Int? = nil, runId: Int64? = nil) {
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerRunId = runId; readerComic = comic }
     }
-    func openReader(id: Int64, atPage page: Int? = nil) {
+    func openReader(id: Int64, atPage page: Int? = nil, runId: Int64? = nil) {
         guard let c = db.comic(id: id) else { return }
-        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerComic = c }
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerRunId = runId; readerComic = c }
     }
     func closeReader() {
-        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerComic = nil; readerInitialPage = nil }
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerComic = nil; readerInitialPage = nil; readerRunId = nil }
         // A reading session just ended -- today may now be the first day of a new streak, or
         // extended an existing one, and the sidebar's ambient indicator should reflect that
         // without waiting for the next launch.
