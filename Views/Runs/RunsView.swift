@@ -29,10 +29,7 @@ struct RunsListView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("READING PATHS")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(Design.textPrimary)
-                    .kerning(1)
+                SignageLabel(text: "Reading Paths", size: 20, kerning: 1, tint: Design.textPrimary)
                 Spacer()
                 Button { showingCreate = true } label: {
                     Image(systemName: "plus")
@@ -118,6 +115,7 @@ struct RunsListView: View {
                 }
             }
         }
+        .ambientBackground()
         .task { await loadRuns() }
         .onReceive(NotificationCenter.default.publisher(for: .runDeleted)) { _ in
             Task { await loadRuns()
@@ -326,10 +324,7 @@ struct RunDetailView: View {
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             HStack(spacing: 8) {
-                Text("READING PATH")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(.secondary)
-                    .kerning(1.5)
+                SignageLabel(text: "Reading Path", size: 13, kerning: 1.5)
                 Text("\(items.count)")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
@@ -380,6 +375,7 @@ struct RunDetailView: View {
                 .listStyle(.inset)
             }
         }
+        .ambientBackground()
         .task {
             loadItems()
             runRating  = run.rating ?? 0

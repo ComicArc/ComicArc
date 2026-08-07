@@ -1,6 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The accent-color lookup a selected character group's theme detection needs -- shared by
+/// `SeriesGroupGridView` and `LibraryGridView`, which both react to `vm.selectedGroup` changing
+/// but previously each hand-rolled an identical `guard`+`groupAccentColor` call.
+private func loadSelectedGroupMoodColor(_ group: DatabaseManager.CharacterGroup?, into color: Binding<Color?>) {
+    guard let group else { color.wrappedValue = nil; return }
+    ThumbnailCache.shared.groupAccentColor(key: group.id, coverImagePath: group.coverImagePath,
+                                            representativeComicId: group.coverId) { color.wrappedValue = $0 }
+}
+
 struct LibraryBrowserView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @FocusState private var focused: Bool
@@ -38,7 +47,7 @@ struct LibraryBrowserView: View {
                     .onChange(of: geo.size.width) { _, w in gridWidth = w }
             }
         )
-        .background(Design.appBackground)
+        .libraryAmbientBackground(tint: vm.activePublisher.map { Design.publisherColor($0) } ?? Design.warmSpotlightDefault)
         .focusable()
         .focused($focused)
         .onKeyPress(.return) {
@@ -241,6 +250,133 @@ struct LibraryFilterBar: View {
     }
 }
 
+/// The one genuinely loud moment in the app -- everything else in this design pass (spotlight
+/// hover, shop-floor wash, halftone) was deliberately kept to a whisper so restraint elsewhere
+/// would read as restraint, not blandness. This is the payoff: the front-window display, sized
+/// and saturated well past what any card in a scrolling grid gets, for the one comic that
+/// actually deserves it -- whatever was most recently read. Tints itself from that comic's own
+/// cover color (falling back to its publisher's color, never the neutral gold default), so the
+/// A larger featured cover for whatever was most recently read -- sized past what any card in a
+/// scrolling grid gets, since this is the one comic that actually deserves the extra attention.
+/// Tints itself from that comic's own cover color (falling back to its publisher's color, never
+/// the neutral gold default), so the one enlarged moment in the library is also its most personal
+/// one, not another gold accent.
+///
+/// The cover art is the actual centerpiece, "Now Playing"-style (matches Apple Music/TV's own
+/// hero pattern rather than inventing a new one): the same cover, heavily blurred, fills the whole
+/// band as an ambient backdrop behind a dark scrim, while the sharp cover stays the sole focal
+/// point in front. No hover-tracking tilt, no extra ribbon/texture layered on top -- the enlarged
+/// cover and its own color are the whole effect.
+struct NowReadingHero: View {
+    let comic: Comic
+    @EnvironmentObject var vm: LibraryViewModel
+    @State private var thumbnail: PlatformImage?
+    @State private var accentColor: Color?
+
+    private var tint: Color { accentColor ?? Design.publisherColor(comic.publisher) }
+    private let coverWidth: CGFloat = 180
+    private let coverHeight: CGFloat = 270
+
+    var body: some View {
+        Button {
+            vm.openReader(comic)
+        } label: {
+            HStack(alignment: .center, spacing: 28) {
+                cover
+                details
+                Spacer(minLength: 0)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // `backdrop` as a `.background()`, not a `ZStack` sibling -- a `GeometryReader` sibling
+        // inside a `ScrollView` would be proposed an unbounded height and blow up to fill it. As
+        // a background it's proposed exactly this button's own content-driven size instead.
+        .background(backdrop)
+        .onAppear {
+            ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
+            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Now Reading: \(comic.title)")
+        .accessibilityValue("Page \(comic.progress + 1) of \(comic.pageCount)")
+        .accessibilityHint("Double-tap to continue reading")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// The cover, heavily blurred and extended edge-to-edge, behind a dark scrim so foreground
+    /// text stays readable -- a single static image, blurred once when it loads, not re-rendered
+    /// per frame, so this costs nothing extra during scroll or hover.
+    @ViewBuilder
+    private var backdrop: some View {
+        GeometryReader { geo in
+            if let img = thumbnail {
+                Image(platformImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .blur(radius: 60)
+                    .overlay(Design.appBackground.opacity(0.6))
+            } else {
+                Design.appBackground
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private var cover: some View {
+        Group {
+            Design.cardBg
+            if let img = thumbnail {
+                Image(platformImage: img).comicCoverStyle()
+                    .frame(width: coverWidth, height: coverHeight)
+            } else {
+                Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: coverWidth, height: coverHeight)
+        .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+        .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(tint.opacity(0.5), lineWidth: 1.5))
+        .shadow(color: tint.opacity(0.45), radius: 24, x: 0, y: 14)
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SignageLabel(text: "Now Reading", size: 13, kerning: 1.8, tint: Design.brandGold)
+            Text(comic.title)
+                .font(.system(size: 30, weight: .black, design: .rounded))
+                .foregroundStyle(Design.textPrimary)
+                .lineLimit(2)
+            Text(comic.series)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: comic.progressPercent).tint(tint)
+                    .frame(maxWidth: 260)
+                Text("Page \(comic.progress + 1) of \(comic.pageCount)")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.top, 4)
+
+            HStack(spacing: 6) {
+                Text("Continue Reading")
+                Image(systemName: "arrow.right")
+            }
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 20).padding(.vertical, 9)
+            .background(Design.goldGradient)
+            .clipShape(Capsule())
+            .shadow(color: Design.brandGold.opacity(0.4), radius: 10, x: 0, y: 4)
+            .padding(.top, 6)
+        }
+    }
+}
+
 struct ContinueReadingShelf: View {
     @EnvironmentObject var vm: LibraryViewModel
 
@@ -250,10 +386,7 @@ struct ContinueReadingShelf: View {
                 Image(systemName: "book.open.fill")
                     .font(.system(size: 12, weight: .black))
                     .foregroundStyle(Design.brandGold)
-                Text("CONTINUE READING")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(Design.textPrimary)
-                    .kerning(1.5)
+                SignageLabel(text: "Continue Reading", size: 13, kerning: 1.5, tint: Design.textPrimary)
             }
             .padding(.horizontal, Design.gridSpacing)
 
@@ -280,10 +413,7 @@ struct ReadNextShelf: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .black))
                     .foregroundStyle(Design.brandGold)
-                Text("READ NEXT")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(Design.textPrimary)
-                    .kerning(1.5)
+                SignageLabel(text: "Read Next", size: 13, kerning: 1.5, tint: Design.textPrimary)
             }
             .padding(.horizontal, Design.gridSpacing)
 
@@ -310,10 +440,7 @@ struct OnThisDayShelf: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 12, weight: .black))
                     .foregroundStyle(Design.brandGold)
-                Text("ON THIS DAY")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(Design.textPrimary)
-                    .kerning(1.5)
+                SignageLabel(text: "On This Day", size: 13, kerning: 1.5, tint: Design.textPrimary)
             }
             .padding(.horizontal, Design.gridSpacing)
 
@@ -356,7 +483,7 @@ struct OnThisDayCard: View {
             .frame(width: 90, height: 130)
             // Hover-only glow, same rule as `ComicCard` -- this is a single comic's cover, not a
             // series/character group, so it stays neutral at rest.
-            .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
+            .comicCardStyle(accentColor: accentColor, isHovered: isHovered, fallbackTint: Design.publisherColor(entry.comic.publisher))
 
             Text(entry.comic.title)
                 .font(.caption2).lineLimit(2)
@@ -368,6 +495,7 @@ struct OnThisDayCard: View {
                 .foregroundStyle(Design.brandGold)
         }
         .hoverLift(scale: 1.04, isHovered: $isHovered)
+        .shelfTilt(seed: entry.comic.id, isHovered: isHovered)
         .onAppear {
             ThumbnailCache.shared.thumbnail(for: entry.comic) { thumbnail = $0 }
             ThumbnailCache.shared.accentColor(for: entry.comic) { accentColor = $0 }
@@ -389,10 +517,7 @@ struct RecommendedShelf: View {
                 Image(systemName: "wand.and.stars")
                     .font(.system(size: 12, weight: .black))
                     .foregroundStyle(Design.brandGold)
-                Text("RECOMMENDED FOR YOU")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(Design.textPrimary)
-                    .kerning(1.5)
+                SignageLabel(text: "Recommended For You", size: 13, kerning: 1.5, tint: Design.textPrimary)
             }
             .padding(.horizontal, Design.gridSpacing)
 
@@ -428,7 +553,7 @@ struct RecommendedCard: View {
                 }
             }
             .frame(width: 90, height: 130)
-            .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
+            .comicCardStyle(accentColor: accentColor, isHovered: isHovered, fallbackTint: Design.publisherColor(comic.publisher))
 
             Text(comic.title)
                 .font(.caption2).lineLimit(2)
@@ -440,6 +565,7 @@ struct RecommendedCard: View {
                 .frame(width: 90, alignment: .leading)
         }
         .hoverLift(scale: 1.04, isHovered: $isHovered)
+        .shelfTilt(seed: comic.id, isHovered: isHovered)
         .onAppear {
             ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
             ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
@@ -473,7 +599,7 @@ struct ShelfCard: View {
                     }
                 }
                 .frame(width: 90, height: 130)
-                .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
+                .comicCardStyle(accentColor: accentColor, isHovered: isHovered, fallbackTint: Design.publisherColor(comic.publisher))
 
                 if !comic.isFinished {
                     ZStack(alignment: .leading) {
@@ -495,6 +621,7 @@ struct ShelfCard: View {
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         }
         .hoverLift(scale: 1.04, isHovered: $isHovered)
+        .shelfTilt(seed: comic.id, isHovered: isHovered)
         .onAppear {
             ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
             ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
@@ -529,6 +656,10 @@ struct CharacterGroupGridView: View {
             } else if vm.characterGroups.isEmpty {
                 emptyState
             } else {
+                if let current = vm.inProgressComics.first {
+                    NowReadingHero(comic: current)
+                    Divider().overlay(Design.borderColor).padding(.vertical, 6)
+                }
                 if !vm.inProgressComics.isEmpty {
                     ContinueReadingShelf()
                     Divider().overlay(Design.borderColor).padding(.vertical, 6)
@@ -593,10 +724,11 @@ struct CharacterGroupGridView: View {
     private var emptyState: some View {
         EmptyStateView(
             icon: "books.vertical.fill",
-            title: "No Comics",
+            title: "Your Shelf Is Empty",
             message: vm.libraryPaths.isEmpty
-                ? "Set your library folder(s) in Settings"
-                : "Scan your library to get started"
+                ? "Set your library folder(s) in Settings to start stocking it"
+                : "Scan your library to bring your comics to the shelf",
+            illustration: vm.libraryPaths.isEmpty ? nil : AnyView(LongBoxesIllustration())
         ) {
             if !vm.libraryPaths.isEmpty {
                 Button("Scan Library") { vm.scan() }.buttonStyle(.borderedProminent)
@@ -609,6 +741,7 @@ struct SeriesGroupGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var draggedSeries: String?
     @State private var dropTargetSeries: String?
+    @State private var moodColor: Color?
 
     private let columns = [GridItem(.adaptive(minimum: Design.groupCardWidth,
                                               maximum: Design.groupCardWidth + 20),
@@ -651,6 +784,15 @@ struct SeriesGroupGridView: View {
                 .padding(.vertical, Design.gridSpacing)
             }
         }
+        // A themed backdrop for this character -- name-matched first (generic decoration only,
+        // see `Design.ComicTheme`), falling back to a scene derived from the character's own
+        // cover-art color for anything unmatched. The same detected theme is also injected into
+        // the environment, so every `GroupCard` inside automatically scales its own existing
+        // hover spotlight/lift/shadow to match -- no card needs to know which theme it is.
+        .background(ThemeBackdrop(name: vm.selectedGroup?.groupName, color: moodColor))
+        .environment(\.comicTheme, ComicTheme.detect(name: vm.selectedGroup?.groupName, color: moodColor))
+        .onAppear { loadSelectedGroupMoodColor(vm.selectedGroup, into: $moodColor) }
+        .onChange(of: vm.selectedGroup?.id) { _, _ in loadSelectedGroupMoodColor(vm.selectedGroup, into: $moodColor) }
     }
 
     @ViewBuilder
@@ -853,10 +995,12 @@ private struct GroupCard: View {
 
     @State private var thumbnail: PlatformImage?
     @State private var identityColor: Color?
+    @State private var isHovered = false
     @AppStorage("progressFormat") private var progressFormatRaw = ProgressFormat.fraction.rawValue
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.comicTheme) private var theme
 
     private var progressFormat: ProgressFormat { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction }
     private var restingTint: Color? {
@@ -875,7 +1019,7 @@ private struct GroupCard: View {
             ZStack(alignment: .bottomLeading) {
                 coverImage
                     .frame(width: Design.groupCardWidth, height: Design.groupCardHeight)
-                    .comicCardStyle(restingTint: restingTint)
+                    .comicCardStyle(accentColor: identityColor, isHovered: isHovered, restingTint: restingTint, theme: theme)
 
                 LinearGradient(colors: [.clear, scrimColor.opacity(0.82)],
                                startPoint: .center, endPoint: .bottom)
@@ -908,7 +1052,7 @@ private struct GroupCard: View {
                     .frame(width: Design.groupCardWidth, alignment: .leading)
             }
         }
-        .hoverLift()
+        .hoverLift(scale: theme.interaction.hoverLiftScale, duration: theme.interaction.hoverAnimationDuration, isHovered: $isHovered)
         .animation(Design.motion(Design.easeStandard, reduce: reduceMotion), value: identityColor)
         .onAppear { loadThumbnail() }
     }
@@ -954,6 +1098,7 @@ struct LibraryGridView: View {
     @AppStorage("gridDensity") private var densityRaw = GridDensity.regular.rawValue
     @State private var draggedId:   Int64? = nil
     @State private var dropTargetId: Int64? = nil
+    @State private var groupMoodColor: Color?
 
     private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }
 
@@ -1008,6 +1153,22 @@ struct LibraryGridView: View {
                 .padding(Design.gridSpacing)
             }
         }
+        // Same themed backdrop as the character screen you drilled in from -- only when actually
+        // scoped to a character (`vm.selectedGroup`); the plain top-level Library/Favorites/
+        // Continue Reading/Reading List sections keep the neutral `libraryAmbientBackground()`
+        // their parent `LibraryBrowserView` already provides, nothing layered on top. Also
+        // injects the detected theme into the environment so every `ComicCard` inside picks up
+        // its hover spotlight/lift/shadow automatically.
+        .background {
+            if let group = vm.selectedGroup {
+                ThemeBackdrop(name: group.groupName, color: groupMoodColor)
+            }
+        }
+        .environment(\.comicTheme, vm.selectedGroup.map {
+            ComicTheme.detect(name: $0.groupName, color: groupMoodColor)
+        } ?? .library)
+        .onAppear { loadSelectedGroupMoodColor(vm.selectedGroup, into: $groupMoodColor) }
+        .onChange(of: vm.selectedGroup?.id) { _, _ in loadSelectedGroupMoodColor(vm.selectedGroup, into: $groupMoodColor) }
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             Task { await handleDrop(providers) }
             return true
@@ -1030,8 +1191,19 @@ struct LibraryGridView: View {
     }
 
     private var emptyState: some View {
-        EmptyStateView(icon: emptyIcon, title: emptyTitle, message: emptyMessage) {
+        EmptyStateView(icon: emptyIcon, title: emptyTitle, message: emptyMessage, illustration: emptyIllustration) {
             emptyAction
+        }
+    }
+
+    private var emptyIllustration: AnyView? {
+        switch vm.selectedSection {
+        case .continueReading, .favorites, .readingList: return nil
+        default:
+            if vm.activeTag != nil || vm.activePublisher != nil { return nil }
+            if !vm.searchText.isEmpty { return AnyView(SpeechBubbleQuestionIllustration()) }
+            if vm.libraryPaths.isEmpty { return nil }
+            return AnyView(LongBoxesIllustration())
         }
     }
 
@@ -1058,7 +1230,7 @@ struct LibraryGridView: View {
             if let pub = vm.activePublisher  { return "No \(pub) Comics" }
             if !vm.searchText.isEmpty        { return "No Results" }
             if vm.libraryPaths.isEmpty        { return "Library Not Set Up" }
-            return "No Comics"
+            return "Your Shelf Is Empty"
         }
     }
 
@@ -1075,7 +1247,7 @@ struct LibraryGridView: View {
             if let pub = vm.activePublisher  { return "No \(pub) comics found in your library." }
             if !vm.searchText.isEmpty        { return "Try a different search term or clear the search field." }
             if vm.libraryPaths.isEmpty        { return "Go to Settings to choose your comics folder(s)." }
-            return "Drop CBZ, CBR, or PDF files here, or scan your library folders."
+            return "Drop CBZ, CBR, or PDF files here to start stocking your shelves."
         }
     }
 

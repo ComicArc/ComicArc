@@ -52,6 +52,10 @@ struct SettingsView: View {
 
     @State private var folderToRemove: String?
     @State private var folderToRemoveComicCount = 0
+    #if DEBUG
+    @State private var iconExportResult = ""
+    @State private var showIconExportResult = false
+    #endif
 
     private var progressFormat: Binding<ProgressFormat> {
         Binding(get: { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction },
@@ -112,12 +116,9 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             if noSectionsMatch {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 42)).foregroundStyle(.quaternary)
-                    Text("No Matching Settings").font(.headline).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 240)
-                .padding(.top, 60)
+                EmptyStateView(icon: "magnifyingglass", title: "No Matching Settings")
+                    .frame(maxWidth: .infinity, minHeight: 240)
+                    .padding(.top, 60)
             }
 
             Form {
@@ -135,6 +136,9 @@ struct SettingsView: View {
                 if sectionMatches("Data") { dataSection }
                 if sectionMatches("Sync") { syncSection }
                 if sectionMatches("Help") { helpSection }
+                #if DEBUG
+                if sectionMatches("Developer") { developerSection }
+                #endif
                 if sectionMatches("About") { aboutSection }
             }
             .formStyle(.grouped)
@@ -503,6 +507,23 @@ struct SettingsView: View {
         }
     }
 
+    #if DEBUG
+    @ViewBuilder private var developerSection: some View {
+        Section("Developer") {
+            Button("Export App Icon Master (1024px)…") {
+                iconExportResult = AppIconExporter.exportMaster()
+                showIconExportResult = true
+            }
+            .help("Renders Views/AppIconArt.swift to icon_master_1024.png at the project root")
+        }
+        .alert("Icon Export", isPresented: $showIconExportResult) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(iconExportResult)
+        }
+    }
+    #endif
+
     @ViewBuilder private var aboutSection: some View {
         Section("About") {
             HStack {
@@ -608,11 +629,7 @@ struct TrashView: View {
             .padding(20)
 
             if trashed.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "trash").font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("Trash is empty").foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "trash", title: "Trash is empty")
             } else {
                 List(trashed) { comic in
                     HStack {

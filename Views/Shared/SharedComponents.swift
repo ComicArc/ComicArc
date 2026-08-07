@@ -76,11 +76,7 @@ struct CoverPickerSheet: View {
             if isLoading && results.isEmpty {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if results.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("No comics found").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No comics found")
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 16) {

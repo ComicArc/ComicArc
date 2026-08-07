@@ -1,7 +1,6 @@
 import Foundation
 import CoreGraphics
 import SwiftUI
-import ZIPFoundation
 
 final class ThumbnailCache: @unchecked Sendable {
     static let shared = ThumbnailCache()
@@ -354,42 +353,13 @@ final class ThumbnailCache: @unchecked Sendable {
         return FileManager.default.fileExists(atPath: dest.path) ? dest.path : nil
     }
 
-    private let imageExts = LibraryScanner.imageExtensions
-
     private func extract(from path: String) -> PlatformImage? {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         switch ext {
-        case "cbz": return cbzCover(path)
-        case "cbr": return LibraryScanner.shared.page(path: path, index: 0)
-        case "pdf": return pdfCover(path)
+        case "cbz", "cbr", "pdf": return LibraryScanner.shared.page(path: path, index: 0)
         case "jpg", "jpeg", "png": return PlatformImage.fromFile(path)
         default: return nil
         }
-    }
-
-    private func cbzCover(_ path: String) -> PlatformImage? {
-        guard let archive = try? Archive(url: URL(fileURLWithPath: path), accessMode: .read, pathEncoding: nil) else { return nil }
-        let entries = archive.filter {
-            imageExts.contains(URL(fileURLWithPath: $0.path).pathExtension.lowercased()) && !$0.path.hasPrefix("__MACOSX")
-        }
-        guard let first = entries.min(by: { $0.path.localizedStandardCompare($1.path) == .orderedAscending }) else { return nil }
-
-        guard first.uncompressedSize <= 50 * 1024 * 1024 else { return nil }
-        var data = Data()
-        data.reserveCapacity(Int(first.uncompressedSize))
-        do {
-            _ = try archive.extract(first, consumer: { data.append($0) })
-        } catch {
-            return nil
-        }
-        return PlatformImage.fromData(data)
-    }
-
-    private func pdfCover(_ path: String) -> PlatformImage? {
-        guard let provider = CGDataProvider(url: URL(fileURLWithPath: path) as CFURL),
-              let pdf = CGPDFDocument(provider),
-              let page = pdf.page(at: 1) else { return nil }
-        return PlatformImage.renderPDFPage(page, scale: 1.0)
     }
 
     private func save(_ image: PlatformImage, to url: URL) {

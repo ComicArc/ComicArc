@@ -245,7 +245,7 @@ struct ContentView: View {
             if let run = vm.selectedRun {
                 RunDetailView(run: run, onDelete: { vm.selectedRun = nil })
                     .frame(maxWidth: .infinity)
-                    .background(Design.appBackground)
+                    .ambientBackground()
             } else {
                 runsPlaceholder
             }
@@ -258,7 +258,7 @@ struct ContentView: View {
             title: "Select a Reading Path",
             message: "Group comics into reading paths to track multi-series arcs."
         )
-        .background(Design.appBackground)
+        .ambientBackground()
     }
 
     private var tierListsContent: some View {
@@ -270,7 +270,7 @@ struct ContentView: View {
             if let tierList = vm.selectedTierList {
                 TierListDetailView(tierList: tierList, onDelete: { vm.selectedTierList = nil })
                     .frame(maxWidth: .infinity)
-                    .background(Design.appBackground)
+                    .ambientBackground()
             } else {
                 tierListsPlaceholder
             }
@@ -283,7 +283,7 @@ struct ContentView: View {
             title: "Select a Tier List",
             message: "Rank your comics into S/A/B/C/D/F tiers by dragging them between rows."
         )
-        .background(Design.appBackground)
+        .ambientBackground()
     }
 
     @ToolbarContentBuilder
@@ -686,10 +686,12 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .listRowBackground(
             vm.destination == item
-                ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor).padding(.horizontal, 4)
+                ? RoundedRectangle(cornerRadius: 6)
+                    .fill(Design.brandGold.opacity(0.16))
+                    .padding(.horizontal, 4)
                 : nil
         )
-        .foregroundStyle(vm.destination == item ? Color.white : Color.primary)
+        .foregroundStyle(vm.destination == item ? Design.brandGold : Color.primary)
         .accessibilityAddTraits(vm.destination == item ? [.isButton, .isSelected] : .isButton)
     }
 

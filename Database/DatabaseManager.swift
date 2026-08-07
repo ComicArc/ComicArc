@@ -268,48 +268,68 @@ final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    func comicRow(_ s: OpaquePointer) -> Comic {
+    /// The plain, zero-offset reader -- kept as its own overload (rather than a default argument
+    /// on `comicRow(_:offset:)` below) so it still matches `(OpaquePointer) -> Comic` when passed
+    /// as a bare function reference (`rows(sql, map: comicRow)`), which the ~15 existing call
+    /// sites across `Database/` all do; a default-valued parameter doesn't get elided for an
+    /// unapplied reference like that.
+    func comicRow(_ s: OpaquePointer) -> Comic { comicRow(s, offset: 0) }
+
+    /// Reads a `Comic` from a row whose columns are `comicColumns`, offset when other columns
+    /// (e.g. a `run_items`/`tier_list_items` join row's own id/position) precede them -- see
+    /// `DatabaseManager+Collections.swift`'s `runItems`/`tierListItems`, which select
+    /// `comicColumns` alongside their own extra columns rather than duplicating this mapping.
+    func comicRow(_ s: OpaquePointer, offset: Int32) -> Comic {
         Comic(
-            id: colInt64(s, 0), title: colText(s, 1) ?? "", filePath: colText(s, 2) ?? "",
-            publisher: colText(s, 3) ?? "Unknown", character: colText(s, 4),
-            series: colText(s, 5) ?? "General", issueNumber: colText(s, 6),
-            pageCount: colInt(s, 7), writer: colText(s, 8), penciller: colText(s, 9),
-            year: sqlite3_column_type(s, 10) != SQLITE_NULL ? colInt(s, 10) : nil,
-            volume: colText(s, 30), format: colText(s, 31),
-            storyArc: colText(s, 11), languageIso: colText(s, 12), notes: colText(s, 13),
-            addedAt: colText(s, 14) ?? "", deletedAt: colText(s, 15),
-            position: colInt(s, 16), fileHash: colText(s, 17),
-            progress: colInt(s, 18), lastRead: colText(s, 19),
-            rating: colInt(s, 20),
-            review: colText(s, 23),
-            isFavorite: colBool(s, 21), inReadingList: colBool(s, 22),
-            readingOrderPosition: sqlite3_column_type(s, 24) != SQLITE_NULL ? colInt(s, 24) : nil,
-            readingOrderConfidence: sqlite3_column_type(s, 25) != SQLITE_NULL ? colInt(s, 25) : nil,
-            readingOrderReason: colText(s, 26),
-            gcdMatchConfidence: sqlite3_column_type(s, 27) != SQLITE_NULL ? colInt(s, 27) : nil,
-            gcdSeriesName: colText(s, 28), gcdIssueNumber: colText(s, 29),
-            deletedReason: colText(s, 32)
+            id: colInt64(s, offset), title: colText(s, offset + 1) ?? "", filePath: colText(s, offset + 2) ?? "",
+            publisher: colText(s, offset + 3) ?? "Unknown", character: colText(s, offset + 4),
+            series: colText(s, offset + 5) ?? "General", issueNumber: colText(s, offset + 6),
+            pageCount: colInt(s, offset + 7), writer: colText(s, offset + 8), penciller: colText(s, offset + 9),
+            year: sqlite3_column_type(s, offset + 10) != SQLITE_NULL ? colInt(s, offset + 10) : nil,
+            volume: colText(s, offset + 30), format: colText(s, offset + 31),
+            storyArc: colText(s, offset + 11), languageIso: colText(s, offset + 12), notes: colText(s, offset + 13),
+            addedAt: colText(s, offset + 14) ?? "", deletedAt: colText(s, offset + 15),
+            position: colInt(s, offset + 16), fileHash: colText(s, offset + 17),
+            progress: colInt(s, offset + 18), lastRead: colText(s, offset + 19),
+            rating: colInt(s, offset + 20),
+            review: colText(s, offset + 23),
+            isFavorite: colBool(s, offset + 21), inReadingList: colBool(s, offset + 22),
+            readingOrderPosition: sqlite3_column_type(s, offset + 24) != SQLITE_NULL ? colInt(s, offset + 24) : nil,
+            readingOrderConfidence: sqlite3_column_type(s, offset + 25) != SQLITE_NULL ? colInt(s, offset + 25) : nil,
+            readingOrderReason: colText(s, offset + 26),
+            gcdMatchConfidence: sqlite3_column_type(s, offset + 27) != SQLITE_NULL ? colInt(s, offset + 27) : nil,
+            gcdSeriesName: colText(s, offset + 28), gcdIssueNumber: colText(s, offset + 29),
+            deletedReason: colText(s, offset + 32)
         )
     }
 
-    let comicSelect = """
-        SELECT c.id, c.title, c.file_path, c.publisher, c.character, c.series,
-               c.issue_number, c.page_count, c.writer, c.penciller, c.year,
-               c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
-               COALESCE(c.position, c.id), c.file_hash,
-               COALESCE(rp.current_page, 0) as progress, rp.last_read,
-               COALESCE(r.rating, 0) as rating,
-               (f.comic_id IS NOT NULL) as is_favorite,
-               (rl.comic_id IS NOT NULL) as in_reading_list,
-               r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
-               c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format,
-               c.deleted_reason
+    /// The column list `comicRow(_:offset:)` reads -- factored out from `comicSelect` so joins
+    /// that need their own extra columns alongside a comic's (`runItems`/`tierListItems`) can
+    /// select `comicColumns` themselves instead of duplicating this list and `comicRow`'s mapping.
+    let comicColumns = """
+        c.id, c.title, c.file_path, c.publisher, c.character, c.series,
+        c.issue_number, c.page_count, c.writer, c.penciller, c.year,
+        c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
+        COALESCE(c.position, c.id), c.file_hash,
+        COALESCE(rp.current_page, 0) as progress, rp.last_read,
+        COALESCE(r.rating, 0) as rating,
+        (f.comic_id IS NOT NULL) as is_favorite,
+        (rl.comic_id IS NOT NULL) as in_reading_list,
+        r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
+        c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format,
+        c.deleted_reason
+    """
+
+    var comicSelect: String {
+        """
+        SELECT \(comicColumns)
         FROM comics c
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN ratings r           ON c.id = r.comic_id
         LEFT JOIN favorites f         ON c.id = f.comic_id
         LEFT JOIN reading_list rl     ON c.id = rl.comic_id
-    """
+        """
+    }
 
     enum ReadingOrderMode: String, CaseIterable, Identifiable {
         case filename = "Filename", legacyNumber = "Legacy Number",

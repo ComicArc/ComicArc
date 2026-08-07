@@ -23,6 +23,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = servicesProvider
+        #if DEBUG
+        // Headless icon-export path for automated/CI-style regeneration -- avoids needing to
+        // click the Settings button by hand. `AppIconExporter` is `@MainActor`; this delegate
+        // callback already runs on the main actor by the time the app has finished launching.
+        if CommandLine.arguments.contains("--export-icon") {
+            let result = AppIconExporter.exportMaster()
+            print("ICON_EXPORT_RESULT: \(result)")
+            NSApp.terminate(nil)
+        }
+        #endif
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

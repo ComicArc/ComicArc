@@ -25,10 +25,7 @@ struct ReadingHistoryView: View {
         let filtered = filteredHistory(history)
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("READING HISTORY")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                    .kerning(1.5)
+                SignageLabel(text: "Reading History", size: 20, kerning: 1.5, tint: Design.brandGold)
                 Spacer()
             }
             .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
@@ -36,23 +33,10 @@ struct ReadingHistoryView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if history.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No reading history yet.")
-                        .foregroundStyle(.secondary)
-                    Text("Open a comic in the reader to start tracking.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "clock.arrow.circlepath", title: "No reading history yet.",
+                                message: "Open a comic in the reader to start tracking.")
             } else if filtered.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No matching history.")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No matching history.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -64,10 +48,7 @@ struct ReadingHistoryView: View {
                                         .padding(.leading, 24)
                                 }
                             } header: {
-                                Text(formattedGroupDate(group.date))
-                                    .font(.system(size: 11, weight: .black))
-                                    .foregroundStyle(.secondary)
-                                    .kerning(1.5)
+                                SignageLabel(text: formattedGroupDate(group.date), size: 11, kerning: 1.5)
                                     .padding(.horizontal, 24).padding(.vertical, 8)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(Design.appBackground)
@@ -77,7 +58,7 @@ struct ReadingHistoryView: View {
                 }
             }
         }
-        .background(Design.appBackground)
+        .ambientBackground()
         .task { await load() }
     }
 

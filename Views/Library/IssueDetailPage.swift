@@ -61,7 +61,7 @@ struct IssueDetailPage: View {
                 }
             }
         }
-        .background(Design.appBackground)
+        .ambientBackground()
         .onKeyPress(.escape) {
             guard !showingEdit else { return .ignored }
             withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { onBack() }
@@ -192,6 +192,10 @@ struct IssueDetailPage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity)
+        // The cover spotlight, column wash, and metadata-cell borders all default to a generic
+        // warm tint before `accentColor` finishes loading asynchronously -- animate the swap to
+        // the comic's real color so it reads as a smooth "warming up," not an instant flash.
+        .animation(Design.motion(Design.easeStandard, reduce: reduceMotion), value: accentColor)
     }
 
     private var coverColumn: some View {
@@ -220,6 +224,19 @@ struct IssueDetailPage: View {
             }
             .frame(width: coverSize.width, height: coverSize.height)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            // An always-on spotlight pool behind the cover -- this page's whole job is "look at
+            // the comic you own," so unlike the grid's hover-gated version, this one is lit from
+            // the moment the page appears.
+            .background(
+                RadialGradient(
+                    colors: [(accentColor ?? Design.warmSpotlightDefault).opacity(0.35),
+                             (accentColor ?? Design.warmSpotlightDefault).opacity(0)],
+                    center: .center, startRadius: 0, endRadius: max(coverSize.width, coverSize.height) * 0.85
+                )
+                .frame(width: coverSize.width * 1.8, height: coverSize.height * 1.8)
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+            )
             .shadow(color: (accentColor ?? .black).opacity(accentColor != nil ? 0.4 : 0.55), radius: 24, x: 0, y: 10)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
@@ -320,10 +337,16 @@ struct IssueDetailPage: View {
         .background(
             // A faint wash of this comic's own cover color behind its detail page -- the same
             // "now playing" ambient-tint idea, scoped to just this one column so it never
-            // competes with the neutral home-base look everywhere else in the app.
+            // competes with the neutral home-base look everywhere else in the app. Radial rather
+            // than flat so it reads as light spilling outward from where the cover sits, not a
+            // uniform color cast over the whole column.
             ZStack {
                 Design.navBackground.opacity(0.4)
-                if let accentColor { accentColor.opacity(0.16) }
+                RadialGradient(
+                    colors: [(accentColor ?? Design.warmSpotlightDefault).opacity(0.22),
+                             (accentColor ?? Design.warmSpotlightDefault).opacity(0)],
+                    center: UnitPoint(x: 0.5, y: 0.3), startRadius: 0, endRadius: 360
+                )
             }
         )
     }
@@ -545,11 +568,7 @@ struct IssueDetailPage: View {
 
     private func sectionBlock<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(title)
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .foregroundStyle(.secondary)
-                .kerning(1.2)
-                .textCase(.uppercase)
+            SignageLabel(text: title, size: 11, kerning: 1.2)
             content()
         }
         .padding(.horizontal, 40).padding(.vertical, 24)
@@ -571,7 +590,10 @@ struct IssueDetailPage: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Design.surfaceBg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Design.borderColor))
+        // A whisper of the cover's own color in the metadata grid's border -- ties the whole
+        // detail page back to the one thing that's actually "this specific comic," instead of
+        // every cell reading identically regardless of which issue is open.
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke((accentColor ?? Design.borderColor).opacity(accentColor != nil ? 0.35 : 1), lineWidth: 1))
     }
 
     private func tagChip(_ tag: Tag) -> some View {

@@ -23,10 +23,7 @@ struct FavoriteMomentsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("HIGHLIGHTS")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                    .kerning(1.5)
+                SignageLabel(text: "Highlights", size: 20, kerning: 1.5, tint: Design.brandGold)
                 Spacer()
             }
             .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
@@ -53,7 +50,7 @@ struct FavoriteMomentsView: View {
                 }
             }
         }
-        .background(Design.appBackground)
+        .ambientBackground()
         .task { await load() }
     }
 

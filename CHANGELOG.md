@@ -4,6 +4,31 @@ All notable changes to ComicArc are documented here, starting from the 1.0 launc
 
 ---
 
+## [Unreleased]
+
+Work since the 1.0.0 launch, not yet tagged as a new release.
+
+### Platform
+- Added a third native target, **ComicArcVision**, for visionOS — reuses the iPad interface.
+
+### Sync & Sharing
+- Peer sync: local, cloud-free reading-progress sync between a Mac and an iPad on the same network over MultipeerConnectivity, matched by file hash. Ratings, reviews, tags, diary entries, and reading-order overrides are intentionally not synced.
+- Share cards: export a shareable image card for a Tier List, Reading Path, or Year in Review recap.
+
+### Reader
+- Reworked the reader's end-of-issue/end-of-series flow with continue and completion cards.
+
+### Architecture
+- Split `DatabaseManager`/`LibraryViewModel` into focused files and hardened concurrency.
+
+### Fixes & polish
+- Simplified the file renamer, fixed cover cropping, and stopped Sparkle from downgrading dev builds.
+- Reader UX and accessibility fixes from a full deep-audit pass.
+- Redesigned per-series library theming as a restrained, performance-conscious atmosphere/interaction system.
+- Consolidated several duplicated code paths (CBZ/PDF cover extraction, Reading Path/Tier List row mapping, shared empty-state and star-rating components) found in a codebase audit.
+
+---
+
 ## [1.0.0] — 2026-07-28
 
 First public release.

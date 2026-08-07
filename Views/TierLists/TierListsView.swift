@@ -37,10 +37,7 @@ struct TierListsListView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("TIER LISTS")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(Design.textPrimary)
-                    .kerning(1)
+                SignageLabel(text: "Tier Lists", size: 20, kerning: 1, tint: Design.textPrimary)
                 Spacer()
                 Button { showingCreate = true } label: {
                     Image(systemName: "plus")
@@ -124,6 +121,7 @@ struct TierListsListView: View {
                 }
             }
         }
+        .ambientBackground()
         .task { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .tierListDeleted)) { _ in
             Task { await load()
@@ -347,10 +345,7 @@ struct TierListDetailView: View {
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             HStack(spacing: 8) {
-                Text("TIER LIST")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundStyle(.secondary)
-                    .kerning(1.5)
+                SignageLabel(text: "Tier List", size: 13, kerning: 1.5)
                 Text("\(items.count)")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
@@ -397,6 +392,7 @@ struct TierListDetailView: View {
                 }
             }
         }
+        .ambientBackground()
         .task {
             loadItems()
             tierListRating = tierList.rating ?? 0
