@@ -12,6 +12,7 @@ struct ComicCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.fileService) private var fileService
     @Environment(\.readerNamespace) private var readerNamespace
+    @Environment(\.comicTheme) private var theme
     @State private var thumbnail: PlatformImage?
     @State private var accentColor: Color?
     @State private var isHovered = false
@@ -33,7 +34,8 @@ struct ComicCard: View {
             ZStack(alignment: .bottom) {
                 cover
                     .frame(width: cardWidth, height: cardHeight)
-                    .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
+                    .comicCardStyle(accentColor: accentColor, isHovered: isHovered,
+                                     fallbackTint: Design.publisherColor(comic.publisher), theme: theme)
 
                 if comic.isStarted && !comic.isFinished {
                     progressStrip
@@ -78,7 +80,9 @@ struct ComicCard: View {
         // isHovered: binds this to the shared HoverLiftModifier (same scale/ease/reduce-motion
         // behavior every other card uses) while still exposing the boolean here, since the cover
         // glow above (`comicCardStyle(accentColor:isHovered:)`) needs it too.
-        .hoverLift(isHovered: $isHovered)
+        // `theme.interaction.hoverLiftScale` is how this same lift becomes theme-aware (e.g. a
+        // snappier pop inside `webbed`) without this view ever knowing which theme it is.
+        .hoverLift(scale: theme.interaction.hoverLiftScale, duration: theme.interaction.hoverAnimationDuration, isHovered: $isHovered)
         .overlay(
             RoundedRectangle(cornerRadius: Design.cardCorner + 2)
                 .stroke(

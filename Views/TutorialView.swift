@@ -21,7 +21,9 @@ private extension TStep {
     var info: TStepInfo {
         switch self {
         case .welcome:
-            return TStepInfo(icon: "diamond.fill",
+            // This icon string is unused in practice -- `calloutCard` renders the app's own
+            // `ComicBurstShape` mark for the welcome step specifically, not an SF Symbol.
+            return TStepInfo(icon: "books.vertical.fill",
                 title: "Welcome to ComicArc",
                 body: "Let's take a quick tour of the major features. You can skip this at any time and return to it from Settings → Show Tutorial.",
                 spot: nil, above: true)
@@ -215,10 +217,15 @@ struct TutorialView: View {
     private var calloutCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Image(systemName: info.icon)
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Design.goldGradient)
-                    .frame(width: 40)
+                // The welcome step shows the app's own mark, not a generic SF Symbol.
+                if currentStep == .welcome {
+                    ComicBurstShape().fill(Design.goldGradient).frame(width: 28, height: 28).frame(width: 40)
+                } else {
+                    Image(systemName: info.icon)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(Design.goldGradient)
+                        .frame(width: 40)
+                }
 
                 Text(info.title)
                     .font(.system(size: 18, weight: .bold, design: .rounded))

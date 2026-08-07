@@ -25,10 +25,7 @@ struct ReadingHistoryView: View {
         let filtered = filteredHistory(history)
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("READING HISTORY")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                    .kerning(1.5)
+                SignageLabel(text: "Reading History", size: 20, kerning: 1.5, tint: Design.brandGold)
                 Spacer()
             }
             .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
@@ -64,10 +61,7 @@ struct ReadingHistoryView: View {
                                         .padding(.leading, 24)
                                 }
                             } header: {
-                                Text(formattedGroupDate(group.date))
-                                    .font(.system(size: 11, weight: .black))
-                                    .foregroundStyle(.secondary)
-                                    .kerning(1.5)
+                                SignageLabel(text: formattedGroupDate(group.date), size: 11, kerning: 1.5)
                                     .padding(.horizontal, 24).padding(.vertical, 8)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(Design.appBackground)
@@ -77,7 +71,7 @@ struct ReadingHistoryView: View {
                 }
             }
         }
-        .background(Design.appBackground)
+        .ambientBackground()
         .task { await load() }
     }
 

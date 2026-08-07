@@ -48,10 +48,7 @@ struct StatsView: View {
     private var heading: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("YOUR STATS")
-                    .font(.system(size: 30, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                    .kerning(2)
+                SignageLabel(text: "Your Stats", size: 30, kerning: 2, tint: Design.brandGold)
                 Text("Everything you've read, rated, and collected.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -342,10 +339,7 @@ struct StatsView: View {
     }
 
     private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 12, weight: .black))
-            .foregroundStyle(.secondary)
-            .kerning(1.2)
+        SignageLabel(text: title, size: 12, kerning: 1.2)
     }
 
     private func loadStats() async {

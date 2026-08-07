@@ -40,7 +40,7 @@ struct ReadingOrderManagerView: View {
                 }
             }
         }
-        .background(Design.appBackground)
+        .ambientBackground()
         .navigationTitle("Reading Order Suggestions")
         .task { vm.refreshDuplicates() }
         .onChange(of: vm.autoPlacedIssues) { _, _ in recomputeVisibleGroups() }

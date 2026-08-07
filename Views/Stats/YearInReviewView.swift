@@ -111,7 +111,7 @@ struct YearInReviewView: View {
 
     private func topRatedSection(_ topRated: [(comicId: Int64, title: String, rating: Int)]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("TOP RATED").font(.system(size: 12, weight: .black)).foregroundStyle(.secondary).kerning(1.2)
+            SignageLabel(text: "Top Rated", size: 12, kerning: 1.2)
             VStack(spacing: 0) {
                 ForEach(Array(topRated.enumerated()), id: \.offset) { _, entry in
                     HStack {

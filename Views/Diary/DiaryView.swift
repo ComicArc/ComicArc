@@ -25,10 +25,7 @@ struct DiaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("DIARY")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                    .kerning(1.5)
+                SignageLabel(text: "Diary", size: 20, kerning: 1.5, tint: Design.brandGold)
                 Spacer()
             }
             .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
@@ -67,7 +64,7 @@ struct DiaryView: View {
                 }
             }
         }
-        .background(Design.appBackground)
+        .ambientBackground()
         .task { await load() }
         .sheet(item: $openedComic) { comic in
             IssueDetailPage(comic: comic, onBack: { openedComic = nil })

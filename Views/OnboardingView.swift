@@ -41,9 +41,9 @@ struct OnboardingView: View {
 
     private var topBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "diamond.fill")
-                .foregroundStyle(Design.brandGold)
-                .font(.system(size: 14, weight: .black))
+            ComicBurstShape()
+                .fill(Design.goldGradient)
+                .frame(width: 14, height: 14)
             Text("COMICARC")
                 .font(.system(size: 14, weight: .black, design: .rounded))
                 .foregroundStyle(Design.brandGold)
@@ -78,9 +78,11 @@ struct OnboardingView: View {
                 Circle()
                     .stroke(Design.brandGold.opacity(0.3), lineWidth: 1.5)
                     .frame(width: 130, height: 130)
-                Image(systemName: "diamond.fill")
-                    .font(.system(size: 56, weight: .black))
-                    .foregroundStyle(Design.goldGradient)
+                // The app's own mark -- same shape as the real app icon (`AppIconArt.swift`), so
+                // this reads as brand consistency, not an extra decoration.
+                ComicBurstShape()
+                    .fill(Design.goldGradient)
+                    .frame(width: 64, height: 64)
             }
 
             VStack(spacing: 14) {
