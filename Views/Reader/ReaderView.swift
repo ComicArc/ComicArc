@@ -737,21 +737,10 @@ struct ReaderView: View {
                     .padding(12)
                 }
 
-                HStack(spacing: 4) {
-                    ForEach(1...5, id: \.self) { star in
-                        Button {
-                            let newRating = star == comicRating ? 0 : star
-                            comicRating = newRating
-                            LibraryViewModel.shared.setRating(comic, rating: newRating)
-                        } label: {
-                            Image(systemName: star <= comicRating ? "star.fill" : "star")
-                                .font(.system(size: 13))
-                                .foregroundStyle(star <= comicRating ? Design.brandGold : .white.opacity(0.55))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(star == comicRating ? "Remove \(star)-star rating" : "Rate \(star) star\(star == 1 ? "" : "s")")
-                        .help(star == comicRating ? "Tap to clear rating" : "Rate \(star) star\(star == 1 ? "" : "s")")
-                    }
+                StarRating(rating: comicRating, size: 13, unfilledColor: .white.opacity(0.55)) { star in
+                    let newRating = star == comicRating ? 0 : star
+                    comicRating = newRating
+                    LibraryViewModel.shared.setRating(comic, rating: newRating)
                 }
             }
             .padding(.horizontal, 20)
@@ -810,13 +799,8 @@ struct ReaderView: View {
             Divider()
 
             if bookmarks.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "bookmark").font(.largeTitle).foregroundStyle(.secondary)
-                    Text("No bookmarks yet").foregroundStyle(.secondary)
-                    Text("Press B while reading to bookmark a page.")
-                        .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "bookmark", title: "No bookmarks yet",
+                                message: "Press B while reading to bookmark a page.")
             } else {
                 List {
                     ForEach(bookmarks) { bm in
@@ -909,7 +893,7 @@ struct ReaderView: View {
             // Already on the last page -- turning the page again carries straight into the next
             // comic, like flipping past the final page of a bound anthology, instead of stopping
             // dead or waiting on a "Continue" tap.
-            if let nextIssue {
+            if nextIssue != nil {
                 advanceToNextIssue()
             } else {
                 showBoundaryToast("That's the last one")
@@ -923,7 +907,7 @@ struct ReaderView: View {
     private func prevPage() {
         let step = (doublePage && !currentPageIsSpread && !scrollMode) ? 2 : 1
         guard currentPage > 0 else {
-            if let previousIssue {
+            if previousIssue != nil {
                 goToPreviousIssue()
             } else {
                 showBoundaryToast("That's the first one")

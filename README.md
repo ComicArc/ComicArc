@@ -1,6 +1,6 @@
 # ComicArc
 
-**A native comic library, reader, and tracker for macOS and iPadOS. No account, no cloud, no subscription.**
+**A native comic library, reader, and tracker for macOS, iPadOS, and visionOS. No account, no cloud, no subscription.**
 
 Point it at the folder where your comics already live, and it builds a fast, local library around the files you already have. Nothing gets uploaded, nothing gets renamed without asking, and nothing needs an internet connection to keep working.
 
@@ -19,7 +19,7 @@ Most comic readers want you to hand your library over to them — import it into
 - **Genuinely native.** 100% SwiftUI on top of AppKit/UIKit — real keyboard shortcuts, full VoiceOver support, native drag-and-drop, and the platform's own navigation idioms, not a web view wearing a costume.
 - **Fast because it's simple.** SQLite through the raw C API, no ORM, no network round-trip between you and your own library.
 - **Offline by default, forever.** No account, no telemetry, nothing phoning home. The one optional download — an offline comics database for better metadata matching — is a single file you grab once; after that it works forever with no connection.
-- **Two real native targets.** macOS and iPadOS share one core (database, scanner, reading-order engine) but are each built for their own platform, not one UI awkwardly stretched over both.
+- **Three real native targets.** macOS, iPadOS, and visionOS share one core (database, scanner, reading-order engine) but are each built for their own platform, not one UI awkwardly stretched over three.
 - **More than a reader.** A Diary that logs every read and reread, Tier Lists, Favorite Moments, Reading Paths that span multiple series, and a Year in Review recap — the parts of tracking what you've read that most comic readers skip entirely.
 
 ---
@@ -101,25 +101,32 @@ Totals for issues and pages read, time in-app, a publisher breakdown, a reading 
 
 Six built-in themes (Dark, Pure Black for OLED, Graphite, Midnight Blue, Forest, Sepia) plus a custom accent color if none of them are quite right.
 
+### Sync & Sharing
+
+- **Peer sync (macOS ↔ iPad)** — over the local network via MultipeerConnectivity, no account or server involved. Deliberately scoped to reading progress (current page + last-read time), matched by file hash so it works even though each platform keeps its own independently-scanned library. Ratings, reviews, tags, diary entries, and reading-order overrides aren't synced — those have messier merge semantics than a single last-write-wins page number.
+- **Share cards** — export a shareable image card for a Tier List, Reading Path, or your Year in Review recap, to post or send outside the app.
+
 ---
 
-## macOS vs. iPad
+## macOS, iPad & Vision
 
-Both apps share the same core — database, scanner, reading-order engine, every screen above — so almost everything you can do on one, you can do on the other. The gaps come down to two real platform constraints: iOS sandboxing has no shell-out access, and touch input isn't pointer input.
+All three targets share the same core — database, scanner, reading-order engine, every screen above — so almost everything you can do on one, you can do on the others. The visionOS app reuses the iPad interface as-is. The remaining gaps come down to two real platform constraints: iOS/visionOS sandboxing has no shell-out access, and touch/gaze input isn't pointer input.
 
-| Feature | macOS | iPad |
+| Feature | macOS | iPad / Vision |
 |---|---|---|
 | Folder scanning | Yes (FSEvents, live) | Yes (rescans on foreground) |
 | Multiple library folders | Yes | Yes |
 | CBZ / PDF / JPG / PNG | Yes | Yes |
-| CBR | Yes (bundled `unar`) | No — no shell access in the iOS sandbox |
+| CBR | Yes (bundled `unar`) | No — no shell access in the sandbox |
 | Reading order, offline database, Fix Match | Yes | Yes |
 | Rename Files | Yes | Yes |
 | Reading Paths, Diary, Tier Lists, Favorite Moments | Yes | Yes |
 | Stats, History, Year in Review | Yes | Yes |
+| Share cards | Yes | Yes |
+| Peer sync (reading progress) | Yes | Yes (iPad only) |
 | Backup export/import | Yes | Yes |
-| Double-page spread, RTL, color filters, in-reader bookmarks | Yes | Not yet — touch reader is swipe/zoom/autoplay for now |
-| Keyboard shortcuts | Full | Magic Keyboard: scan, navigate, back, rename |
+| Double-page spread, RTL, color filters, in-reader bookmarks | Yes | Not yet — touch/gaze reader is swipe/zoom/autoplay for now |
+| Keyboard shortcuts | Full | Magic Keyboard (iPad): scan, navigate, back, rename |
 | VoiceOver | Yes | Yes |
 
 ---
@@ -209,7 +216,7 @@ Everything lives on your device. Nothing leaves it.
 
 Your comic files themselves are **never moved, renamed, or modified** unless you use the Rename Files tool.
 
-macOS and iPad each keep their own independent local library — there's no sync between them. Either platform can export a full JSON backup (comics, progress, ratings, reviews, tags, bookmarks, Reading Paths, Tier Lists, Diary entries, series links, reading-order overrides) and restore it on the same device, or use it to move state to another device by hand.
+macOS and iPad each keep their own independent local library. Peer sync (see [Sync & Sharing](#sync--sharing)) keeps reading progress in step between them over the local network; everything else — ratings, reviews, tags, bookmarks, Reading Paths, Tier Lists, Diary entries, series links, reading-order overrides — stays local to each device unless you move it yourself. Either platform can export a full JSON backup of all of it and restore it on the same device, or use it to move state to another device by hand.
 
 ---
 
@@ -237,7 +244,7 @@ cd ComicArc
 open ComicArc.xcodeproj
 ```
 
-Pick the **ComicArc** scheme for macOS or **ComicArcPad** for iPad, and run. No external dependencies to install — ZIPFoundation ships as a vendored local Swift package, and CBR support bundles its own `unar`.
+Pick the **ComicArc** scheme for macOS, **ComicArcPad** for iPad, or **ComicArcVision** for visionOS, and run. No external dependencies to install — ZIPFoundation ships as a vendored local Swift package, and CBR support bundles its own `unar`.
 
 ```sh
 # Run the test suite

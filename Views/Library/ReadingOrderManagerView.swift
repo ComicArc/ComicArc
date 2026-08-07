@@ -49,14 +49,8 @@ struct ReadingOrderManagerView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.circle").font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("Nothing to Review").font(.title3.bold()).foregroundStyle(.secondary)
-            Text("Annuals and specials that get automatically placed by Intelligent Reading Order will show up here so you can confirm or correct them.")
-                .font(.subheadline).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center).frame(maxWidth: 360)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "checkmark.circle", title: "Nothing to Review",
+                        message: "Annuals and specials that get automatically placed by Intelligent Reading Order will show up here so you can confirm or correct them.")
     }
 }
 

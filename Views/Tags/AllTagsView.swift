@@ -32,11 +32,7 @@ struct AllTagsView: View {
             Divider()
 
             if vm.allTags.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "tag").font(.system(size: 40)).foregroundStyle(.quaternary)
-                    Text("No tags yet.").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "tag", title: "No tags yet.")
             } else {
                 List {
                     ForEach(grouped, id: \.category) { group in

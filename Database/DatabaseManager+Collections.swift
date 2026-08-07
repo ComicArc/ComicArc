@@ -117,13 +117,7 @@ extension DatabaseManager {
     func runItems(runId: Int64) -> [RunItem] {
         queue.sync {
             let sql = """
-            SELECT ri.id, ri.position, COALESCE(ri.notes,''),
-                   c.id, c.title, c.file_path, c.publisher, c.character, c.series,
-                   c.issue_number, c.page_count, c.writer, c.penciller, c.year,
-                   c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
-                   COALESCE(c.position, c.id), c.file_hash,
-                   COALESCE(rp.current_page, 0), rp.last_read,
-                   COALESCE(r.rating, 0), (f.comic_id IS NOT NULL), (rl.comic_id IS NOT NULL)
+            SELECT ri.id, ri.position, COALESCE(ri.notes,''), \(comicColumns)
             FROM run_items ri
             JOIN comics c ON ri.comic_id = c.id AND c.deleted_at IS NULL
             LEFT JOIN reading_progress rp ON c.id = rp.comic_id
@@ -133,19 +127,8 @@ extension DatabaseManager {
             WHERE ri.run_id = ? ORDER BY ri.position
             """
             return rows(sql, args: [runId]) { s -> RunItem in
-                let comic = Comic(
-                    id: colInt64(s, 3), title: colText(s, 4) ?? "", filePath: colText(s, 5) ?? "",
-                    publisher: colText(s, 6) ?? "Unknown", character: colText(s, 7), series: colText(s, 8) ?? "General",
-                    issueNumber: colText(s, 9), pageCount: colInt(s, 10), writer: colText(s, 11),
-                    penciller: colText(s, 12), year: sqlite3_column_type(s, 13) != SQLITE_NULL ? colInt(s, 13) : nil,
-                    storyArc: colText(s, 14), languageIso: colText(s, 15), notes: colText(s, 16),
-                    addedAt: colText(s, 17) ?? "", deletedAt: colText(s, 18),
-                    position: colInt(s, 19), fileHash: colText(s, 20),
-                    progress: colInt(s, 21), lastRead: colText(s, 22),
-                    rating: colInt(s, 23), isFavorite: colBool(s, 24), inReadingList: colBool(s, 25)
-                )
-                return RunItem(id: colInt64(s, 0), comic: comic,
-                               position: colInt(s, 1), notes: colText(s, 2) ?? "")
+                RunItem(id: colInt64(s, 0), comic: comicRow(s, offset: 3),
+                        position: colInt(s, 1), notes: colText(s, 2) ?? "")
             }
         }
     }
@@ -236,13 +219,7 @@ extension DatabaseManager {
     func tierListItems(tierListId: Int64) -> [TierListItem] {
         queue.sync {
             let sql = """
-            SELECT tli.id, tli.tier, tli.position,
-                   c.id, c.title, c.file_path, c.publisher, c.character, c.series,
-                   c.issue_number, c.page_count, c.writer, c.penciller, c.year,
-                   c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
-                   COALESCE(c.position, c.id), c.file_hash,
-                   COALESCE(rp.current_page, 0), rp.last_read,
-                   COALESCE(r.rating, 0), (f.comic_id IS NOT NULL), (rl.comic_id IS NOT NULL)
+            SELECT tli.id, tli.tier, tli.position, \(comicColumns)
             FROM tier_list_items tli
             JOIN comics c ON tli.comic_id = c.id AND c.deleted_at IS NULL
             LEFT JOIN reading_progress rp ON c.id = rp.comic_id
@@ -252,19 +229,8 @@ extension DatabaseManager {
             WHERE tli.tier_list_id = ? ORDER BY tli.position
             """
             return rows(sql, args: [tierListId]) { s -> TierListItem in
-                let comic = Comic(
-                    id: colInt64(s, 3), title: colText(s, 4) ?? "", filePath: colText(s, 5) ?? "",
-                    publisher: colText(s, 6) ?? "Unknown", character: colText(s, 7), series: colText(s, 8) ?? "General",
-                    issueNumber: colText(s, 9), pageCount: colInt(s, 10), writer: colText(s, 11),
-                    penciller: colText(s, 12), year: sqlite3_column_type(s, 13) != SQLITE_NULL ? colInt(s, 13) : nil,
-                    storyArc: colText(s, 14), languageIso: colText(s, 15), notes: colText(s, 16),
-                    addedAt: colText(s, 17) ?? "", deletedAt: colText(s, 18),
-                    position: colInt(s, 19), fileHash: colText(s, 20),
-                    progress: colInt(s, 21), lastRead: colText(s, 22),
-                    rating: colInt(s, 23), isFavorite: colBool(s, 24), inReadingList: colBool(s, 25)
-                )
-                return TierListItem(id: colInt64(s, 0), comic: comic,
-                                     tier: colText(s, 1) ?? "B", position: colInt(s, 2))
+                TierListItem(id: colInt64(s, 0), comic: comicRow(s, offset: 3),
+                             tier: colText(s, 1) ?? "B", position: colInt(s, 2))
             }
         }
     }

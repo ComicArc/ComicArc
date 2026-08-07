@@ -490,8 +490,7 @@ final class OfflineMetadataStore {
             LEFT JOIN publisher po ON po.id = so.publisher_id
             LEFT JOIN publisher pt ON pt.id = st.publisher_id
             JOIN series_bond_type bt ON bt.id = sb.bond_type_id
-            WHERE bt.name IN ('major_name_numbering_continues', 'minor_name_numbering_continues',
-                               'publisher_numbering_continues', 'subnumbering_continues')
+            WHERE bt.name IN \(Self.continuationBondTypes)
         """
         var results: [GCDSeriesBond] = []
         var stmt: OpaquePointer?

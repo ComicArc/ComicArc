@@ -43,14 +43,8 @@ struct MetadataConflictsView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.circle").font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("Nothing to Review").font(.title3.bold()).foregroundStyle(.secondary)
-            Text("Every already-imported comic's series and publisher agree with its own ComicInfo.xml.")
-                .font(.subheadline).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center).frame(maxWidth: 360)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "checkmark.circle", title: "Nothing to Review",
+                        message: "Every already-imported comic's series and publisher agree with its own ComicInfo.xml.")
     }
 }
 

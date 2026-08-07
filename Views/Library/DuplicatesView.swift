@@ -106,22 +106,12 @@ struct DuplicatesView: View {
     }
 
     private var noMatchesState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "magnifyingglass").font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("No Matching Duplicates").font(.title3.bold()).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "magnifyingglass", title: "No Matching Duplicates")
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.circle").font(.system(size: 52)).foregroundStyle(.quaternary)
-            Text("No Duplicates Found").font(.title3.bold()).foregroundStyle(.secondary)
-            Text("Comics that share the same publisher, series, and issue number will show up here.")
-                .font(.subheadline).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center).frame(maxWidth: 360)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(icon: "checkmark.circle", title: "No Duplicates Found",
+                        message: "Comics that share the same publisher, series, and issue number will show up here.")
     }
 }
 

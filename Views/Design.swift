@@ -296,15 +296,149 @@ extension View {
             .clipShape(Rectangle())
             .background(
                 GeometryReader { geo in
-                    let span = max(geo.size.width, geo.size.height) * 1.7
-                    RadialGradient(
-                        colors: [spotlightTint.opacity(isHovered ? min(0.30 * glow, 0.6) : 0), spotlightTint.opacity(0)],
-                        center: .center, startRadius: 0, endRadius: span / 2
-                    )
-                    .frame(width: span, height: span)
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                    .blendMode(.screen)
-                    .allowsHitTesting(false)
+                    // Only ever built while actually hovered -- at rest this whole block is
+                    // skipped, not just hidden at zero opacity, so a grid of thousands of cards
+                    // costs nothing extra beyond the one card the pointer is actually over.
+                    if isHovered {
+                        // A small FIXED margin (not a multiplier of card size) so the bleed past
+                        // the card's own edges stays the same regardless of how big the card is.
+                        // Only one card is ever hovered at once, so the safety threshold is the
+                        // FULL gap to a neighbor, not half of it (there's no second halo meeting
+                        // this one halfway) -- 12pt stays under even the grid's tightest
+                        // (compact-density, 14pt) spacing with a couple points to spare, while
+                        // actually being big enough to read as a halo instead of a sliver.
+                        let haloMargin: CGFloat = 12
+                        let w = geo.size.width, h = geo.size.height
+                        // Circular glows (soft/searchlight/sunburst) stay true circles, sized off
+                        // the SHORTER card dimension -- safe on both axes, at the cost of not
+                        // reaching the long axis's own edges on a portrait card.
+                        let circleSide = min(w, h) + haloMargin * 2
+                        // Line-based effects (web/speed lines/radar rings) instead match the
+                        // card's own aspect ratio -- a rectangle, not a square, so a tall card gets
+                        // a tall pattern (longer spokes/rings on its long axis) instead of being
+                        // squashed into a square sized off the card's longer dimension, which is
+                        // what made the web look short and wide on portrait covers before.
+                        let boxW = w + haloMargin * 2, boxH = h + haloMargin * 2
+                        switch theme.interaction.cardSpotlight {
+                        case .soft:
+                            RadialGradient(
+                                colors: [spotlightTint.opacity(min(0.55 * glow, 0.85)), spotlightTint.opacity(0)],
+                                center: .center, startRadius: 0, endRadius: circleSide / 2
+                            )
+                            .frame(width: circleSide, height: circleSide)
+                            .position(x: w / 2, y: h / 2)
+                            .blendMode(.screen)
+                            .allowsHitTesting(false)
+                        case .searchlight(let searchTint):
+                            // A tight, defined circle -- reads as a circular light being cast on
+                            // the comic, like a signal pointed at it. The bright core holds most
+                            // of the way out and then cuts off fast, rather than a long, soft,
+                            // hazy falloff -- a defined spotlight disc, not a diffuse cloud.
+                            Circle()
+                                .fill(RadialGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: searchTint.opacity(0.9), location: 0),
+                                        .init(color: searchTint.opacity(0.9), location: 0.6),
+                                        .init(color: searchTint.opacity(0.25), location: 0.85),
+                                        .init(color: searchTint.opacity(0), location: 1.0)
+                                    ]),
+                                    center: .center, startRadius: 0, endRadius: circleSide / 2
+                                ))
+                                .frame(width: circleSide, height: circleSide)
+                                .position(x: w / 2, y: h / 2)
+                                .blendMode(.screen)
+                                .allowsHitTesting(false)
+                        case .webStrands(let webTint):
+                            // A radial web -- spokes from a center point plus concentric connecting
+                            // rings, parametrized as an ellipse (independent x/y radii) rather than
+                            // a true circle so the pattern stretches to match the card's own
+                            // proportions -- longer spokes on a tall card's long axis, not a small
+                            // circle squashed inside a square. `Canvas` clips its own drawing to
+                            // its frame, so the web reads as continuing off past its own edges
+                            // rather than being cut off mid-line.
+                            Canvas { context, size in
+                                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                                let rx = size.width / 2, ry = size.height / 2
+                                let spokeCount = 10
+                                let ringCount = 4
+                                for i in 0..<spokeCount {
+                                    let angle = Double(i) / Double(spokeCount) * 2 * .pi
+                                    let end = CGPoint(x: center.x + rx * cos(angle), y: center.y + ry * sin(angle))
+                                    var path = Path()
+                                    path.move(to: center)
+                                    path.addLine(to: end)
+                                    context.stroke(path, with: .color(webTint.opacity(0.7)), lineWidth: 1.3)
+                                }
+                                for r in 1...ringCount {
+                                    let fraction = CGFloat(r) / CGFloat(ringCount)
+                                    var path = Path()
+                                    for i in 0...spokeCount {
+                                        let angle = Double(i % spokeCount) / Double(spokeCount) * 2 * .pi
+                                        let pt = CGPoint(x: center.x + rx * fraction * cos(angle), y: center.y + ry * fraction * sin(angle))
+                                        if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                                    }
+                                    context.stroke(path, with: .color(webTint.opacity(0.55)), lineWidth: 1.2)
+                                }
+                            }
+                            .frame(width: boxW, height: boxH)
+                            .position(x: w / 2, y: h / 2)
+                            .blendMode(.screen)
+                            .allowsHitTesting(false)
+                        case .sunburst(let sunTint):
+                            // Just a warm radiant glow -- no ray lines.
+                            Circle()
+                                .fill(RadialGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: sunTint.opacity(0.85), location: 0),
+                                        .init(color: sunTint.opacity(0.85), location: 0.45),
+                                        .init(color: sunTint.opacity(0.2), location: 0.8),
+                                        .init(color: sunTint.opacity(0), location: 1.0)
+                                    ]),
+                                    center: .center, startRadius: 0, endRadius: circleSide / 2
+                                ))
+                                .frame(width: circleSide, height: circleSide)
+                                .position(x: w / 2, y: h / 2)
+                                .blendMode(.screen)
+                                .allowsHitTesting(false)
+                        case .speedLines(let speedTint):
+                            // A handful of horizontal streaks entering from the left, tapering in
+                            // length -- reads as a blur of motion rushing past.
+                            Canvas { context, size in
+                                let lineCount = 6
+                                for i in 0..<lineCount {
+                                    let y = size.height * (0.12 + 0.76 * CGFloat(i) / CGFloat(lineCount - 1))
+                                    let length = size.width * (0.4 + 0.3 * CGFloat(i % 3) / 2)
+                                    var path = Path()
+                                    path.move(to: CGPoint(x: 0, y: y))
+                                    path.addLine(to: CGPoint(x: length, y: y))
+                                    context.stroke(path, with: .color(speedTint.opacity(0.6)), lineWidth: 2)
+                                }
+                            }
+                            .frame(width: boxW, height: boxH)
+                            .position(x: w / 2, y: h / 2)
+                            .blendMode(.screen)
+                            .allowsHitTesting(false)
+                        case .radarPing(let pingTint):
+                            // Concentric ring outlines from the center, parametrized as ellipses
+                            // (independent x/y radii) so the rings match the card's own
+                            // proportions -- a static "ping," not an expanding animation.
+                            Canvas { context, size in
+                                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                                let rx = size.width / 2 * 0.96, ry = size.height / 2 * 0.96
+                                let ringCount = 4
+                                for r in 1...ringCount {
+                                    let fraction = CGFloat(r) / CGFloat(ringCount)
+                                    let radiusX = rx * fraction, radiusY = ry * fraction
+                                    let rect = CGRect(x: center.x - radiusX, y: center.y - radiusY, width: radiusX * 2, height: radiusY * 2)
+                                    context.stroke(Path(ellipseIn: rect), with: .color(pingTint.opacity(0.55)), lineWidth: 1.2)
+                                }
+                            }
+                            .frame(width: boxW, height: boxH)
+                            .position(x: w / 2, y: h / 2)
+                            .blendMode(.screen)
+                            .allowsHitTesting(false)
+                        }
+                    }
                 }
             )
             .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
@@ -458,7 +592,6 @@ enum AmbientEffect {
     case stars
     case grid
     case grain
-    case shelfEdge
 }
 
 enum SpotlightShape {
@@ -477,6 +610,30 @@ struct SpotlightStyle {
     /// by the owning theme's own `accentColor`, never a separate color of its own.
     let intensity: Double
     let shape: SpotlightShape
+}
+
+/// How a card's own hover spotlight actually renders -- distinct from `SpotlightStyle` above,
+/// which only shapes the ambient background wash. Test case: `.gothic`'s `.searchlight`, a tight,
+/// defined circle rather than the default wide soft pool -- evokes a search/signal light without
+/// reproducing any owned emblem (no bat shape drawn, just the light itself).
+enum CardHoverSpotlight {
+    /// Today's default -- the wide, soft radial pool every card already has, tinted from the
+    /// comic's own cover accent.
+    case soft
+    /// A tight circular beam with a defined edge, in the theme's own fixed tint (not the cover's
+    /// accent) -- narrows onto the cover on hover rather than spilling softly past its edges.
+    case searchlight(tint: Color)
+    /// A radial web -- spokes from a center point plus concentric connecting rings, like an actual
+    /// spiderweb silhouette -- sized to bleed past the card's own edges into the space around it.
+    case webStrands(tint: Color)
+    /// A warm radiant core, no rays -- like sunlight or a power glow depending on tint.
+    case sunburst(tint: Color)
+    /// A handful of horizontal motion-blur streaks rushing in from one side -- something moving
+    /// too fast to see clearly. No lightning-bolt icon drawn.
+    case speedLines(tint: Color)
+    /// Concentric ring outlines expanding from the center, like a radar/sonar ping -- heightened
+    /// senses, not a literal radar dish.
+    case radarPing(tint: Color)
 }
 
 struct ComicTheme: Identifiable {
@@ -510,6 +667,7 @@ struct ComicTheme: Identifiable {
     /// environment only ever sets the mood quietly.
     struct Interaction {
         var spotlight: SpotlightStyle
+        var cardSpotlight: CardHoverSpotlight = .soft
         var hoverGlowMultiplier: Double = 1.0
         var hoverLiftScale: CGFloat = 1.03
         var hoverShadowRadius: CGFloat = 16
@@ -528,11 +686,13 @@ struct ComicTheme: Identifiable {
     private static func make(id: String, keywords: [String], accentColor: Color,
                               tint: [Color] = [], ambient: AmbientEffect? = nil,
                               spotlightIntensity: Double = 1.0, spotlightShape: SpotlightShape = .bloom,
+                              cardSpotlight: CardHoverSpotlight = .soft,
                               glow: Double = 1.0, lift: CGFloat = 1.03, shadow: CGFloat = 16,
                               hoverDuration: Double = 0.15, transition: Double = 0.4) -> ComicTheme {
         ComicTheme(id: id, keywords: keywords, accentColor: accentColor,
                    environment: Environment(backgroundTint: tint, ambientEffect: ambient),
                    interaction: Interaction(spotlight: SpotlightStyle(intensity: spotlightIntensity, shape: spotlightShape),
+                                             cardSpotlight: cardSpotlight,
                                              hoverGlowMultiplier: glow, hoverLiftScale: lift, hoverShadowRadius: shadow,
                                              hoverAnimationDuration: hoverDuration, transitionDuration: transition))
     }
@@ -545,66 +705,79 @@ struct ComicTheme: Identifiable {
               accentColor: Color(red: 0.55, green: 0.65, blue: 0.85),
               tint: [Color(red: 0.05, green: 0.07, blue: 0.10), Color(red: 0.13, green: 0.17, blue: 0.24)],
               ambient: .mist, spotlightIntensity: 1.2, spotlightShape: .beam,
+              cardSpotlight: .searchlight(tint: Color(red: 0.80, green: 0.88, blue: 1.0)),
               glow: 1.3, lift: 1.03, shadow: 22, hoverDuration: 0.30, transition: 0.5),
         .make(id: "webbed", keywords: ["spider-man", "spiderman", "spider man", "venom", "miles morales"],
               accentColor: Color(red: 0.85, green: 0.25, blue: 0.2),
               tint: [Color(red: 0.11, green: 0.05, blue: 0.04), Color(red: 0.25, green: 0.09, blue: 0.07)],
               ambient: .skyline, spotlightIntensity: 1.3, spotlightShape: .bloom,
+              cardSpotlight: .webStrands(tint: Color(red: 0.95, green: 0.96, blue: 1.0)),
               glow: 1.4, lift: 1.05, shadow: 18, hoverDuration: 0.15, transition: 0.3),
         .make(id: "celestial", keywords: ["superman", "supergirl", "superboy"],
               accentColor: Color(red: 1.0, green: 0.93, blue: 0.75),
               tint: [Color(red: 0.11, green: 0.09, blue: 0.05), Color(red: 0.24, green: 0.19, blue: 0.11)],
               ambient: .clouds, spotlightIntensity: 1.3, spotlightShape: .glow,
+              cardSpotlight: .sunburst(tint: Color(red: 0.35, green: 0.9, blue: 0.5)),
               glow: 1.4, lift: 1.03, shadow: 16, hoverDuration: 0.22, transition: 0.4),
         .make(id: "wonderwoman", keywords: ["wonder woman", "amazons", "themyscira"],
               accentColor: Color(red: 0.9, green: 0.75, blue: 0.4),
               tint: [Color(red: 0.13, green: 0.08, blue: 0.05), Color(red: 0.26, green: 0.17, blue: 0.09)],
               spotlightIntensity: 1.2, spotlightShape: .glow,
+              cardSpotlight: .searchlight(tint: Color(red: 1.0, green: 0.85, blue: 0.45)),
               glow: 1.35, lift: 1.04, shadow: 16, hoverDuration: 0.22, transition: 0.4),
         .make(id: "speedster", keywords: ["flash", "quicksilver", "impulse", "kid flash"],
               accentColor: Color(red: 1.0, green: 0.8, blue: 0.3),
               tint: [Color(red: 0.12, green: 0.03, blue: 0.03), Color(red: 0.26, green: 0.06, blue: 0.04)],
               ambient: .streak, spotlightIntensity: 1.4, spotlightShape: .beam,
+              cardSpotlight: .speedLines(tint: Color(red: 1.0, green: 0.85, blue: 0.35)),
               glow: 1.4, lift: 1.06, shadow: 14, hoverDuration: 0.12, transition: 0.25),
         .make(id: "lantern", keywords: ["green lantern", "hal jordan", "john stewart", "sinestro"],
               accentColor: Color(red: 0.25, green: 0.85, blue: 0.45),
               tint: [Color(red: 0.03, green: 0.09, blue: 0.05), Color(red: 0.05, green: 0.20, blue: 0.10)],
               ambient: .stars, spotlightIntensity: 1.2, spotlightShape: .bloom,
+              cardSpotlight: .searchlight(tint: Color(red: 0.35, green: 0.95, blue: 0.55)),
               glow: 1.4, lift: 1.04, shadow: 18, hoverDuration: 0.22, transition: 0.4),
         .make(id: "xmen", keywords: ["x-men", "xmen", "wolverine", "cyclops", "professor x", "magneto"],
               accentColor: Color(red: 0.4, green: 0.55, blue: 0.75),
               tint: [Color(red: 0.06, green: 0.08, blue: 0.12), Color(red: 0.12, green: 0.16, blue: 0.22)],
               ambient: .grid, spotlightIntensity: 1.1, spotlightShape: .beam,
+              cardSpotlight: .searchlight(tint: Color(red: 0.55, green: 0.7, blue: 0.95)),
               glow: 1.25, lift: 1.03, shadow: 16, hoverDuration: 0.20, transition: 0.4),
         .make(id: "daredevil", keywords: ["daredevil", "matt murdock", "hell's kitchen"],
               accentColor: Color(red: 0.7, green: 0.12, blue: 0.14),
               tint: [Color(red: 0.06, green: 0.02, blue: 0.02), Color(red: 0.20, green: 0.03, blue: 0.03)],
               ambient: .rain, spotlightIntensity: 1.0, spotlightShape: .beam,
+              cardSpotlight: .radarPing(tint: Color(red: 0.9, green: 0.2, blue: 0.22)),
               glow: 1.3, lift: 1.02, shadow: 24, hoverDuration: 0.28, transition: 0.5),
         .make(id: "fantasticfour", keywords: ["fantastic four", "mr fantastic", "invisible woman", "human torch"],
               accentColor: Color(red: 0.35, green: 0.55, blue: 0.85),
               tint: [Color(red: 0.04, green: 0.08, blue: 0.13), Color(red: 0.08, green: 0.16, blue: 0.26)],
               ambient: .skyline, spotlightIntensity: 1.2, spotlightShape: .glow,
+              cardSpotlight: .sunburst(tint: Color(red: 0.45, green: 0.65, blue: 0.95)),
               glow: 1.3, lift: 1.04, shadow: 16, hoverDuration: 0.18, transition: 0.35),
         .make(id: "hulk", keywords: ["hulk", "bruce banner", "gamma"],
               accentColor: Color(red: 0.35, green: 0.65, blue: 0.35),
               tint: [Color(red: 0.04, green: 0.08, blue: 0.04), Color(red: 0.07, green: 0.18, blue: 0.07)],
               spotlightIntensity: 0.9, spotlightShape: .beam,
+              cardSpotlight: .searchlight(tint: Color(red: 0.45, green: 0.75, blue: 0.35)),
               glow: 1.2, lift: 1.02, shadow: 26, hoverDuration: 0.30, transition: 0.5),
         .make(id: "thor", keywords: ["thor", "asgard", "odin", "mjolnir"],
               accentColor: Color(red: 0.75, green: 0.82, blue: 0.95),
               tint: [Color(red: 0.07, green: 0.08, blue: 0.12), Color(red: 0.15, green: 0.17, blue: 0.24)],
               ambient: .streak, spotlightIntensity: 1.3, spotlightShape: .beam,
+              cardSpotlight: .searchlight(tint: Color(red: 0.8, green: 0.85, blue: 1.0)),
               glow: 1.4, lift: 1.04, shadow: 18, hoverDuration: 0.18, transition: 0.4),
         .make(id: "strange", keywords: ["doctor strange", "sorcerer supreme", "stephen strange"],
               accentColor: Color(red: 0.65, green: 0.4, blue: 0.85),
               tint: [Color(red: 0.06, green: 0.04, blue: 0.12), Color(red: 0.16, green: 0.09, blue: 0.28)],
               ambient: .stars, spotlightIntensity: 1.2, spotlightShape: .glow,
+              cardSpotlight: .radarPing(tint: Color(red: 0.75, green: 0.45, blue: 0.95)),
               glow: 1.4, lift: 1.04, shadow: 20, hoverDuration: 0.24, transition: 0.45),
         .make(id: "cosmic", keywords: ["guardians", "cosmic", "nova", "silver surfer"],
               accentColor: Color(red: 0.45, green: 0.5, blue: 0.95),
               tint: [Color(red: 0.03, green: 0.03, blue: 0.10), Color(red: 0.08, green: 0.08, blue: 0.24)],
               ambient: .stars, spotlightIntensity: 1.15, spotlightShape: .bloom,
+              cardSpotlight: .sunburst(tint: Color(red: 0.55, green: 0.55, blue: 0.98)),
               glow: 1.3, lift: 1.04, shadow: 20, hoverDuration: 0.24, transition: 0.5),
         .make(id: "horror", keywords: ["swamp thing", "hellblazer", "constantine", "sandman", "horror"],
               accentColor: Color(red: 0.5, green: 0.12, blue: 0.14),
@@ -632,11 +805,11 @@ struct ComicTheme: Identifiable {
     /// the registry (no environment tint, standard hover) so switching INTO a named series theme
     /// is the moment that actually reads as a mood change. Used by `libraryAmbientBackground()`.
     static let library = ComicTheme.make(id: "library", keywords: [], accentColor: Design.warmSpotlightDefault,
-                                          ambient: .shelfEdge, spotlightIntensity: 1.0, spotlightShape: .bloom,
+                                          spotlightIntensity: 1.0, spotlightShape: .bloom,
                                           glow: 1.0, lift: 1.03, shadow: 16, hoverDuration: 0.15, transition: 0.5)
 
     /// The plain fallback for non-series, non-library screens (Diary, Runs, Stats, etc.) -- same
-    /// calm baseline as `.library`, minus its shelf-edge line.
+    /// calm baseline as `.library`.
     static let neutral = ComicTheme.make(id: "neutral", keywords: [], accentColor: Design.warmSpotlightDefault,
                                           spotlightIntensity: 1.0, spotlightShape: .bloom,
                                           glow: 1.0, lift: 1.03, shadow: 16, hoverDuration: 0.15, transition: 0.5)
@@ -725,14 +898,17 @@ struct ThemeBackdrop: View {
 
     var body: some View {
         ZStack {
-            Design.appBackground
-            if !theme.environment.backgroundTint.isEmpty {
-                // A wash, not a replacement -- blended at reduced opacity over the base so it
-                // reads as this room's lighting rather than a distinct painted scene.
+            if theme.environment.backgroundTint.isEmpty {
+                Design.appBackground
+            } else {
+                // The theme's actual room color -- a real gradient, not a wash blended over the
+                // neutral base. A blend reads fine for warm/saturated themes but disappears for
+                // cool-toned ones close in hue to the base itself (e.g. Batman's blue-gray against
+                // the app's own near-black blue-gray) -- replacing stays visible for every hue.
                 LinearGradient(colors: theme.environment.backgroundTint, startPoint: .top, endPoint: .bottom)
-                    .opacity(0.55)
             }
             if colorSchemeContrast != .increased {
+                HalftoneTexture(tint: Design.textPrimary, opacity: 0.03)
                 vignette
                 if let effect = theme.environment.ambientEffect {
                     AmbientEffectView(effect: effect, tint: tint)
@@ -862,14 +1038,6 @@ private struct AmbientEffectView: View {
             }
             .frame(width: 340, height: 200)
             .position(x: 780, y: 130)
-        case .shelfEdge:
-            // The one line that says "these are sitting on something," not floating in a
-            // gradient -- the library theme's own signature.
-            Rectangle()
-                .fill(Design.textPrimary.opacity(0.06))
-                .frame(height: 1)
-                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                .position(x: 480, y: 600)
         }
     }
 }
@@ -1178,14 +1346,16 @@ struct GoldCapsuleStyle: ButtonStyle {
 
 struct StarRating: View {
     let rating: Int
+    var size: CGFloat = 12
+    var unfilledColor: Color = Design.secondaryLabel
     let onTap: (Int) -> Void
 
     var body: some View {
         HStack(spacing: 3) {
             ForEach(1...5, id: \.self) { star in
                 Image(systemName: star <= rating ? "star.fill" : "star")
-                    .font(.system(size: 12))
-                    .foregroundStyle(star <= rating ? Design.brandGold : Design.secondaryLabel)
+                    .font(.system(size: size))
+                    .foregroundStyle(star <= rating ? Design.brandGold : unfilledColor)
                     .overlay(
                         Rectangle().fill(Color.clear).frame(width: 32, height: 32)
                             .contentShape(Rectangle())

@@ -33,23 +33,10 @@ struct ReadingHistoryView: View {
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if history.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No reading history yet.")
-                        .foregroundStyle(.secondary)
-                    Text("Open a comic in the reader to start tracking.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "clock.arrow.circlepath", title: "No reading history yet.",
+                                message: "Open a comic in the reader to start tracking.")
             } else if filtered.isEmpty {
-                VStack(spacing: 14) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 48)).foregroundStyle(.quaternary)
-                    Text("No matching history.")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No matching history.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
