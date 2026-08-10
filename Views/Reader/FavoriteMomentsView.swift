@@ -134,7 +134,13 @@ private struct PageThumbnail: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: "\(comic.id):\(page)") {
-            PageCache.shared.load(comic: comic, page: page) { image = $0 }
+            // A standalone one-off (each favorite moment is typically a different comic), so
+            // there's no already-open document to reuse the way the filmstrip/cover-picker do --
+            // open, decode at a thumbnail-appropriate size, close.
+            guard let document = try? await ComicDocumentFactory.open(path: comic.filePath),
+                  let source = try? document.pageSource(index: page) else { return }
+            defer { document.close() }
+            image = PageDecoder.decode(source, maxPixelSize: 400)
         }
     }
 }

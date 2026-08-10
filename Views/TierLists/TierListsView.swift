@@ -16,297 +16,37 @@ private func tierColor(_ tier: String) -> Color {
     }
 }
 
+private func tierListConfig(_ vm: LibraryViewModel) -> CollectionListConfig<TierList> {
+    CollectionListConfig(
+        noun: "Tier List", nounPlural: "Tier Lists",
+        emptyIcon: "square.stack.3d.up",
+        emptyMessage: "Rank your comics into S/A/B/C/D/F tiers, like \"Best Batman Runs.\"",
+        cardIcon: "square.stack.3d.up.fill",
+        subtitle: { "\($0.comicCount) comic\($0.comicCount == 1 ? "" : "s")" },
+        deleteWithUndo: { vm.deleteTierListWithUndo($0) },
+        fetch: { await Task.detached(priority: .userInitiated) { DatabaseManager.shared.allTierLists() }.value },
+        reorder: { vm.reorderTierLists(orderedIds: $0) },
+        create: { title, desc in vm.createTierList(title: title, description: desc) },
+        setCoverFromComic: { list, comic, done in vm.setTierListCover(tierListId: list.id, usingCoverOf: comic, onDone: done) },
+        setCoverFromURL: { list, url in _ = vm.setTierListCover(tierListId: list.id, imageURL: url) },
+        clearCover: { vm.clearTierListCover(tierListId: $0.id) }
+    )
+}
+
 struct TierListsListView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Binding var selectedTierList: TierList?
-    @State private var tierLists:      [TierList] = []
-    @State private var isLoading       = true
-    @State private var showingCreate   = false
-    @State private var newTitle        = ""
-    @State private var newDesc         = ""
-    @State private var draggedId:      Int64?
-    @State private var dropTargetId:   Int64?
-    @State private var pendingDelete:  TierList?
-
-    private var filteredTierLists: [TierList] {
-        guard !vm.searchText.isEmpty else { return tierLists }
-        let q = vm.searchText.lowercased()
-        return tierLists.filter { $0.title.lowercased().contains(q) }
-    }
+    @State private var reloadToken = UUID()
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                SignageLabel(text: "Tier Lists", size: 20, kerning: 1, tint: Design.textPrimary)
-                Spacer()
-                Button { showingCreate = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Design.brandGold)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Create Tier List")
+        CollectionListView(config: tierListConfig(vm), selected: $selectedTierList,
+                            onListChanged: { vm.refreshTierLists() }, reloadToken: reloadToken)
+            .onReceive(NotificationCenter.default.publisher(for: .tierListDeleted)) { _ in
+                vm.refreshTierLists(); reloadToken = UUID()
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Design.navBackground)
-
-            Rectangle().fill(Design.borderColor).frame(height: 1)
-
-            if isLoading {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if tierLists.isEmpty {
-                EmptyStateView(
-                    icon: "square.stack.3d.up",
-                    title: "No Tier Lists Yet",
-                    message: "Rank your comics into S/A/B/C/D/F tiers, like \"Best Batman Runs.\""
-                ) {
-                    Button("Create Tier List") { showingCreate = true }
-                        .buttonStyle(.borderedProminent).tint(Design.brandGold)
-                        .foregroundStyle(.black)
-                }
-            } else if filteredTierLists.isEmpty {
-                EmptyStateView(icon: "magnifyingglass", title: "No Matching Tier Lists")
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(filteredTierLists) { tierList in
-                            let isTarget = dropTargetId == tierList.id && draggedId != tierList.id
-                            TierListCard(
-                                tierList: tierList,
-                                isSelected: selectedTierList?.id == tierList.id,
-                                onCoverChanged: { Task { await load() } }
-                            ) { selectedTierList = tierList }
-                            .background(isTarget ? Design.brandGold.opacity(0.12) : Color.clear)
-                            .onDrag {
-                                draggedId = tierList.id
-                                return NSItemProvider(object: NSString(string: String(tierList.id)))
-                            }
-                            .onDrop(of: [.plainText],
-                                    isTargeted: Binding(
-                                        get: { isTarget },
-                                        set: { active in dropTargetId = active ? tierList.id : nil }
-                                    )) { _, _ in
-                                guard let fromId = draggedId,
-                                      let fromIdx = tierLists.firstIndex(where: { $0.id == fromId }),
-                                      let toIdx = tierLists.firstIndex(where: { $0.id == tierList.id }) else { return false }
-                                var arr = tierLists
-                                let moved = arr.remove(at: fromIdx)
-                                arr.insert(moved, at: toIdx)
-                                tierLists = arr
-                                vm.reorderTierLists(orderedIds: arr.map(\.id))
-                                draggedId = nil; dropTargetId = nil
-                                return true
-                            }
-                            .contextMenu {
-                                Button("Move to Top") { moveTierList(tierList, to: 0) }
-                                    .disabled(tierLists.first?.id == tierList.id)
-                                Button("Move Up") { moveTierList(tierList, by: -1) }
-                                    .disabled(tierLists.first?.id == tierList.id)
-                                Button("Move Down") { moveTierList(tierList, by: 1) }
-                                    .disabled(tierLists.last?.id == tierList.id)
-                                Button("Move to Bottom") { moveTierList(tierList, to: tierLists.count - 1) }
-                                    .disabled(tierLists.last?.id == tierList.id)
-                                Divider()
-                                Button("Delete Tier List", role: .destructive) { pendingDelete = tierList }
-                            }
-                            .accessibilityActions {
-                                Button("Move Up") { moveTierList(tierList, by: -1) }
-                                Button("Move Down") { moveTierList(tierList, by: 1) }
-                                Button("Move to Top") { moveTierList(tierList, to: 0) }
-                                Button("Move to Bottom") { moveTierList(tierList, to: tierLists.count - 1) }
-                            }
-                            Rectangle().fill(Design.borderColor).frame(height: 1)
-                        }
-                    }
-                }
+            .onReceive(NotificationCenter.default.publisher(for: .tierListUpdated)) { _ in
+                reloadToken = UUID()
             }
-        }
-        .ambientBackground()
-        .task { await load() }
-        .onReceive(NotificationCenter.default.publisher(for: .tierListDeleted)) { _ in
-            Task { await load()
-                if let sel = selectedTierList, !tierLists.contains(sel) { selectedTierList = nil }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .tierListUpdated)) { _ in
-            Task { await load() }
-        }
-        .sheet(isPresented: $showingCreate) { createSheet }
-        .confirmationDialog(
-            "Delete \"\(pendingDelete?.title ?? "")\"?",
-            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Delete Tier List", role: .destructive) {
-                guard let target = pendingDelete else { return }
-                vm.deleteTierListWithUndo(target)
-                if selectedTierList?.id == target.id { selectedTierList = nil }
-                pendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
-        } message: {
-            Text("The comics themselves are not affected -- only this ranking is removed.")
-        }
-    }
-
-    private var createSheet: some View {
-        VStack(spacing: 20) {
-            Text("New Tier List").font(.title2.bold())
-            TextField("Title", text: $newTitle).textFieldStyle(.roundedBorder)
-            TextField("Description (optional)", text: $newDesc).textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Cancel") { showingCreate = false }.keyboardShortcut(.escape)
-                Spacer()
-                Button("Create") { createTierList() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding(24).frame(width: 360)
-    }
-
-    private func createTierList() {
-        let title = newTitle.trimmingCharacters(in: .whitespaces)
-        guard !title.isEmpty else { return }
-        vm.createTierList(title: title, description: newDesc)
-        newTitle = ""; newDesc = ""
-        showingCreate = false
-        Task { await load() }
-    }
-
-    private func load() async {
-        isLoading = true
-        tierLists = await Task.detached(priority: .userInitiated) {
-            DatabaseManager.shared.allTierLists()
-        }.value
-        isLoading = false
-    }
-
-    private func moveTierList(_ tierList: TierList, by delta: Int) {
-        guard let idx = tierLists.firstIndex(where: { $0.id == tierList.id }) else { return }
-        moveTierList(tierList, to: idx + delta)
-    }
-
-    private func moveTierList(_ tierList: TierList, to newIndex: Int) {
-        guard let fromIdx = tierLists.firstIndex(where: { $0.id == tierList.id }) else { return }
-        let clamped = max(0, min(newIndex, tierLists.count - 1))
-        guard clamped != fromIdx else { return }
-        var arr = tierLists
-        let moved = arr.remove(at: fromIdx)
-        arr.insert(moved, at: clamped)
-        tierLists = arr
-        vm.reorderTierLists(orderedIds: arr.map(\.id))
-    }
-}
-
-private struct TierListCard: View {
-    let tierList:   TierList
-    let isSelected: Bool
-    var onCoverChanged: () -> Void = {}
-    let onSelect:   () -> Void
-
-    @State private var isHovered = false
-    @State private var showCoverPicker = false
-    @Environment(\.fileService) private var fileService
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(isSelected ? Design.brandGold : Color.clear)
-                    .frame(width: 3)
-
-                coverThumbnail
-                    .frame(width: 36, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .padding(.leading, 10)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(tierList.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Design.textPrimary)
-                        .lineLimit(1)
-
-                    if !tierList.description.isEmpty {
-                        Text(tierList.description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    HStack(spacing: 6) {
-                        if let r = tierList.rating, r > 0 {
-                            HStack(spacing: 1) {
-                                ForEach(1...r, id: \.self) { _ in
-                                    Image(systemName: "star.fill")
-                                        .font(.system(size: 7))
-                                        .foregroundStyle(Design.brandGold)
-                                }
-                            }
-                        }
-                        if tierList.comicCount > 0 {
-                            Text("\(tierList.comicCount) comic\(tierList.comicCount == 1 ? "" : "s")")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.quaternary)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-            }
-            .background(isSelected ? Design.brandBlue.opacity(0.12) : (isHovered ? Design.surfaceBg : Color.clear))
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .accessibilityLabel(tierList.description.isEmpty ? tierList.title : "\(tierList.title), \(tierList.description)")
-        .accessibilityValue(tierList.comicCount > 0 ? "\(tierList.comicCount) comics" : "Empty")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .contextMenu {
-            Button("Choose Existing Cover…") { showCoverPicker = true }
-            Button("Custom Image…") { pickCoverImage() }
-            if tierList.coverImagePath != nil {
-                Button("Remove Custom Cover") {
-                    LibraryViewModel.shared.clearTierListCover(tierListId: tierList.id)
-                    onCoverChanged()
-                }
-            }
-        }
-        .sheet(isPresented: $showCoverPicker) {
-            CoverPickerSheet(title: "Choose Cover for \(tierList.title)") { comic in
-                LibraryViewModel.shared.setTierListCover(tierListId: tierList.id, usingCoverOf: comic, onDone: onCoverChanged)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var coverThumbnail: some View {
-        if let path = tierList.coverImagePath, let img = PlatformImage.fromFile(path) {
-            Image(platformImage: img).comicCoverStyle()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ZStack {
-                Design.surfaceBg
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 14)).foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private func pickCoverImage() {
-        fileService.pickFiles(
-            allowsMultiple: false,
-            message: "Choose a cover image for \(tierList.title)",
-            prompt: "Set Cover",
-            contentTypes: [.image]
-        ) { urls in
-            if let url = urls.first {
-                LibraryViewModel.shared.setTierListCover(tierListId: tierList.id, imageURL: url)
-                onCoverChanged()
-            }
-        }
     }
 }
 
@@ -423,7 +163,10 @@ struct TierListDetailView: View {
             reviewSheet
         }
         .sheet(isPresented: $showEditSheet) {
-            EditTierListView(tierList: $currentTierList)
+            EditCollectionView(noun: "Tier List", item: $currentTierList) { t, d, _ in
+                LibraryViewModel.shared.updateTierList(id: currentTierList.id, title: t, description: d)
+                currentTierList.title = t; currentTierList.description = d
+            }
         }
         .confirmationDialog(
             "Delete \"\(currentTierList.title)\"?",
@@ -438,14 +181,7 @@ struct TierListDetailView: View {
         } message: {
             Text("The comics themselves are not affected -- only this ranking is removed.")
         }
-        .alert("Export Failed", isPresented: Binding(
-            get: { exportErrorMessage != nil },
-            set: { if !$0 { exportErrorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(exportErrorMessage ?? "")
-        }
+        .errorAlert("Export Failed", message: $exportErrorMessage)
     }
 
     private var header: some View {
@@ -525,8 +261,8 @@ struct TierListDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             // Reads `currentTierList` (the synced @State copy), not the immutable `tierList` init
             // parameter -- otherwise this sheet keeps showing the pre-edit title after
-            // EditTierListView updates currentTierList, since `tierList` itself never changes for
-            // this view's lifetime.
+            // EditCollectionView updates currentTierList, since `tierList` itself never changes
+            // for this view's lifetime.
             Text("Rate & Review: \(currentTierList.title)")
                 .font(.title2.bold())
 
@@ -690,56 +426,6 @@ private struct TierListItemCard: View {
             }
         }
         .onAppear { ThumbnailCache.shared.thumbnail(for: item.comic) { thumbnail = $0 } }
-    }
-}
-
-struct EditTierListView: View {
-    @Binding var tierList: TierList
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var title:       String
-    @State private var description: String
-
-    init(tierList: Binding<TierList>) {
-        self._tierList = tierList
-        _title         = State(initialValue: tierList.wrappedValue.title)
-        _description   = State(initialValue: tierList.wrappedValue.description)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Edit Tier List")
-                .font(.title2.bold())
-                .padding(24)
-
-            Form {
-                Section {
-                    TextField("Title", text: $title)
-                    TextField("Description", text: $description)
-                }
-            }
-            .formStyle(.grouped)
-
-            HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
-                Spacer()
-                Button("Save") { save() }
-                    .keyboardShortcut(.return)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(24)
-        }
-        .frame(width: 400)
-    }
-
-    private func save() {
-        let t = title.trimmingCharacters(in: .whitespaces)
-        let d = description.trimmingCharacters(in: .whitespaces)
-        LibraryViewModel.shared.updateTierList(id: tierList.id, title: t, description: d)
-        tierList.title       = t
-        tierList.description = d
-        dismiss()
     }
 }
 

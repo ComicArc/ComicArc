@@ -201,19 +201,17 @@ struct ComicCard: View {
             }
 
             Menu("Add to Reading Path") {
-                let runs = DatabaseManager.shared.allRuns()
-                ForEach(runs) { run in
+                ForEach(vm.runs) { run in
                     Button(run.title) { vm.addToRun(runId: run.id, comicIds: [comic.id]) }
                 }
-                if !runs.isEmpty { Divider() }
+                if !vm.runs.isEmpty { Divider() }
                 Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
             }
             Menu("Add to Tier List") {
-                let tierLists = DatabaseManager.shared.allTierLists()
-                ForEach(tierLists) { list in
+                ForEach(vm.tierLists) { list in
                     Button(list.title) { vm.addToTierList(tierListId: list.id, comicIds: [comic.id]) }
                 }
-                if !tierLists.isEmpty { Divider() }
+                if !vm.tierLists.isEmpty { Divider() }
                 Button("New Tier List…") { newTierListTitle = ""; showNewTierListPrompt = true }
             }
 

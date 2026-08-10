@@ -107,14 +107,7 @@ struct IssueDetailPage: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .alert("Couldn't Set Cover", isPresented: Binding(
-            get: { coverChangeError != nil },
-            set: { if !$0 { coverChangeError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(coverChangeError ?? "")
-        }
+        .errorAlert("Couldn't Set Cover", message: $coverChangeError)
     }
 
     private var topBar: some View {

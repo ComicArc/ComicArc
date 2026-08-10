@@ -1,7 +1,8 @@
 import SwiftUI
 
-// Shared between Mac's SettingsView and iPad's iPadSettingsView -- section-level search (the
-// toolbar's search field is shared app-wide) is coarser than filtering every individual control,
+// `SettingsView` is shared verbatim by all three platforms (Mac, iPad, visionOS) -- section-level
+// search (the toolbar's search field is shared app-wide) is coarser than filtering every
+// individual control,
 // but matches how most macOS/iOS settings search actually behaves: it finds the relevant *pane*,
 // not every label inside it. Each section gets a handful of terms a user would plausibly type to
 // find it, beyond its own visible title.
@@ -72,8 +73,16 @@ struct SettingsView: View {
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private static let sectionTitles = ["Appearance", "Library", "Reading Order", "Comics Database",
-                                        "Reader", "Import", "Sidebar", "Fix Filenames", "Data", "Help", "About"]
+    // Kept platform-conditional so a search matching only a Mac-only section (e.g. "cbr") doesn't
+    // leave `noSectionsMatch` false while nothing actually renders on iPad/visionOS.
+    private static let sectionTitles: [String] = {
+        var titles = ["Appearance", "Library", "Reading Order", "Comics Database",
+                      "Reader", "Sidebar", "Fix Filenames", "Data", "Sync", "Help", "About"]
+        #if os(macOS)
+        titles.append("Import")
+        #endif
+        return titles
+    }()
 
     private func sectionMatches(_ title: String) -> Bool {
         SettingsSearch.matches(title, query: vm.searchText)
@@ -106,6 +115,7 @@ struct SettingsView: View {
     @State private var showClearConfirm      = false
     @State private var showOnboardingConfirm = false
     @State private var backupErrorMessage: String?
+    @State private var comicCount            = 0
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -127,7 +137,9 @@ struct SettingsView: View {
                 if sectionMatches("Reading Order") { readingOrderSection }
                 if sectionMatches("Comics Database") { comicsDatabaseSection }
                 if sectionMatches("Reader") { readerSection }
+                #if os(macOS)
                 if sectionMatches("Import") { importSection }
+                #endif
                 if sectionMatches("Sidebar") { sidebarSection }
                 if sectionMatches("Fix Filenames") { fixFilenamesSection }
                 #if os(macOS)
@@ -149,18 +161,15 @@ struct SettingsView: View {
         .background(Design.appBackground)
         .navigationTitle("Settings")
         .onAppear { if cbrEnabled { checkUnarAsync() } }
+        .task {
+            comicCount = await Task.detached(priority: .utility) {
+                DatabaseManager.shared.allComics().count
+            }.value
+        }
         .onChange(of: gcdDownloadState) { _, newValue in
             guard newValue == .success else { return }
             isFixingOrder = true
-            Task.detached(priority: .userInitiated) {
-                DatabaseManager.shared.recomputeGCDMatches()
-                DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
-                DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
-                await MainActor.run {
-                    isFixingOrder = false
-                    vm.reload()
-                }
-            }
+            vm.recomputeGCDMatchesAndReadingOrder { isFixingOrder = false }
         }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
         .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
@@ -181,14 +190,7 @@ struct SettingsView: View {
         } message: {
             Text("This will erase your entire library database, all reading progress, ratings, reviews, reading paths, tier lists, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
         }
-        .alert("Backup Error", isPresented: Binding(
-            get: { backupErrorMessage != nil },
-            set: { if !$0 { backupErrorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(backupErrorMessage ?? "")
-        }
+        .errorAlert("Backup Error", message: $backupErrorMessage)
     }
 
     @ViewBuilder private var appearanceSection: some View {
@@ -224,10 +226,15 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var librarySection: some View {
-        Section("Library") {
+        Section {
             if vm.libraryPaths.isEmpty {
+                #if os(macOS)
                 Text("No folders configured yet.")
                     .font(.caption).foregroundStyle(.secondary)
+                #else
+                Text("No library folder set. Comics can still be imported one at a time with the + button, or choose a folder here to scan its whole contents (including subfolders) and pick up new files automatically whenever you return to the app.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                #endif
             } else {
                 ForEach(vm.libraryPaths, id: \.self) { path in
                     HStack {
@@ -263,6 +270,12 @@ struct SettingsView: View {
                 Text("\(vm.scanState.done) / \(vm.scanState.total) — \(vm.scanState.added) added")
                     .font(.caption).foregroundStyle(.secondary)
             }
+        } header: {
+            Text("Library")
+        } footer: {
+            #if !os(macOS)
+            Text("CBZ, PDF, JPG, and PNG are supported. CBR isn't readable here — extraction needs a command-line tool that doesn't exist in the iOS sandbox. If reading order or metadata looks wrong, use Resync Library — it rescans and re-derives metadata for every comic.")
+            #endif
         }
         .confirmationDialog(
             folderToRemoveComicCount > 0
@@ -366,6 +379,10 @@ struct SettingsView: View {
         }
     }
 
+    #if os(macOS)
+    // CBR extraction shells out to a command-line tool (`unar`) that doesn't exist in the iOS/
+    // iPadOS sandbox -- there's nothing this section could do there, so it's Mac-only rather than
+    // showing a toggle that can never actually turn anything on.
     @ViewBuilder private var importSection: some View {
         Section("Import") {
             Toggle("CBR Support (requires unar)", isOn: $cbrEnabled)
@@ -377,15 +394,14 @@ struct SettingsView: View {
                     Text(unarAvailable ? "unar found" : "unar not found — install with: brew install unar")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                #if os(macOS)
                 if unarAvailable {
                     Button("Convert CBR to CBZ…") { showConvertCBRToCBZ = true }
                         .help("Re-encode RAR-based comics as CBZ in place, so they no longer need unar to read")
                 }
-                #endif
             }
         }
     }
+    #endif
 
     @ViewBuilder private var sidebarSection: some View {
         Section("Sidebar") {
@@ -456,9 +472,15 @@ struct SettingsView: View {
     @ViewBuilder private var syncSection: some View {
         Section("Sync") {
             VStack(alignment: .leading, spacing: 6) {
+                #if os(macOS)
                 Text("Sync your reading progress with another device (like an iPad) over your local network -- no account, no cloud.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                #else
+                Text("Sync your reading progress with another device (like your Mac) over your local network -- no account, no cloud.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                #endif
             }
             .padding(.vertical, 2)
             Button("Sync with Nearby Device…") { showPeerSync = true }
@@ -466,7 +488,12 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var dataSection: some View {
-        Section("Data") {
+        Section {
+            HStack {
+                Text("Comics Imported")
+                Spacer()
+                Text("\(comicCount)").foregroundStyle(.secondary)
+            }
             Button("Export Backup…") { exportBackup() }
             Button("Import Backup…") { importBackup() }
             Button("View Trash…") { showTrash = true }
@@ -492,15 +519,23 @@ struct SettingsView: View {
                 .help("Remove cached thumbnails — they regenerate on demand")
             Button("Clear Library…", role: .destructive) { confirmClear() }
                 .help("Remove all comics, progress, ratings, and runs from the database")
+        } header: {
+            Text("Data")
+        } footer: {
+            Text("Backup includes ratings, reviews, tags, bookmarks, reading orders, lists, diary entries, and series links. Comics themselves stay wherever they already are.")
         }
     }
 
     @ViewBuilder private var helpSection: some View {
         Section("Help") {
+            #if os(macOS)
+            // The interactive tour overlay only exists in ContentView.swift, Mac's root view --
+            // iPad has no listener for this notification, so the button would silently do nothing.
             Button("Show Tutorial Again") {
                 NotificationCenter.default.post(name: .showTutorial, object: nil)
             }
             .help("Re-run the interactive feature tour")
+            #endif
 
             Button("Run Setup Again…") { confirmRerunOnboarding() }
                 .help("Re-run the initial library setup wizard")
@@ -549,7 +584,7 @@ struct SettingsView: View {
     private func checkUnarAsync() {
 #if os(macOS)
         Task.detached(priority: .utility) {
-            let found = LibraryScanner.shared.which("unar") != nil
+            let found = ExternalTool.shared.which("unar") != nil
             await MainActor.run { unarAvailable = found }
         }
 #endif
@@ -565,15 +600,7 @@ struct SettingsView: View {
 
     private func recheckReadingOrder() {
         isFixingOrder = true
-        Task.detached(priority: .userInitiated) {
-            DatabaseManager.shared.recomputeGCDMatches()
-            DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
-            DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
-            await MainActor.run {
-                isFixingOrder = false
-                vm.reload()
-            }
-        }
+        vm.recomputeGCDMatchesAndReadingOrder { isFixingOrder = false }
     }
 
     private func undoManualOrderFixes() {

@@ -4,291 +4,41 @@ extension Notification.Name {
 }
 
 import SwiftUI
-import UniformTypeIdentifiers
+
+private func runListConfig(_ vm: LibraryViewModel) -> CollectionListConfig<Run> {
+    CollectionListConfig(
+        noun: "Reading Path", nounPlural: "Reading Paths",
+        emptyIcon: "list.bullet.rectangle",
+        emptyMessage: "Group comics into an ordered reading path to track multi-series arcs.",
+        cardIcon: "list.bullet.rectangle.portrait",
+        subtitle: { $0.comicCount > 0 ? "\($0.readCount)/\($0.comicCount) read" : "Empty" },
+        deleteWithUndo: nil, // Runs are only deletable from their detail screen, not the list.
+        fetch: { await Task.detached(priority: .userInitiated) { DatabaseManager.shared.allRuns() }.value },
+        reorder: { vm.reorderRuns(orderedIds: $0) },
+        create: { title, desc in vm.createRun(title: title, description: desc) },
+        setCoverFromComic: { run, comic, done in vm.setRunCover(runId: run.id, usingCoverOf: comic, onDone: done) },
+        setCoverFromURL: { run, url in _ = vm.setRunCover(runId: run.id, imageURL: url) },
+        clearCover: { vm.clearRunCover(runId: $0.id) }
+    )
+}
 
 struct RunsListView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Binding var selectedRun: Run?
-    @State private var runs:          [Run]   = []
-    @State private var isLoading      = true
-    @State private var showingCreate  = false
-    @State private var newRunTitle    = ""
-    @State private var newRunDesc     = ""
-    @State private var draggedRunId:  Int64?
-    @State private var dropTargetRunId: Int64?
-
-    // Filters the rendered list only -- reordering (drag-and-drop, Move Up/Down/Top/Bottom)
-    // still looks rows up by id in the full `runs` array below, so a search doesn't corrupt
-    // the real underlying order, it just narrows what's currently visible.
-    private var filteredRuns: [Run] {
-        guard !vm.searchText.isEmpty else { return runs }
-        let q = vm.searchText.lowercased()
-        return runs.filter { $0.title.lowercased().contains(q) }
-    }
+    @State private var reloadToken = UUID()
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                SignageLabel(text: "Reading Paths", size: 20, kerning: 1, tint: Design.textPrimary)
-                Spacer()
-                Button { showingCreate = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Design.brandGold)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Create Reading Path")
+        CollectionListView(config: runListConfig(vm), selected: $selectedRun,
+                            onListChanged: { vm.refreshRuns() }, reloadToken: reloadToken)
+            .onReceive(NotificationCenter.default.publisher(for: .runDeleted)) { _ in
+                vm.refreshRuns(); reloadToken = UUID()
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Design.navBackground)
-
-            Rectangle().fill(Design.borderColor).frame(height: 1)
-
-            if isLoading {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if runs.isEmpty {
-                EmptyStateView(
-                    icon: "list.bullet.rectangle",
-                    title: "No Reading Paths Yet",
-                    message: "Group comics into an ordered reading path to track multi-series arcs."
-                ) {
-                    Button("Create Reading Path") { showingCreate = true }
-                        .buttonStyle(.borderedProminent).tint(Design.brandGold)
-                        .foregroundStyle(.black)
-                }
-            } else if filteredRuns.isEmpty {
-                EmptyStateView(icon: "magnifyingglass", title: "No Matching Reading Paths")
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(filteredRuns) { run in
-                            let isTarget = dropTargetRunId == run.id && draggedRunId != run.id
-                            RunListCard(
-                                run: run,
-                                isSelected: selectedRun?.id == run.id,
-                                onCoverChanged: { Task { await loadRuns() } }
-                            ) { selectedRun = run }
-                            .background(isTarget ? Design.brandGold.opacity(0.12) : Color.clear)
-                            .onDrag {
-                                draggedRunId = run.id
-                                return NSItemProvider(object: NSString(string: String(run.id)))
-                            }
-                            .onDrop(of: [.plainText],
-                                    isTargeted: Binding(
-                                        get: { isTarget },
-                                        set: { active in dropTargetRunId = active ? run.id : nil }
-                                    )) { _, _ in
-                                guard let fromId = draggedRunId,
-                                      let fromIdx = runs.firstIndex(where: { $0.id == fromId }),
-                                      let toIdx = runs.firstIndex(where: { $0.id == run.id }) else { return false }
-                                var list = runs
-                                let moved = list.remove(at: fromIdx)
-                                list.insert(moved, at: toIdx)
-                                runs = list
-                                DatabaseManager.shared.reorderRuns(orderedIds: list.map(\.id))
-                                draggedRunId = nil; dropTargetRunId = nil
-                                return true
-                            }
-                            // Drag-and-drop is the only way to reorder Reading Paths, which is
-                            // both a hard accessibility gap (no keyboard/VoiceOver path at all)
-                            // and slow for a long list (dragging across many rows). These give a
-                            // faster, non-drag alternative for everyone.
-                            .contextMenu {
-                                Button("Move to Top") { moveRun(run, to: 0) }
-                                    .disabled(runs.first?.id == run.id)
-                                Button("Move Up") { moveRun(run, by: -1) }
-                                    .disabled(runs.first?.id == run.id)
-                                Button("Move Down") { moveRun(run, by: 1) }
-                                    .disabled(runs.last?.id == run.id)
-                                Button("Move to Bottom") { moveRun(run, to: runs.count - 1) }
-                                    .disabled(runs.last?.id == run.id)
-                            }
-                            .accessibilityActions {
-                                Button("Move Up") { moveRun(run, by: -1) }
-                                Button("Move Down") { moveRun(run, by: 1) }
-                                Button("Move to Top") { moveRun(run, to: 0) }
-                                Button("Move to Bottom") { moveRun(run, to: runs.count - 1) }
-                            }
-                            Rectangle().fill(Design.borderColor).frame(height: 1)
-                        }
-                    }
-                }
+            .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in
+                // Renaming/re-rating a Run in its detail view only updates that view's own local
+                // @State copy and the DB -- without this, this list's row keeps showing the
+                // pre-edit title/rating until an unrelated reload happens.
+                reloadToken = UUID()
             }
-        }
-        .ambientBackground()
-        .task { await loadRuns() }
-        .onReceive(NotificationCenter.default.publisher(for: .runDeleted)) { _ in
-            Task { await loadRuns()
-                if let sel = selectedRun, !runs.contains(sel) { selectedRun = nil }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in
-            // Renaming/re-rating a Run in its detail view only updates that view's own local
-            // @State copy and the DB -- without this, this sidebar list's row keeps showing the
-            // pre-edit title/rating until an unrelated reload happens.
-            Task { await loadRuns() }
-        }
-        .sheet(isPresented: $showingCreate) { createSheet }
-    }
-
-    private var createSheet: some View {
-        VStack(spacing: 20) {
-            Text("New Reading Path").font(.title2.bold())
-            TextField("Title", text: $newRunTitle).textFieldStyle(.roundedBorder)
-            TextField("Description (optional)", text: $newRunDesc).textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Cancel") { showingCreate = false }.keyboardShortcut(.escape)
-                Spacer()
-                Button("Create") { createRun() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(newRunTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding(24).frame(width: 360)
-    }
-
-    private func createRun() {
-        let title = newRunTitle.trimmingCharacters(in: .whitespaces)
-        guard !title.isEmpty else { return }
-        LibraryViewModel.shared.createRun(title: title, description: newRunDesc)
-        newRunTitle = ""; newRunDesc = ""
-        showingCreate = false
-        Task { await loadRuns() }
-    }
-
-    private func loadRuns() async {
-        isLoading = true
-        let r = await Task.detached(priority: .userInitiated) {
-            DatabaseManager.shared.allRuns()
-        }.value
-        runs = r; isLoading = false
-    }
-
-    private func moveRun(_ run: Run, by delta: Int) {
-        guard let idx = runs.firstIndex(where: { $0.id == run.id }) else { return }
-        moveRun(run, to: idx + delta)
-    }
-
-    private func moveRun(_ run: Run, to newIndex: Int) {
-        guard let fromIdx = runs.firstIndex(where: { $0.id == run.id }) else { return }
-        let clamped = max(0, min(newIndex, runs.count - 1))
-        guard clamped != fromIdx else { return }
-        var list = runs
-        let moved = list.remove(at: fromIdx)
-        list.insert(moved, at: clamped)
-        runs = list
-        DatabaseManager.shared.reorderRuns(orderedIds: list.map(\.id))
-    }
-}
-
-struct RunListCard: View {
-    let run:        Run
-    let isSelected: Bool
-    var onCoverChanged: () -> Void = {}
-    let onSelect:   () -> Void
-
-    @State private var isHovered = false
-    @State private var showCoverPicker = false
-    @Environment(\.fileService) private var fileService
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(isSelected ? Design.brandGold : Color.clear)
-                    .frame(width: 3)
-
-                coverThumbnail
-                    .frame(width: 36, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .padding(.leading, 10)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(run.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Design.textPrimary)
-                        .lineLimit(1)
-
-                    if !run.description.isEmpty {
-                        Text(run.description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    HStack(spacing: 6) {
-                        if let r = run.rating, r > 0 {
-                            HStack(spacing: 1) {
-                                ForEach(1...r, id: \.self) { _ in
-                                    Image(systemName: "star.fill")
-                                        .font(.system(size: 7))
-                                        .foregroundStyle(Design.brandGold)
-                                }
-                            }
-                        }
-                        if run.comicCount > 0 {
-                            Text("\(run.readCount)/\(run.comicCount) read")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.quaternary)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-            }
-            .background(isSelected ? Design.brandBlue.opacity(0.12) : (isHovered ? Design.surfaceBg : Color.clear))
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .accessibilityLabel(run.description.isEmpty ? run.title : "\(run.title), \(run.description)")
-        .accessibilityValue(run.comicCount > 0 ? "\(run.readCount) of \(run.comicCount) read" : "Empty")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .contextMenu {
-            Button("Choose Existing Cover…") { showCoverPicker = true }
-            Button("Custom Image…") { pickCoverImage() }
-            if run.coverImagePath != nil {
-                Button("Remove Custom Cover") {
-                    LibraryViewModel.shared.clearRunCover(runId: run.id)
-                    onCoverChanged()
-                }
-            }
-        }
-        .sheet(isPresented: $showCoverPicker) {
-            CoverPickerSheet(title: "Choose Cover for \(run.title)") { comic in
-                LibraryViewModel.shared.setRunCover(runId: run.id, usingCoverOf: comic, onDone: onCoverChanged)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var coverThumbnail: some View {
-        if let path = run.coverImagePath, let img = PlatformImage.fromFile(path) {
-            Image(platformImage: img).comicCoverStyle()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ZStack {
-                Design.surfaceBg
-                Image(systemName: "list.bullet.rectangle.portrait")
-                    .font(.system(size: 14)).foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private func pickCoverImage() {
-        fileService.pickFiles(
-            allowsMultiple: false,
-            message: "Choose a cover image for \(run.title)",
-            prompt: "Set Cover",
-            contentTypes: [.image]
-        ) { urls in
-            if let url = urls.first {
-                LibraryViewModel.shared.setRunCover(runId: run.id, imageURL: url)
-                onCoverChanged()
-            }
-        }
     }
 }
 
@@ -407,16 +157,13 @@ struct RunDetailView: View {
             reviewSheet
         }
         .sheet(isPresented: $showEditSheet) {
-            EditRunView(run: $currentRun)
+            EditCollectionView(noun: "Reading Path", item: $currentRun,
+                                buyLink: Binding(get: { currentRun.buyLink ?? "" }, set: { currentRun.buyLink = $0 })) { t, d, link in
+                LibraryViewModel.shared.updateRun(id: currentRun.id, title: t, description: d, buyLink: link)
+                currentRun.title = t; currentRun.description = d
+            }
         }
-        .alert("Export Failed", isPresented: Binding(
-            get: { exportErrorMessage != nil },
-            set: { if !$0 { exportErrorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(exportErrorMessage ?? "")
-        }
+        .errorAlert("Export Failed", message: $exportErrorMessage)
     }
 
     private var runPageHeader: some View {
@@ -520,8 +267,8 @@ struct RunDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             // Reads `currentRun` (the synced @State copy), not the immutable `run` init
             // parameter -- otherwise this sheet keeps showing the pre-edit title/buy link after
-            // EditRunView updates currentRun, since `run` itself never changes for this view's
-            // lifetime.
+            // EditCollectionView updates currentRun, since `run` itself never changes for this
+            // view's lifetime.
             Text("Rate & Review: \(currentRun.title)")
                 .font(.title2.bold())
 
@@ -738,62 +485,6 @@ struct RunItemRow: View {
             }
         }
         .padding(16)
-    }
-}
-
-struct EditRunView: View {
-    @Binding var run: Run
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var title:       String
-    @State private var description: String
-    @State private var buyLink:     String
-
-    init(run: Binding<Run>) {
-        self._run    = run
-        _title       = State(initialValue: run.wrappedValue.title)
-        _description = State(initialValue: run.wrappedValue.description)
-        _buyLink     = State(initialValue: run.wrappedValue.buyLink ?? "")
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Edit Reading Path")
-                .font(.title2.bold())
-                .padding(24)
-
-            Form {
-                Section {
-                    TextField("Title", text: $title)
-                    TextField("Description", text: $description)
-                    TextField("Buy / Info Link (URL)", text: $buyLink)
-                        .autocorrectionDisabled()
-                }
-            }
-            .formStyle(.grouped)
-
-            HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
-                Spacer()
-                Button("Save") { save() }
-                    .keyboardShortcut(.return)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(24)
-        }
-        .frame(width: 400)
-    }
-
-    private func save() {
-        let t = title.trimmingCharacters(in: .whitespaces)
-        let d = description.trimmingCharacters(in: .whitespaces)
-        let l = buyLink.trimmingCharacters(in: .whitespaces)
-        LibraryViewModel.shared.updateRun(id: run.id, title: t, description: d, buyLink: l.isEmpty ? nil : l)
-        run.title       = t
-        run.description = d
-        run.buyLink     = l.isEmpty ? nil : l
-        dismiss()
     }
 }
 

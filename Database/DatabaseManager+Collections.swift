@@ -120,10 +120,7 @@ extension DatabaseManager {
             SELECT ri.id, ri.position, COALESCE(ri.notes,''), \(comicColumns)
             FROM run_items ri
             JOIN comics c ON ri.comic_id = c.id AND c.deleted_at IS NULL
-            LEFT JOIN reading_progress rp ON c.id = rp.comic_id
-            LEFT JOIN ratings r           ON c.id = r.comic_id
-            LEFT JOIN favorites f         ON c.id = f.comic_id
-            LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+            \(comicJoins)
             WHERE ri.run_id = ? ORDER BY ri.position
             """
             return rows(sql, args: [runId]) { s -> RunItem in
@@ -222,10 +219,7 @@ extension DatabaseManager {
             SELECT tli.id, tli.tier, tli.position, \(comicColumns)
             FROM tier_list_items tli
             JOIN comics c ON tli.comic_id = c.id AND c.deleted_at IS NULL
-            LEFT JOIN reading_progress rp ON c.id = rp.comic_id
-            LEFT JOIN ratings r           ON c.id = r.comic_id
-            LEFT JOIN favorites f         ON c.id = f.comic_id
-            LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+            \(comicJoins)
             WHERE tli.tier_list_id = ? ORDER BY tli.position
             """
             return rows(sql, args: [tierListId]) { s -> TierListItem in

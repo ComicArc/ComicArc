@@ -438,15 +438,7 @@ struct OnboardingView: View {
         .onChange(of: gcdDownloadState) { _, newValue in
             guard newValue == .success else { return }
             isMatchingAfterDownload = true
-            Task.detached(priority: .userInitiated) {
-                DatabaseManager.shared.recomputeGCDMatches()
-                DatabaseManager.shared.autoPopulateSeriesLinksFromGCD()
-                DatabaseManager.shared.recomputeReadingOrder()
-                await MainActor.run {
-                    isMatchingAfterDownload = false
-                    LibraryViewModel.shared.reload()
-                }
-            }
+            LibraryViewModel.shared.recomputeGCDMatchesAndReadingOrder { isMatchingAfterDownload = false }
         }
     }
 

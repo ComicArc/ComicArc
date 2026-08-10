@@ -39,10 +39,14 @@ struct Comic: Identifiable, Equatable, Hashable {
     /// vanished from disk during a scan). Nil for pre-existing soft-deletes, treated as "user".
     /// Only meaningful when `deletedAt` is set; irrelevant otherwise.
     var deletedReason: String? = nil
+    var finishedAt: String? = nil
 
     var fileExtension: String { URL(fileURLWithPath: filePath).pathExtension.lowercased() }
     var isStarted: Bool { progress > 0 }
-    var isFinished: Bool { pageCount > 1 && progress >= pageCount - 1 }
+    /// Sticky once set -- driven by `finished_at`, not raw page position, so rereading an earlier
+    /// page of a finished issue (or briefly scrubbing to the last page without reading through)
+    /// doesn't flip completion state. See `DatabaseManager.markFinished`/`markUnfinished`.
+    var isFinished: Bool { finishedAt != nil }
     var progressPercent: Double { pageCount > 0 ? Double(progress) / Double(pageCount) : 0 }
 
     static func == (lhs: Comic, rhs: Comic) -> Bool { lhs.id == rhs.id }

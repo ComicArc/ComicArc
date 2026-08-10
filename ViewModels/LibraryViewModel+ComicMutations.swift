@@ -25,19 +25,25 @@ extension LibraryViewModel {
     func markRead(_ comic: Comic) {
         let page = max(0, comic.pageCount - 1)
         db.updateProgress(comicId: comic.id, page: page)
+        db.markFinished(comicId: comic.id)
+        let now = ISO8601DateFormatter().string(from: Date())
         patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .continueReading) {
             $0.progress = page
+            $0.finishedAt = now
         }
     }
 
     func markUnread(_ comic: Comic) {
         db.updateProgress(comicId: comic.id, page: 0)
+        db.markUnfinished(comicId: comic.id)
         patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .continueReading) {
             $0.progress = 0
+            $0.finishedAt = nil
         }
     }
     func markRead(_ comics: [Comic]) {
         db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
+        for comic in comics { db.markFinished(comicId: comic.id) }
         reload()
     }
 

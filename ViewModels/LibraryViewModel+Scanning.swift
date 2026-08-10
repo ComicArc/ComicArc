@@ -2,6 +2,23 @@ import Foundation
 import UserNotifications
 
 extension LibraryViewModel {
+    /// Re-derives GCD matches, auto-links series, and recomputes reading order -- the exact same
+    /// 3-call sequence previously duplicated in `SettingsView` (twice, in two different buttons)
+    /// and `OnboardingView` (once, after downloading the GCD database for the first time). Runs
+    /// off the main thread; `onComplete` fires back on main once `reload()` has also finished, so
+    /// callers can flip a local "is this button busy" flag back off.
+    func recomputeGCDMatchesAndReadingOrder(onComplete: @escaping () -> Void = {}) {
+        Task.detached(priority: .userInitiated) { [db] in
+            db.recomputeGCDMatches()
+            db.autoPopulateSeriesLinksFromGCD()
+            db.recomputeReadingOrder()
+            await MainActor.run { [weak self] in
+                self?.reload()
+                onComplete()
+            }
+        }
+    }
+
     func resyncLibrary() {
         let paths = libraryPaths
         guard !paths.isEmpty, !isBusy else { return }

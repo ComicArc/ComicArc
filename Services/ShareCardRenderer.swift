@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 /// Rasterizes a small SwiftUI view into a PNG on disk, for use with SwiftUI's `ShareLink(item:)`.
 /// A plain file `URL` is `Transferable` on both platforms with zero custom conformance, unlike
@@ -6,6 +7,8 @@ import SwiftUI
 /// kept in memory.
 @MainActor
 enum ShareCardRenderer {
+    private static let logger = Logger(subsystem: "com.comicarc", category: "sharecard")
+
     static func renderToTempPNG<Content: View>(_ content: Content, filename: String) -> URL? {
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2.0
@@ -23,12 +26,16 @@ enum ShareCardRenderer {
         pngData = renderer.uiImage?.pngData()
         #endif
 
-        guard let pngData else { return nil }
+        guard let pngData else {
+            logger.error("Failed to rasterize share card '\(filename)' to PNG data")
+            return nil
+        }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         do {
             try pngData.write(to: url, options: .atomic)
             return url
         } catch {
+            logger.error("Failed to write share card '\(filename)' to disk: \(error.localizedDescription)")
             return nil
         }
     }

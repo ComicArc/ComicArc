@@ -31,8 +31,7 @@ let package = Package(
         .systemLibrary(
             name: "CZLib",
             pkgConfig: "zlib",
-            providers: [.brew(["zlib"]), .apt(["zlib"])]),
-        .testTarget(name: "ZIPFoundationTests", dependencies: ["ZIPFoundation"])
+            providers: [.brew(["zlib"]), .apt(["zlib"])])
     ],
     swiftLanguageVersions: [.v4, .v4_2, .v5]
 )

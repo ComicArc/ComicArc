@@ -299,7 +299,8 @@ final class DatabaseManager: @unchecked Sendable {
             readingOrderReason: colText(s, offset + 26),
             gcdMatchConfidence: sqlite3_column_type(s, offset + 27) != SQLITE_NULL ? colInt(s, offset + 27) : nil,
             gcdSeriesName: colText(s, offset + 28), gcdIssueNumber: colText(s, offset + 29),
-            deletedReason: colText(s, offset + 32)
+            deletedReason: colText(s, offset + 32),
+            finishedAt: colText(s, offset + 33)
         )
     }
 
@@ -317,17 +318,27 @@ final class DatabaseManager: @unchecked Sendable {
         (rl.comic_id IS NOT NULL) as in_reading_list,
         r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
         c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format,
-        c.deleted_reason
+        c.deleted_reason, rp.finished_at
     """
+
+    /// The per-comic annotation joins (progress/rating/favorite/reading-list) every comic query
+    /// needs -- shared so `runItems`/`tierListItems` (which need their own leading columns
+    /// alongside a comic's, so they can't just use `comicSelect` outright) don't each hand-roll
+    /// their own copy of the same four lines.
+    var comicJoins: String {
+        """
+        LEFT JOIN reading_progress rp ON c.id = rp.comic_id
+        LEFT JOIN ratings r           ON c.id = r.comic_id
+        LEFT JOIN favorites f         ON c.id = f.comic_id
+        LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+        """
+    }
 
     var comicSelect: String {
         """
         SELECT \(comicColumns)
         FROM comics c
-        LEFT JOIN reading_progress rp ON c.id = rp.comic_id
-        LEFT JOIN ratings r           ON c.id = r.comic_id
-        LEFT JOIN favorites f         ON c.id = f.comic_id
-        LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+        \(comicJoins)
         """
     }
 

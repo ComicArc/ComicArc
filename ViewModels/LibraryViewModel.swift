@@ -140,12 +140,10 @@ final class LibraryViewModel: ObservableObject {
     @Published var renameSuggestionDismissed: Bool = false
     var scanReportDismissTask: DispatchWorkItem?
 
-    struct UndoableAction {
-        let message: String
-        let undo: () -> Void
-    }
-    @Published var pendingUndo: UndoableAction?
-    var undoDismissTask: DispatchWorkItem?
+    /// See `UndoToastController`. `pendingUndo` is a thin passthrough (kept as the same name/type
+    /// existing call sites already use) onto the controller's own `@Published` storage.
+    let undoToastController = UndoToastController()
+    var pendingUndo: UndoToastController.Action? { undoToastController.pending }
 
     @Published var isResyncing:         Bool = false
 
@@ -160,25 +158,28 @@ final class LibraryViewModel: ObservableObject {
     @Published var selectedComic:     Comic? = nil
     @Published var selectedRun:       Run? = nil
     @Published var selectedTierList:  TierList? = nil
-    /// Set alongside `readerComic` when opening at a specific page (e.g. jumping to a favorite
-    /// moment) rather than the comic's own saved resume position -- read once by ReaderView's
-    /// init. `openReader(_:atPage:)`'s `nil` default means every ordinary open already resets
-    /// this, so it can't leak a stale page onto the next comic.
-    @Published var readerInitialPage: Int? = nil
-    /// Set alongside `readerComic` when opening a comic from inside a Run's reading path, so the
-    /// reader can offer run-scoped next/previous navigation instead of (or alongside) its normal
-    /// series-based one. Carried forward automatically as the reader advances within the same run.
-    @Published var readerRunId:       Int64? = nil
-    @Published var readerComic:       Comic? = nil {
-        didSet {
-            // The reader is presented as a ZStack overlay in ContentView, not a navigation push,
-            // so RunDetailView never disappears/reappears around a read and is never otherwise
-            // told its `items` snapshot (progress, "first unfinished"/Resume target) is now
-            // stale. Broadcast on close so it can refresh.
-            if oldValue != nil, readerComic == nil {
-                NotificationCenter.default.post(name: .readerDidClose, object: nil)
-            }
-        }
+    /// The full list, kept live here rather than fetched ad hoc by whichever view needs it --
+    /// `ComicCard`'s "Add to Reading Path"/"Add to Tier List" submenus used to call
+    /// `DatabaseManager.shared.allRuns()`/`.allTierLists()` synchronously inside their own
+    /// `.contextMenu` closure (blocking the main thread every time a card's menu opened); reading
+    /// from here instead means that data is already warm.
+    @Published var runs:      [Run] = []
+    @Published var tierLists: [TierList] = []
+    /// The reader-presentation subsystem, genuinely independent of library data/navigation --
+    /// see `ReaderCoordinator`'s doc comment. `readerComic`/`readerInitialPage`/`readerRunId`
+    /// below are thin passthroughs so every existing call site keeps working unchanged.
+    let readerCoordinator = ReaderCoordinator()
+    var readerInitialPage: Int? {
+        get { readerCoordinator.initialPage }
+        set { readerCoordinator.initialPage = newValue }
+    }
+    var readerRunId: Int64? {
+        get { readerCoordinator.runId }
+        set { readerCoordinator.runId = newValue }
+    }
+    var readerComic: Comic? {
+        get { readerCoordinator.comic }
+        set { readerCoordinator.comic = newValue }
     }
 
     @Published var characterGroups:   [DatabaseManager.CharacterGroup] = []
@@ -194,6 +195,13 @@ final class LibraryViewModel: ObservableObject {
     @Published var duplicateGroups:   [[Comic]] = []
     @Published var autoPlacedIssues:  [Comic] = []
     @Published var pendingMetadataConflicts: [MetadataConflictRow] = []
+
+    /// So a collapsed "More" Discover section in the sidebar can't silently hide something that
+    /// actually needs attention -- shown as a badge on the disclosure row itself even while
+    /// collapsed. Shared by Mac's `SidebarView` and iPad's `iPadSidebar`.
+    var moreDiscoverAlertCount: Int {
+        duplicateGroups.count + autoPlacedIssues.count + pendingMetadataConflicts.count
+    }
 
     var selectedSection: SidebarSection {
         switch destination {
@@ -237,6 +245,8 @@ final class LibraryViewModel: ObservableObject {
     var db: DatabaseManager { .shared }
     var watcher: FileWatcher?
     var searchCancellable: AnyCancellable?
+    private var readerCoordinatorCancellable: AnyCancellable?
+    private var undoToastCancellable: AnyCancellable?
 
     /// The list of configured library folders -- the single source of truth every scan/watch/
     /// import operation threads through. Backed by a real `@Published` var (not a plain computed
@@ -306,6 +316,13 @@ final class LibraryViewModel: ObservableObject {
         searchCancellable = $searchText
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reload() }
+        // `readerComic`/etc. are passthroughs onto `readerCoordinator`'s own `@Published`
+        // storage now, not stored properties here -- without forwarding its `objectWillChange`,
+        // views observing `vm` wouldn't re-render when only the coordinator's state changes.
+        readerCoordinatorCancellable = readerCoordinator.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+        undoToastCancellable = undoToastController.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         reload()
         startWatcher()
         reparseMetaIfNeeded()
@@ -314,6 +331,8 @@ final class LibraryViewModel: ObservableObject {
         refreshOnThisDay()
         refreshRecommendations()
         refreshReadingStreak()
+        refreshRuns()
+        refreshTierLists()
 
         // Scanning at launch (and every time the app is brought back to the foreground) is
         // driven uniformly by `scenePhase == .active` in both app entry points (ComicArcMacApp,
@@ -359,6 +378,8 @@ final class LibraryViewModel: ObservableObject {
     var duplicatesGeneration = 0
     var healthGeneration = 0
     var renameCandidatesGeneration = 0
+    var runsGeneration = 0
+    var tierListsGeneration = 0
 
     func reload() {
         reloadWorkItem?.cancel()
@@ -549,14 +570,14 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func openReader(_ comic: Comic, atPage page: Int? = nil, runId: Int64? = nil) {
-        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerRunId = runId; readerComic = comic }
+        readerCoordinator.open(comic, atPage: page, runId: runId)
     }
     func openReader(id: Int64, atPage page: Int? = nil, runId: Int64? = nil) {
         guard let c = db.comic(id: id) else { return }
-        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerInitialPage = page; readerRunId = runId; readerComic = c }
+        readerCoordinator.open(c, atPage: page, runId: runId)
     }
     func closeReader() {
-        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { readerComic = nil; readerInitialPage = nil; readerRunId = nil }
+        readerCoordinator.close()
         // A reading session just ended -- today may now be the first day of a new streak, or
         // extended an existing one, and the sidebar's ambient indicator should reflect that
         // without waiting for the next launch.
@@ -630,6 +651,15 @@ final class LibraryViewModel: ObservableObject {
     func updateProgress(comic: Comic, page: Int) {
         db.updateProgress(comicId: comic.id, page: page)
         patchComicLocally(comic.id) { $0.progress = page }
+    }
+
+    /// Called only when the reader determines a page-turn reached the end via genuine sequential
+    /// reading (see `ReaderView.suppressCompletionCheck`) -- sticky, so it's safe to call again on
+    /// a later reread without needing to check `comic.isFinished` first.
+    func markFinished(comic: Comic) {
+        db.markFinished(comicId: comic.id)
+        let now = ISO8601DateFormatter().string(from: Date())
+        patchComicLocally(comic.id) { $0.finishedAt = now }
     }
 
 }

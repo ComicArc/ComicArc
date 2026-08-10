@@ -38,21 +38,20 @@ struct AppDestinationTests {
         #expect(AppDestination.tag("horror").title == "#horror")
     }
 
-    @Test func destinationIconNonEmpty() {
+    // Consolidates what were three separate near-duplicate tests (`destinationIconNonEmpty`,
+    // `destinationSettingsHasTitle`, `destinationSettingsHasIcon`) -- the latter two were just
+    // `.settings` special-cased out of the same check this loop already does for every case.
+    // Icon is checked for every case; title is checked for every case except `.publisher("")`,
+    // whose legitimately-empty title is `destinationPublisherEmptyStringHasTitle`'s own point.
+    @Test func destinationTitleAndIconNonEmptyForEveryCase() {
         let all: [AppDestination] = [.library, .continueReading, .favorites, .readingList,
                                       .publisher(""), .tag(""), .runs, .stats, .history,
                                       .settings]
         for dest in all {
             #expect(dest.icon.isEmpty == false, "icon empty for \(dest)")
+            if case .publisher = dest { continue }
+            #expect(dest.title.isEmpty == false, "title empty for \(dest)")
         }
-    }
-
-    @Test func destinationSettingsHasTitle() {
-        #expect(AppDestination.settings.title.isEmpty == false)
-    }
-
-    @Test func destinationSettingsHasIcon() {
-        #expect(AppDestination.settings.icon.isEmpty == false)
     }
 
     @Test("An empty-string publisher name degrades to an empty title rather than crashing or substituting a placeholder")

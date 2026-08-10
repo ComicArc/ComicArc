@@ -148,23 +148,9 @@ struct MetadataInspectorView: View {
             }
             .environmentObject(vm)
         }
-        .alert("Couldn't Rename File", isPresented: Binding(
-            get: { renameError != nil },
-            set: { if !$0 { renameError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(renameError ?? "")
-        }
+        .errorAlert("Couldn't Rename File", message: $renameError)
         #if os(macOS)
-        .alert("Couldn't Write ComicInfo.xml", isPresented: Binding(
-            get: { writeBackError != nil },
-            set: { if !$0 { writeBackError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(writeBackError ?? "")
-        }
+        .errorAlert("Couldn't Write ComicInfo.xml", message: $writeBackError)
         #endif
     }
 

@@ -365,6 +365,13 @@ extension DatabaseManager {
         widenMainlinePositionStrideIfNeeded()
         recomputeOnceAfterUpgradeIfNeeded()
         allowUnratedReviewsIfNeeded()
+
+        // Decouples "finished" from the raw resume position: `current_page` alone used to double
+        // as completion state, so scrubbing the reader's page slider to the last page (without
+        // reading through it) instantly marked the issue finished. This is set only via
+        // markFinished()/markUnfinished() -- sticky once set, and only from genuine sequential
+        // reading or an explicit Mark Read/Unread action, never from jump-style navigation.
+        exec("ALTER TABLE reading_progress ADD COLUMN finished_at TIMESTAMP")
     }
 
     func recomputeOnceAfterUpgradeIfNeeded() {
