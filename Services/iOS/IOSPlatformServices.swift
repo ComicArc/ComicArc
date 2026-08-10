@@ -1,8 +1,10 @@
 #if os(iOS) || os(visionOS)
 import UIKit
 import UniformTypeIdentifiers
+import os
 
 private let libraryFolderBookmarksKey = "libraryFolderBookmarks"
+private let fileServiceLogger = Logger(subsystem: "com.comicarc", category: "fileservice")
 
 /// Resolves every configured library folder's security-scoped bookmark, granting access to each
 /// (never explicitly balanced with `stopAccessingSecurityScopedResource` -- access is opened once
@@ -121,6 +123,7 @@ struct IOSFileService: FileServiceProtocol {
             try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
             return resultingURL as URL?
         } catch {
+            fileServiceLogger.error("Failed to move '\(url.lastPathComponent)' to Trash: \(error.localizedDescription)")
             return nil
         }
     }

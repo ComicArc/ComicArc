@@ -1,6 +1,9 @@
 #if os(macOS)
 import AppKit
 import UniformTypeIdentifiers
+import os
+
+private let fileServiceLogger = Logger(subsystem: "com.comicarc", category: "fileservice")
 
 struct MacFileService: FileServiceProtocol {
     func pickFiles(
@@ -44,6 +47,10 @@ struct MacFileService: FileServiceProtocol {
             try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
             return resultingURL as URL?
         } catch {
+            // A caller treats this as "trashing failed, leave the file alone" -- but if the DB
+            // side of a delete already committed, silently returning nil here means the file
+            // stays on disk with no trace of why the trash step didn't happen.
+            fileServiceLogger.error("Failed to move '\(url.lastPathComponent)' to Trash: \(error.localizedDescription)")
             return nil
         }
     }

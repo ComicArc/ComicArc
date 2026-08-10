@@ -8,10 +8,15 @@ import CoreImage
 // to gigabytes of raw bitmap and can crash the reader outright. This caps the *decode* itself
 // (not just display) via ImageIO's thumbnail-from-source path, which is cheap to check (reads
 // only the header) and only kicks in when a page is genuinely pathological -- ordinary comic
-// pages (a few thousand pixels on a side) are decoded exactly as before.
-private let maxDecodedPixelDimension = 8000
+// pages (a few thousand pixels on a side) are decoded exactly as before. Not private: `PageDecoder`
+// reuses this same primitive with a caller-supplied (usually much smaller, viewport-sized)
+// `maxPixelSize` for its target-size-aware decode, rather than duplicating the ImageIO logic.
+let maxDecodedPixelDimension = 8000
 
-private func safeCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
+/// Decodes `data` at up to `maxPixelSize` on the long edge -- if the source is already smaller,
+/// decodes at its natural size; otherwise uses ImageIO's thumbnail-from-source path, which is a
+/// genuinely smaller/faster decode, not a full decode followed by a downscale.
+func safeCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
     guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
           let w = props[kCGImagePropertyPixelWidth] as? Int,
@@ -76,6 +81,7 @@ extension NSImage {
     }
     static func fromFile(_ path: String) -> NSImage? { NSImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> NSImage? { NSImage(contentsOf: url) }
+    static func fromCGImage(_ cg: CGImage) -> NSImage { NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height)) }
 
     func averageColor() -> Color? {
         guard let cg = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
@@ -92,6 +98,12 @@ extension NSImage {
         guard let cg = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return 0 }
         return cg.width * cg.height * 4
     }
+
+    /// The actual display's backing scale, clamped to a sane range -- rendering a PDF page at a
+    /// fixed 1.5x regardless of screen produced visibly soft pages on Retina displays (a typical
+    /// 6x9in page rendered to ~650x975px). Clamped rather than used raw so a rare very-high-DPI
+    /// external display doesn't balloon a single page's decoded size unbounded.
+    static var pdfRenderScale: CGFloat { min(3.0, max(2.0, NSScreen.main?.backingScaleFactor ?? 2.0)) }
 
     static func renderPDFPage(_ page: CGPDFPage, scale: CGFloat = 1.5) -> NSImage? {
         let bounds = page.getBoxRect(.mediaBox)
@@ -122,6 +134,8 @@ extension UIImage {
         return renderer.image { _ in source.draw(in: CGRect(origin: .zero, size: drawSize)) }
     }
 
+    static func fromCGImage(_ cg: CGImage) -> UIImage { UIImage(cgImage: cg) }
+
     static func fromData(_ data: Data) -> UIImage? {
         if let cg = safeCGImage(from: data, maxPixelSize: maxDecodedPixelDimension) {
             return UIImage(cgImage: cg)
@@ -141,6 +155,9 @@ extension UIImage {
     }
 
     var byteSize: Int { Int(size.width * scale) * Int(size.height * scale) * 4 }
+
+    /// Same intent as the macOS side's `pdfRenderScale` -- see its comment.
+    static var pdfRenderScale: CGFloat { min(3.0, max(2.0, UIScreen.main.scale)) }
 
     static func renderPDFPage(_ page: CGPDFPage, scale: CGFloat = 1.5) -> UIImage? {
         let bounds = page.getBoxRect(.mediaBox)

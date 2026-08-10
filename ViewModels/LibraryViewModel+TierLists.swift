@@ -1,13 +1,30 @@
 import Foundation
 
 extension LibraryViewModel {
+    /// Called at launch and after any mutation that changes the tier-list *list* (create/delete/
+    /// reorder) -- edits to a single tier list's fields (rating, cover) don't need this.
+    func refreshTierLists() {
+        tierListsGeneration += 1
+        let gen = tierListsGeneration
+        Task.detached(priority: .utility) { [db] in
+            let loaded = db.allTierLists()
+            await MainActor.run {
+                guard gen == self.tierListsGeneration else { return }
+                self.tierLists = loaded
+            }
+        }
+    }
+
     @discardableResult
     func createTierList(title: String, description: String) -> Int64 {
-        db.createTierList(title: title, description: description)
+        let id = db.createTierList(title: title, description: description)
+        refreshTierLists()
+        return id
     }
     func deleteTierListWithUndo(_ tierList: TierList) {
         let items = db.tierListItems(tierListId: tierList.id)
         db.deleteTierList(tierList.id)
+        refreshTierLists()
         NotificationCenter.default.post(name: .tierListDeleted, object: nil)
         offerUndo("Tier List \"\(tierList.title)\" deleted") { [weak self] in
             guard let self else { return }
@@ -22,6 +39,7 @@ extension LibraryViewModel {
                 let ids = items.filter { $0.tier == tier.rawValue }.map(\.comic.id)
                 if !ids.isEmpty { self.db.addToTierList(tierListId: newId, comicIds: ids, tier: tier.rawValue) }
             }
+            self.refreshTierLists()
             NotificationCenter.default.post(name: .tierListDeleted, object: nil)
         }
     }
@@ -33,7 +51,7 @@ extension LibraryViewModel {
         db.setTierListRating(tierListId, rating: rating, review: review)
         NotificationCenter.default.post(name: .tierListUpdated, object: nil)
     }
-    func reorderTierLists(orderedIds: [Int64]) { db.reorderTierLists(orderedIds: orderedIds) }
+    func reorderTierLists(orderedIds: [Int64]) { db.reorderTierLists(orderedIds: orderedIds); refreshTierLists() }
     func addToTierList(tierListId: Int64, comicIds: [Int64], tier: String = "B") {
         db.addToTierList(tierListId: tierListId, comicIds: comicIds, tier: tier)
     }

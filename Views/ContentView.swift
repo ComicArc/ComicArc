@@ -152,7 +152,7 @@ struct ContentView: View {
         }
     }
 
-    private func undoToast(_ action: LibraryViewModel.UndoableAction) -> some View {
+    private func undoToast(_ action: UndoToastController.Action) -> some View {
         HStack(spacing: 14) {
             Text(action.message)
                 .font(.callout).foregroundStyle(.white)
@@ -432,22 +432,13 @@ struct SidebarView: View {
     @State private var renamingSavedView: SavedLibraryView?
     @State private var renameSavedViewDraft = ""
 
-    // The Discover section is a lot to take in on day one (up to 9 items) with nothing
-    // distinguishing daily-use items from deep-tracking extras -- these three are the ones a
-    // new user is most likely to reach for immediately; everything else collapses into "More"
-    // below so first launch isn't a flat wall of equally-weighted rows.
-    private let coreDiscoverItems: Set<DiscoverItem> = [.runs, .stats, .history]
-
-    /// So a collapsed "More" section can't silently hide something that actually needs attention
-    /// -- a pending duplicate/conflict/suggestion still shows its count on the disclosure row
-    /// itself even while collapsed.
-    private var moreDiscoverAlertCount: Int {
-        vm.duplicateGroups.count + vm.autoPlacedIssues.count + vm.pendingMetadataConflicts.count
-    }
+    // Shared with iPad's `iPadSidebar` via `SidebarCustomization.coreDiscoverItems` -- these three
+    // are the Discover items a new user is most likely to reach for immediately; everything else
+    // collapses into "More" so first launch isn't a flat wall of equally-weighted rows.
+    private var coreDiscoverItems: Set<DiscoverItem> { SidebarCustomization.coreDiscoverItems }
 
     private var visibleDiscoverItems: [DiscoverItem] {
-        let hidden = SidebarCustomization.decodeHidden(discoverHiddenRaw)
-        return SidebarCustomization.decodeOrder(discoverOrderRaw).filter { !hidden.contains($0) }
+        SidebarCustomization.visibleItems(orderRaw: discoverOrderRaw, hiddenRaw: discoverHiddenRaw)
     }
 
     var body: some View {
@@ -483,6 +474,16 @@ struct SidebarView: View {
                                 if isTarget {
                                     Rectangle().fill(Design.brandGold).frame(height: 2)
                                 }
+                            }
+                            // Keyboard/VoiceOver alternative to the drag reorder above -- onDrag/
+                            // onDrop alone has no accessible fallback for a user who can't drag.
+                            .accessibilityAction(named: "Move Up") {
+                                guard let idx = vm.publishers.firstIndex(of: pub), idx > 0 else { return }
+                                vm.movePublisher(from: pub, to: vm.publishers[idx - 1])
+                            }
+                            .accessibilityAction(named: "Move Down") {
+                                guard let idx = vm.publishers.firstIndex(of: pub), idx + 1 < vm.publishers.count else { return }
+                                vm.movePublisher(from: pub, to: vm.publishers[idx + 1])
                             }
                     }
                 }
@@ -548,8 +549,8 @@ struct SidebarView: View {
                             HStack {
                                 Text("More")
                                 Spacer()
-                                if moreDiscoverAlertCount > 0 {
-                                    Text("\(moreDiscoverAlertCount)")
+                                if vm.moreDiscoverAlertCount > 0 {
+                                    Text("\(vm.moreDiscoverAlertCount)")
                                         .font(.system(size: 11, weight: .bold))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 6).padding(.vertical, 2)

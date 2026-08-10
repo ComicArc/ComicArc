@@ -1,13 +1,33 @@
 import Foundation
 
 extension LibraryViewModel {
+    /// Called at launch and after any mutation that changes the run *list* (create/delete/
+    /// reorder) -- edits to a single run's fields (rating, cover, notes) don't need this since
+    /// they don't change membership/order of `runs` itself.
+    func refreshRuns() {
+        runsGeneration += 1
+        let gen = runsGeneration
+        Task.detached(priority: .utility) { [db] in
+            let loaded = db.allRuns()
+            await MainActor.run {
+                guard gen == self.runsGeneration else { return }
+                self.runs = loaded
+            }
+        }
+    }
+
     @discardableResult
-    func createRun(title: String, description: String) -> Int64 { db.createRun(title: title, description: description) }
-    func deleteRun(_ runId: Int64) { db.deleteRun(runId) }
+    func createRun(title: String, description: String) -> Int64 {
+        let id = db.createRun(title: title, description: description)
+        refreshRuns()
+        return id
+    }
+    func deleteRun(_ runId: Int64) { db.deleteRun(runId); refreshRuns() }
 
     func deleteRunWithUndo(_ run: Run) {
         let items = db.runItems(runId: run.id)
         db.deleteRun(run.id)
+        refreshRuns()
         NotificationCenter.default.post(name: .runDeleted, object: nil)
         offerUndo("Reading order \"\(run.title)\" deleted") { [weak self] in
             guard let self else { return }
@@ -29,6 +49,7 @@ extension LibraryViewModel {
                     self.db.setRunItemNotes(match.id, notes: item.notes)
                 }
             }
+            self.refreshRuns()
             NotificationCenter.default.post(name: .runDeleted, object: nil)
         }
     }
@@ -53,6 +74,7 @@ extension LibraryViewModel {
         }
     }
     func reorderRun(runId: Int64, orderedIds: [Int64]) { db.reorderRun(runId: runId, orderedIds: orderedIds) }
+    func reorderRuns(orderedIds: [Int64]) { db.reorderRuns(orderedIds: orderedIds); refreshRuns() }
 
     @discardableResult
     func setRunCover(runId: Int64, imageURL: URL) -> String? {

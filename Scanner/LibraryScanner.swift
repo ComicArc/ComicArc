@@ -376,12 +376,17 @@ final class LibraryScanner: @unchecked Sendable {
 
     #if os(macOS)
     private func cbrPageCount(_ path: String) -> Int {
-        guard which("unar") != nil else { return 0 }
+        guard ExternalTool.shared.which("unar") != nil else { return 0 }
         return cbrImageListing(path).count
     }
 
     private let cbrListingLock = NSLock()
     private var cbrListingCache: [String: [String]] = [:]
+    /// Insertion order for `cbrListingCache`, oldest first -- a plain Dictionary has no ordering
+    /// of its own, so this is what lets eviction drop only the oldest entries instead of wiping
+    /// the whole cache (and forcing every still-being-read comic to re-run `lsar`) every time the
+    /// cap is hit.
+    private var cbrListingOrder: [String] = []
 
     private static let maxCBRSizeBytes: UInt64 = 5 * 1024 * 1024 * 1024
 
@@ -391,15 +396,18 @@ final class LibraryScanner: @unchecked Sendable {
         cbrListingLock.unlock()
         let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
         guard UInt64(size) <= Self.maxCBRSizeBytes else { return [] }
-        guard let lsar = which("lsar") else { return [] }
-        let listing = shell(lsar, args: [path])
+        guard let lsar = ExternalTool.shared.which("lsar") else { return [] }
+        let listing = ExternalTool.shared.shell(lsar, args: [path])
         let images = listing.split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { imageExts.contains(URL(fileURLWithPath: $0).pathExtension.lowercased()) }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         cbrListingLock.lock()
-        if cbrListingCache.count >= 500 { cbrListingCache.removeAll() }
         cbrListingCache[path] = images
+        cbrListingOrder.append(path)
+        while cbrListingOrder.count > 500 {
+            cbrListingCache.removeValue(forKey: cbrListingOrder.removeFirst())
+        }
         cbrListingLock.unlock()
         return images
     }
@@ -416,13 +424,13 @@ final class LibraryScanner: @unchecked Sendable {
     func convertCBRToCBZ(path: String) -> Result<URL, CBRConversionError> {
         let sourceURL = URL(fileURLWithPath: path)
         guard sourceURL.pathExtension.lowercased() == "cbr" else { return .failure(.notACBR) }
-        guard let unar = which("unar") else { return .failure(.unarNotFound) }
+        guard let unar = ExternalTool.shared.which("unar") else { return .failure(.unarNotFound) }
 
         let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        _ = shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path])
+        _ = ExternalTool.shared.shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path])
 
         guard let enumerator = FileManager.default.enumerator(
             at: tmpDir, includingPropertiesForKeys: [.isRegularFileKey]
@@ -786,115 +794,10 @@ final class LibraryScanner: @unchecked Sendable {
     private func normalizeSeriesName(_ raw: String) -> String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     #if os(macOS)
-    private let whichLock = NSLock()
-    private var whichCache: [String: String?] = [:]
-
-    func which(_ name: String) -> String? {
-        whichLock.lock()
-        if let cached = whichCache[name] { whichLock.unlock(); return cached }
-        whichLock.unlock()
-        let resolved = resolveWhich(name)
-        whichLock.lock(); whichCache[name] = resolved; whichLock.unlock()
-        return resolved
-    }
-
-    private func resolveWhich(_ name: String) -> String? {
-        if let bundled = Bundle.main.executableURL?
-            .deletingLastPathComponent().appendingPathComponent(name).path,
-           FileManager.default.fileExists(atPath: bundled) { return bundled }
-        let brewPaths = ["/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)", "/usr/bin/\(name)"]
-        if let found = brewPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) { return found }
-        let result = shell("/usr/bin/which", args: [name])
-        let path = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        return path.isEmpty ? nil : path
-    }
-
-    @discardableResult
-    func shell(_ executable: String, args: [String]) -> String {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: executable)
-        proc.arguments = args
-        let pipe = Pipe()
-        proc.standardOutput = pipe; proc.standardError = Pipe()
-
-        activeProcessLock.lock()
-        activeProcess = proc
-        activeProcessLock.unlock()
-        defer { activeProcessLock.lock(); activeProcess = nil; activeProcessLock.unlock() }
-
-        try? proc.run(); proc.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    }
-
-    private let activeProcessLock = NSLock()
-    private var activeProcess: Process?
-
-    func terminateActiveProcess() {
-        activeProcessLock.lock()
-        let proc = activeProcess
-        activeProcessLock.unlock()
-        if proc?.isRunning == true { proc?.terminate() }
-    }
-    #endif
-
-    func page(path: String, index: Int) -> PlatformImage? {
-        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        switch ext {
-        case "cbz": return cbzPage(path: path, index: index)
-        case "pdf": return pdfPage(path: path, index: index)
-        case "jpg", "jpeg", "png": return index == 0 ? PlatformImage.fromFile(path) : nil
-        case "cbr":
-            #if os(macOS)
-            return cbrPage(path: path, index: index)
-            #else
-            return nil
-            #endif
-        default: return nil
-        }
-    }
-
-    /// Same cap already used by ThumbnailCache for cover extraction -- generous enough for even a
-    /// high-DPI scanned page, but bounds how much a single crafted/corrupted entry can force this
-    /// to decompress into memory when a user opens or the app prefetches that comic.
-    private static let maxPageSizeBytes: UInt64 = 50 * 1024 * 1024
-
-    private func cbzPage(path: String, index: Int) -> PlatformImage? {
-        guard let archive = try? Archive(url: URL(fileURLWithPath: path), accessMode: .read, pathEncoding: nil) else { return nil }
-        let images = archive
-            .filter { imageExts.contains(URL(fileURLWithPath: $0.path).pathExtension.lowercased()) && !$0.path.hasPrefix("__MACOSX") }
-            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
-        guard index < images.count, images[index].uncompressedSize <= Self.maxPageSizeBytes else { return nil }
-        var data = Data()
-        _ = try? archive.extract(images[index], consumer: { data.append($0) })
-        return PlatformImage.fromData(data)
-    }
-
-    private func pdfPage(path: String, index: Int) -> PlatformImage? {
-        guard let provider = CGDataProvider(url: URL(fileURLWithPath: path) as CFURL),
-              let pdf = CGPDFDocument(provider),
-              index < pdf.numberOfPages,
-              let page = pdf.page(at: index + 1) else { return nil }
-        return PlatformImage.renderPDFPage(page, scale: 1.5)
-    }
-
-    #if os(macOS)
-    private func cbrPage(path: String, index: Int) -> PlatformImage? {
-        guard let unar = which("unar") else { return nil }
-        let images = cbrImageListing(path)
-        guard index < images.count else { return nil }
-        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path, "--", images[index]])
-        let enumerator = FileManager.default.enumerator(atPath: tmpDir.path)
-        while let file = enumerator?.nextObject() as? String {
-            if imageExts.contains(URL(fileURLWithPath: file).pathExtension.lowercased()) {
-                return PlatformImage.fromFile(tmpDir.appendingPathComponent(file).path)
-            }
-        }
-        return nil
-    }
+    /// Thin forwarder kept for existing callers (`LibraryViewModel.shutdown()`) -- the actual
+    /// process-launching lives in `ExternalTool`, shared with `CBRDocument`'s reading-time
+    /// extraction, so there's exactly one place that tracks the currently-running subprocess.
+    func terminateActiveProcess() { ExternalTool.shared.terminateActiveProcess() }
     #endif
 }
 

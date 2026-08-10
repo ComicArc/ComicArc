@@ -55,29 +55,22 @@ extension DatabaseManager {
     /// Returns nil at the end of the series -- deliberately doesn't cross into a linked child
     /// series (e.g. a legacy renumbering); that's a real reading-order continuation, but a
     /// different, larger question than "what's the next file after this one."
-    func nextComic(after comic: Comic) -> Comic? {
-        queue.sync {
-            let orderExpr = "COALESCE(c.reading_order_position, c.position, c.id)"
-            let sql = """
-                \(comicSelect)
-                WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ?
-                  AND \(orderExpr) > (SELECT COALESCE(reading_order_position, position, id) FROM comics WHERE id = ?)
-                ORDER BY \(orderExpr), c.title LIMIT 1
-                """
-            return rows(sql, args: [comic.publisher, comic.series, comic.id], map: comicRow).first
-        }
-    }
+    func nextComic(after comic: Comic) -> Comic? { adjacentComic(to: comic, forward: true) }
 
-    /// Mirror of `nextComic(after:)` -- same series-scoped ordering, opposite direction. Lets the
-    /// reader carry a page-turn backward across a comic boundary the same way it does forward.
-    func previousComic(before comic: Comic) -> Comic? {
+    /// Same series-scoped ordering as `nextComic(after:)`, opposite direction -- lets the reader
+    /// carry a page-turn backward across a comic boundary the same way it does forward.
+    func previousComic(before comic: Comic) -> Comic? { adjacentComic(to: comic, forward: false) }
+
+    private func adjacentComic(to comic: Comic, forward: Bool) -> Comic? {
         queue.sync {
             let orderExpr = "COALESCE(c.reading_order_position, c.position, c.id)"
+            let comparison = forward ? ">" : "<"
+            let direction = forward ? "" : " DESC"
             let sql = """
                 \(comicSelect)
                 WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ?
-                  AND \(orderExpr) < (SELECT COALESCE(reading_order_position, position, id) FROM comics WHERE id = ?)
-                ORDER BY \(orderExpr) DESC, c.title DESC LIMIT 1
+                  AND \(orderExpr) \(comparison) (SELECT COALESCE(reading_order_position, position, id) FROM comics WHERE id = ?)
+                ORDER BY \(orderExpr)\(direction), c.title\(direction) LIMIT 1
                 """
             return rows(sql, args: [comic.publisher, comic.series, comic.id], map: comicRow).first
         }
@@ -404,6 +397,31 @@ extension DatabaseManager {
                       SET current_page = ?, last_read = datetime('now')
                     """, rows: updates.map { [$0.comicId, $0.page, $0.page] })
             }
+        }
+    }
+
+    /// Sticky completion flag, deliberately separate from `current_page` -- `current_page` is
+    /// just the resume position (freely moves backward on a reread), while `finished_at` should
+    /// only ever be set by genuine sequential reading reaching the end, or an explicit Mark Read.
+    /// COALESCE keeps a reread from clearing/overwriting an already-recorded finish.
+    func markFinished(comicId: Int64) {
+        queue.sync {
+            _ = run("""
+            INSERT INTO reading_progress (comic_id, finished_at)
+            VALUES (?, datetime('now'))
+            ON CONFLICT(comic_id) DO UPDATE
+              SET finished_at = COALESCE(finished_at, datetime('now'))
+            """, args: [comicId])
+        }
+    }
+
+    func markUnfinished(comicId: Int64) {
+        queue.sync {
+            _ = run("""
+            INSERT INTO reading_progress (comic_id, finished_at)
+            VALUES (?, NULL)
+            ON CONFLICT(comic_id) DO UPDATE SET finished_at = NULL
+            """, args: [comicId])
         }
     }
 

@@ -1,6 +1,9 @@
 import Foundation
 import CoreGraphics
 import SwiftUI
+import os
+
+private let thumbnailLogger = Logger(subsystem: "com.comicarc", category: "thumbnailcache")
 
 final class ThumbnailCache: @unchecked Sendable {
     static let shared = ThumbnailCache()
@@ -349,21 +352,35 @@ final class ThumbnailCache: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: source.path) else { return nil }
         let dest = coversDir.appendingPathComponent("\(destinationName).jpg")
         try? FileManager.default.removeItem(at: dest)
-        try? FileManager.default.copyItem(at: source, to: dest)
+        do {
+            try FileManager.default.copyItem(at: source, to: dest)
+        } catch {
+            thumbnailLogger.error("Failed to copy cover for comic \(comic.id) to '\(destinationName)': \(error.localizedDescription)")
+        }
         return FileManager.default.fileExists(atPath: dest.path) ? dest.path : nil
     }
 
+    /// Called from inside `queue.async` (see `thumbnail(for:completion:)` above), so the
+    /// synchronous open (real work for CBR: a subprocess extraction, shared with reading-time
+    /// extraction via `CBRExtractionCache`) is safe here, off the main thread.
     private func extract(from path: String) -> PlatformImage? {
-        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        switch ext {
-        case "cbz", "cbr", "pdf": return LibraryScanner.shared.page(path: path, index: 0)
-        case "jpg", "jpeg", "png": return PlatformImage.fromFile(path)
-        default: return nil
-        }
+        guard let document = try? ComicDocumentFactory.openSync(path: path),
+              let source = try? document.pageSource(index: 0) else { return nil }
+        defer { document.close() }
+        return PageDecoder.decode(source, maxPixelSize: nil)
     }
 
     private func save(_ image: PlatformImage, to url: URL) {
-        guard let data = image.platformJPEGData(compressionFactor: 0.85) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let data = image.platformJPEGData(compressionFactor: 0.85) else {
+            thumbnailLogger.error("Failed to JPEG-encode thumbnail for '\(url.lastPathComponent)'")
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            // The one real diagnostic point for "why are my thumbnails not showing up" -- a
+            // failure here (disk full, permissions) previously left zero trace anywhere.
+            thumbnailLogger.error("Failed to write thumbnail '\(url.lastPathComponent)' to disk: \(error.localizedDescription)")
+        }
     }
 }

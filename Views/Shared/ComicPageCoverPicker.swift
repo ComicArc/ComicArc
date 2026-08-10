@@ -5,6 +5,11 @@ struct ComicPageCoverPicker: View {
     let onPick: (PlatformImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
+    /// Opened once for the whole grid, not per cell -- `ThumbnailStore` needs an already-open
+    /// document (see its doc comment), and opening one per cell would mean N redundant CBZ
+    /// listings, or worse, N racing CBR extractions before any of them populate the shared cache.
+    @State private var document: ComicDocument?
+
     private let columns = [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 12)]
 
     var body: some View {
@@ -22,7 +27,7 @@ struct ComicPageCoverPicker: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(0..<max(comic.pageCount, 1), id: \.self) { index in
-                        CoverPickerPageCell(comic: comic, index: index) { image in
+                        CoverPickerPageCell(comic: comic, document: document, index: index) { image in
                             onPick(image)
                             dismiss()
                         }
@@ -33,11 +38,13 @@ struct ComicPageCoverPicker: View {
         }
         .frame(minWidth: 560, idealWidth: 640, minHeight: 480, idealHeight: 600)
         .background(Design.appBackground)
+        .task { document = try? await ComicDocumentFactory.open(path: comic.filePath) }
     }
 }
 
 private struct CoverPickerPageCell: View {
     let comic: Comic
+    let document: ComicDocument?
     let index: Int
     let onSelect: (PlatformImage) -> Void
     @State private var image: PlatformImage?
@@ -66,11 +73,12 @@ private struct CoverPickerPageCell: View {
         .disabled(image == nil)
         .accessibilityLabel("Page \(index + 1)")
         .accessibilityHint("Double-tap to use this page as the cover")
-        .task(id: index) {
+        .task(id: "\(index)-\(document != nil)") {
             // Same rationale as the reader filmstrip: a grid of every page in the comic would
             // otherwise decode full-resolution pages through the shared reading-page cache,
             // evicting real reading pages for a picker that only needs small thumbnails.
-            PageThumbnailCache.shared.thumbnail(comic: comic, page: index) { image = $0 }
+            guard let document else { return }
+            ThumbnailStore.shared.thumbnail(document: document, comicId: comic.id, page: index) { image = $0 }
         }
     }
 }

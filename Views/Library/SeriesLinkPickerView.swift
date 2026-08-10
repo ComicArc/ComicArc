@@ -124,14 +124,7 @@ struct SeriesLinkPickerView: View {
         .frame(minWidth: 480, idealWidth: 520, minHeight: 420, idealHeight: 480)
         .background(Design.appBackground)
         .task { await load() }
-        .alert("Couldn't Link Series", isPresented: Binding(
-            get: { linkError != nil },
-            set: { if !$0 { linkError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(linkError ?? "")
-        }
+        .errorAlert("Couldn't Link Series", message: $linkError)
     }
 
     private func load() async {

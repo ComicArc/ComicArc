@@ -3,8 +3,7 @@ import PackageDescription
 
 #if canImport(Compression)
 let targets: [Target] = [
-    .target(name: "ZIPFoundation"),
-    .testTarget(name: "ZIPFoundationTests", dependencies: ["ZIPFoundation"])
+    .target(name: "ZIPFoundation")
 ]
 #else
 let targets: [Target] = [
@@ -16,8 +15,7 @@ let targets: [Target] = [
         name: "ZIPFoundation",
         dependencies: ["CZLib"],
         cSettings: [.define("_GNU_SOURCE", to: "1")],
-        linkerSettings: [.linkedLibrary("z")]),
-    .testTarget(name: "ZIPFoundationTests", dependencies: ["ZIPFoundation"])
+        linkerSettings: [.linkedLibrary("z")])
 ]
 #endif
 

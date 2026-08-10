@@ -66,14 +66,7 @@ struct SeriesManagerView: View {
                 SeriesLinkPickerView(childSeries: series, childPublisher: publisher ?? "Unknown")
                     .environmentObject(vm)
             }
-            .alert("Export Failed", isPresented: Binding(
-                get: { exportErrorMessage != nil },
-                set: { if !$0 { exportErrorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(exportErrorMessage ?? "")
-            }
+            .errorAlert("Export Failed", message: $exportErrorMessage)
 
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
