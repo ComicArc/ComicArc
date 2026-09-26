@@ -56,7 +56,7 @@ private func computeAverageColor(from cgImage: CGImage) -> Color? {
 
 #if os(macOS)
 import AppKit
-public typealias PlatformImage = NSImage
+typealias PlatformImage = NSImage
 
 extension NSImage {
     static func resized(source: NSImage, to target: CGSize) -> NSImage? {
@@ -73,12 +73,6 @@ extension NSImage {
         return result
     }
 
-    static func fromData(_ data: Data) -> NSImage? {
-        if let cg = safeCGImage(from: data, maxPixelSize: maxDecodedPixelDimension) {
-            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-        }
-        return NSImage(data: data)
-    }
     static func fromFile(_ path: String) -> NSImage? { NSImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> NSImage? { NSImage(contentsOf: url) }
     static func fromCGImage(_ cg: CGImage) -> NSImage { NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height)) }
@@ -122,7 +116,7 @@ extension NSImage {
 
 #else
 import UIKit
-public typealias PlatformImage = UIImage
+typealias PlatformImage = UIImage
 
 extension UIImage {
     static func resized(source: UIImage, to target: CGSize) -> UIImage? {
@@ -136,12 +130,6 @@ extension UIImage {
 
     static func fromCGImage(_ cg: CGImage) -> UIImage { UIImage(cgImage: cg) }
 
-    static func fromData(_ data: Data) -> UIImage? {
-        if let cg = safeCGImage(from: data, maxPixelSize: maxDecodedPixelDimension) {
-            return UIImage(cgImage: cg)
-        }
-        return UIImage(data: data)
-    }
     static func fromFile(_ path: String) -> UIImage? { UIImage(contentsOfFile: path) }
     static func fromURL(_ url: URL) -> UIImage? { guard let data = try? Data(contentsOf: url) else { return nil }; return UIImage(data: data) }
 
@@ -157,7 +145,13 @@ extension UIImage {
     var byteSize: Int { Int(size.width * scale) * Int(size.height * scale) * 4 }
 
     /// Same intent as the macOS side's `pdfRenderScale` -- see its comment.
-    static var pdfRenderScale: CGFloat { min(3.0, max(2.0, UIScreen.main.scale)) }
+    static var pdfRenderScale: CGFloat {
+        #if os(visionOS)
+        2.0  // No UIScreen on visionOS; windows render at 2x.
+        #else
+        min(3.0, max(2.0, UIScreen.main.scale))
+        #endif
+    }
 
     static func renderPDFPage(_ page: CGPDFPage, scale: CGFloat = 1.5) -> UIImage? {
         let bounds = page.getBoxRect(.mediaBox)

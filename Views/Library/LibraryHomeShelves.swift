@@ -159,12 +159,7 @@ struct ReadNextShelf: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                SignageLabel(text: "Read Next", size: 13, kerning: 1.5, tint: Design.textPrimary)
-            }
+            SignageLabel(text: "Read Next", size: 13, kerning: 1.5, tint: Design.textPrimary)
             .padding(.horizontal, Design.gridSpacing)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -178,153 +173,6 @@ struct ReadNextShelf: View {
             }
         }
         .padding(.top, Design.gridSpacing)
-    }
-}
-
-struct OnThisDayShelf: View {
-    @EnvironmentObject var vm: LibraryViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 12, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                SignageLabel(text: "On This Day", size: 13, kerning: 1.5, tint: Design.textPrimary)
-            }
-            .padding(.horizontal, Design.gridSpacing)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(vm.onThisDayEntries) { entry in
-                        OnThisDayCard(entry: entry)
-                            .onTapGesture { vm.openReader(entry.comic) }
-                    }
-                }
-                .padding(.horizontal, Design.gridSpacing)
-            }
-        }
-        .padding(.top, Design.gridSpacing)
-    }
-}
-
-struct OnThisDayCard: View {
-    let entry: DiaryEntry
-    @State private var thumbnail: PlatformImage?
-    @State private var accentColor: Color?
-    @State private var isHovered = false
-
-    private var yearsAgo: Int {
-        let loggedYear = Int(entry.loggedAt.prefix(4)) ?? Calendar.current.component(.year, from: Date())
-        return max(1, Calendar.current.component(.year, from: Date()) - loggedYear)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ZStack {
-                Design.cardBg
-                if let img = thumbnail {
-                    Image(platformImage: img).comicCoverStyle()
-                        .frame(width: 90, height: 130)
-                } else {
-                    Image(systemName: "book.closed").foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 90, height: 130)
-            // Hover-only glow, same rule as `ComicCard` -- this is a single comic's cover, not a
-            // series/character group, so it stays neutral at rest.
-            .comicCardStyle(accentColor: accentColor, isHovered: isHovered, fallbackTint: Design.publisherColor(entry.comic.publisher))
-
-            Text(entry.comic.title)
-                .font(.caption2).lineLimit(2)
-                .frame(width: 90, alignment: .leading)
-                .foregroundStyle(.secondary)
-
-            Text(yearsAgo == 1 ? "1 YEAR AGO" : "\(yearsAgo) YEARS AGO")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(Design.brandGold)
-        }
-        .hoverLift(scale: 1.04, isHovered: $isHovered)
-        .shelfTilt(seed: entry.comic.id, isHovered: isHovered)
-        .onAppear {
-            ThumbnailCache.shared.thumbnail(for: entry.comic) { thumbnail = $0 }
-            ThumbnailCache.shared.accentColor(for: entry.comic) { accentColor = $0 }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(entry.comic.title)
-        .accessibilityValue(yearsAgo == 1 ? "Read 1 year ago today" : "Read \(yearsAgo) years ago today")
-        .accessibilityHint("Double-tap to open in reader")
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
-struct RecommendedShelf: View {
-    @EnvironmentObject var vm: LibraryViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 12, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                SignageLabel(text: "Recommended For You", size: 13, kerning: 1.5, tint: Design.textPrimary)
-            }
-            .padding(.horizontal, Design.gridSpacing)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(vm.recommendations) { comic in
-                        RecommendedCard(comic: comic)
-                            .onTapGesture { vm.openReader(comic) }
-                    }
-                }
-                .padding(.horizontal, Design.gridSpacing)
-            }
-        }
-        .padding(.top, Design.gridSpacing)
-    }
-}
-
-struct RecommendedCard: View {
-    let comic: Comic
-    @State private var thumbnail: PlatformImage?
-    @State private var accentColor: Color?
-    @State private var isHovered = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ZStack {
-                Design.cardBg
-                if let img = thumbnail {
-                    Image(platformImage: img).comicCoverStyle()
-                        .frame(width: 90, height: 130)
-                } else {
-                    Image(systemName: "book.closed").foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 90, height: 130)
-            .comicCardStyle(accentColor: accentColor, isHovered: isHovered, fallbackTint: Design.publisherColor(comic.publisher))
-
-            Text(comic.title)
-                .font(.caption2).lineLimit(2)
-                .frame(width: 90, alignment: .leading)
-                .foregroundStyle(.secondary)
-
-            Text(comic.series)
-                .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
-                .frame(width: 90, alignment: .leading)
-        }
-        .hoverLift(scale: 1.04, isHovered: $isHovered)
-        .shelfTilt(seed: comic.id, isHovered: isHovered)
-        .onAppear {
-            ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
-            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(comic.title)
-        .accessibilityValue("From \(comic.series), recommended based on your ratings")
-        .accessibilityHint("Double-tap to open in reader")
-        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -349,7 +197,7 @@ struct ShelfCard: View {
                     }
                 }
                 .frame(width: 90, height: 130)
-                .comicCardStyle(accentColor: accentColor, isHovered: isHovered, fallbackTint: Design.publisherColor(comic.publisher))
+                .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
                 if !comic.isFinished {
                     ZStack(alignment: .leading) {
@@ -371,7 +219,6 @@ struct ShelfCard: View {
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         }
         .hoverLift(scale: 1.04, isHovered: $isHovered)
-        .shelfTilt(seed: comic.id, isHovered: isHovered)
         .onAppear {
             ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
             ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }

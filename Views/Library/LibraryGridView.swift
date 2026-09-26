@@ -6,7 +6,6 @@ struct LibraryGridView: View {
     @AppStorage("gridDensity") private var densityRaw = GridDensity.regular.rawValue
     @State private var draggedId:   Int64? = nil
     @State private var dropTargetId: Int64? = nil
-    @State private var groupMoodColor: Color?
 
     private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }
 
@@ -61,22 +60,6 @@ struct LibraryGridView: View {
                 .padding(Design.gridSpacing)
             }
         }
-        // Same themed backdrop as the character screen you drilled in from -- only when actually
-        // scoped to a character (`vm.selectedGroup`); the plain top-level Library/Favorites/
-        // Continue Reading/Reading List sections keep the neutral `libraryAmbientBackground()`
-        // their parent `LibraryBrowserView` already provides, nothing layered on top. Also
-        // injects the detected theme into the environment so every `ComicCard` inside picks up
-        // its hover spotlight/lift/shadow automatically.
-        .background {
-            if let group = vm.selectedGroup {
-                ThemeBackdrop(name: group.groupName, color: groupMoodColor)
-            }
-        }
-        .environment(\.comicTheme, vm.selectedGroup.map {
-            ComicTheme.detect(name: $0.groupName, color: groupMoodColor)
-        } ?? .library)
-        .onAppear { loadSelectedGroupMoodColor(vm.selectedGroup, into: $groupMoodColor) }
-        .onChange(of: vm.selectedGroup?.id) { _, _ in loadSelectedGroupMoodColor(vm.selectedGroup, into: $groupMoodColor) }
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             Task { await handleDrop(providers) }
             return true
@@ -99,19 +82,8 @@ struct LibraryGridView: View {
     }
 
     private var emptyState: some View {
-        EmptyStateView(icon: emptyIcon, title: emptyTitle, message: emptyMessage, illustration: emptyIllustration) {
+        EmptyStateView(icon: emptyIcon, title: emptyTitle, message: emptyMessage) {
             emptyAction
-        }
-    }
-
-    private var emptyIllustration: AnyView? {
-        switch vm.selectedSection {
-        case .continueReading, .favorites, .readingList: return nil
-        default:
-            if vm.activeTag != nil || vm.activePublisher != nil { return nil }
-            if !vm.searchText.isEmpty { return AnyView(SpeechBubbleQuestionIllustration()) }
-            if vm.libraryPaths.isEmpty { return nil }
-            return AnyView(LongBoxesIllustration())
         }
     }
 

@@ -1,15 +1,5 @@
 import Foundation
 
-enum ComicSortClassifier {
-    static func isSpecialIssue(issueNumber: String?, title: String, series: String) -> Bool {
-        ReadingOrderEngine.classify(issueNumber: issueNumber, title: title, series: series).needsPlacement
-    }
-
-    static let specialBandOffset = 1_000_000
-
-    static let mainlinePositionStride = 100
-}
-
 /// ComicArc's filename cleanup: a plain, predictable text normalization of whatever a file is
 /// ALREADY named -- replace underscores with spaces, collapse repeated whitespace, nothing more.
 ///

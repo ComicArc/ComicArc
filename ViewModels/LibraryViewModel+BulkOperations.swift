@@ -15,37 +15,66 @@ extension LibraryViewModel {
     func selectAll() { selectedComicIds = Set(comics.map(\.id)) }
 
     func bulkMarkRead() {
-        let updates = comics
-            .filter { selectedComicIds.contains($0.id) }
-            .map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) }
-        db.updateProgress(updates)
+        let selected = comics.filter { selectedComicIds.contains($0.id) }
         selectedComicIds.removeAll()
-        reload()
+        markRead(selected)
     }
 
     func bulkMarkUnread() {
-        db.updateProgress(selectedComicIds.map { (comicId: $0, page: 0) })
+        let selected = comics.filter { selectedComicIds.contains($0.id) }
         selectedComicIds.removeAll()
-        reload()
+        markUnread(selected)
     }
 
     func bulkAddToReadingList() {
-        db.setInReadingList(Array(selectedComicIds), true)
+        db.setInReadingList(visibleSelectedIds(), true)
         selectedComicIds.removeAll()
         reload()
     }
 
     func bulkRemoveFromReadingList() {
-        db.setInReadingList(Array(selectedComicIds), false)
+        db.setInReadingList(visibleSelectedIds(), false)
         selectedComicIds.removeAll()
         reload()
     }
 
+    /// Unlike delete/run-delete/tier-list-delete, this previously had no undo -- a bulk reassign
+    /// is exactly the kind of "affects N comics at once, easy to fat-finger the wrong series name"
+    /// action that most needs one. Snapshots each comic's own (series, publisher) *before* the
+    /// change, since a bulk reassign can apply to comics that started out in different series --
+    /// undo has to restore each one to its own original values individually, not just re-apply
+    /// one shared pair.
     func bulkReassign(series: String?, publisher: String?) {
-        db.bulkReassign(ids: Array(selectedComicIds), series: series, publisher: publisher)
+        let ids = visibleSelectedIds()
+        guard !ids.isEmpty else { return }
+        let previous: [(id: Int64, series: String, publisher: String)] = comics
+            .filter { ids.contains($0.id) }
+            .map { (id: $0.id, series: $0.series, publisher: $0.publisher) }
+
+        db.bulkReassign(ids: ids, series: series, publisher: publisher)
         selectedComicIds.removeAll()
         reload()
         refreshDuplicates()
+
+        offerUndo(ids.count == 1 ? "1 comic reassigned" : "\(ids.count) comics reassigned") { [weak self] in
+            guard let self else { return }
+            for snap in previous {
+                self.db.bulkReassign(ids: [snap.id], series: snap.series, publisher: snap.publisher)
+            }
+            self.reload()
+            self.refreshDuplicates()
+        }
+    }
+
+    /// `selectedComicIds` is meant to be scoped to whatever grid is currently on screen, but
+    /// nothing besides navigation (see `select()`/`drillIntoGroup()`/`drillIntoSeries()`/
+    /// `navigateBack()`) actually clears it -- filtering against `comics` here is the same
+    /// belt-and-suspenders check `bulkMarkRead()`/`bulkDelete()` already apply, so a selection
+    /// that somehow survives a navigation change (or a filter/search change within the same
+    /// screen) can't silently mutate comics that aren't even visible anymore.
+    private func visibleSelectedIds() -> [Int64] {
+        let visible = Set(comics.map(\.id))
+        return selectedComicIds.filter { visible.contains($0) }
     }
 
     /// Same trash-and-undo behavior as `delete(_:fileService:)` (single/multi-comic delete from a
@@ -82,11 +111,6 @@ extension LibraryViewModel {
             CSSearchableIndex.default().deleteAllSearchableItems { _ in }
             DispatchQueue.main.async { self?.reload() }
         }
-    }
-
-    func markAllRead() {
-        db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
-        reload()
     }
 
     /// Deletes comics from the library AND moves their underlying files to the system Trash
@@ -130,6 +154,25 @@ extension LibraryViewModel {
             db.setTrashedFilePath(id: id, path: nil)
         }
         db.restore([id])
+        reload()
+    }
+
+    /// Permanently removes a single trashed comic's row (and, via `ON DELETE CASCADE`, its
+    /// bookmarks/rating/progress/tags/run-items/tier-list-items/diary entries) -- Trash previously
+    /// had no purge path at all. Never touches a file on disk: if `delete(fileService:)` already
+    /// moved the file to the real system Trash, that's the user's Finder Trash to empty
+    /// separately; a row soft-deleted without a file move ("missing"/"folder_removed") has no file
+    /// here to touch either way.
+    func purgeFromTrash(id: Int64) {
+        db.purge([id])
+        ThumbnailCache.shared.evict(id)
+        reload()
+    }
+
+    /// Empties the whole Trash in one action -- the header "Empty Trash" button.
+    func emptyTrash(_ trashedIds: [Int64]) {
+        db.purgeAllTrashed()
+        trashedIds.forEach { ThumbnailCache.shared.evict($0) }
         reload()
     }
 }

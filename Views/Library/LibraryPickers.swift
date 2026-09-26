@@ -31,7 +31,7 @@ struct FilterPicker: View {
     @State private var showSaveViewPrompt = false
     @State private var saveViewNameDraft = ""
 
-    private var isActive: Bool { vm.unreadOnly || vm.minRatingFilter > 0 }
+    private var isActive: Bool { vm.unreadOnly }
 
     var body: some View {
         Menu {
@@ -45,20 +45,6 @@ struct FilterPicker: View {
                 }
             }
 
-            Divider()
-
-            ForEach([0, 1, 2, 3, 4, 5], id: \.self) { threshold in
-                Button {
-                    vm.minRatingFilter = threshold
-                } label: {
-                    let label = threshold == 0 ? "Any Rating" : "★\(threshold) & Up"
-                    if vm.minRatingFilter == threshold {
-                        Label(label, systemImage: "checkmark")
-                    } else {
-                        Text(label)
-                    }
-                }
-            }
 
             Divider()
 
@@ -72,7 +58,7 @@ struct FilterPicker: View {
             Label("Filter", systemImage: isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 12))
         }
-        .help(isActive ? "Filters active" : "Filter by read status or rating")
+        .help(isActive ? "Filters active" : "Filter by read status")
         .accessibilityLabel(isActive ? "Filters active" : "Filter comics")
         .alert("Save Current View", isPresented: $showSaveViewPrompt) {
             TextField("Name", text: $saveViewNameDraft)

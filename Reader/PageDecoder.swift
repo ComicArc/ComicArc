@@ -10,7 +10,7 @@ import CoreGraphics
 enum PageDecoder {
     /// `maxPixelSize` is the caller's desired long-edge pixel size (already screen-scale-
     /// adjusted), or `nil` for "decode at full/native resolution" (actual-size zoom). Always
-    /// clamped to the same safety ceiling `PlatformImage.fromData` uses regardless of what's
+    /// clamped to the `maxDecodedPixelDimension` safety ceiling regardless of what's
     /// requested, so a pathological source can't be forced to decode unbounded.
     static func decode(_ source: PageSource, maxPixelSize: Int?) -> PlatformImage? {
         let cappedSize = min(maxPixelSize ?? maxDecodedPixelDimension, maxDecodedPixelDimension)

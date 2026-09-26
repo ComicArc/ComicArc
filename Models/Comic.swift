@@ -18,20 +18,13 @@ struct Comic: Identifiable, Equatable, Hashable {
     var languageIso: String?
     var notes: String?
     var addedAt: String
-    var deletedAt: String?
     var position: Int
     var fileHash: String?
 
     var progress: Int = 0
-    var lastRead: String?
-    var rating: Int = 0
-    var review: String? = nil
     var isFavorite: Bool = false
     var inReadingList: Bool = false
 
-    var readingOrderPosition: Int? = nil
-    var readingOrderConfidence: Int? = nil
-    var readingOrderReason: String? = nil
     var gcdMatchConfidence: Int? = nil
     var gcdSeriesName: String? = nil
     var gcdIssueNumber: String? = nil
@@ -57,15 +50,12 @@ struct Run: Identifiable, Equatable, Hashable {
     let id: Int64
     var title: String
     var description: String
-    var rating: Int?
-    var review: String?
     var buyLink: String?
-    var createdAt: String
     var comicCount: Int = 0
     var readCount:  Int = 0
     var coverImagePath: String? = nil
 
-    // Explicit id-only equality (matching Comic's override above): editing a Run's title/rating
+    // Explicit id-only equality (matching Comic's override above): editing a Run's title
     // elsewhere and then reloading the sidebar's `runs` array must still recognize the edited
     // row as "the same Run" for staleness checks like `if !runs.contains(selectedRun)` --
     // synthesized field-wise Equatable would call the freshly-edited row "different" from the
@@ -81,7 +71,6 @@ struct RunItem: Identifiable {
     var notes: String
 
     var isFinished: Bool { comic.isFinished }
-    var isStarted: Bool { comic.isStarted }
 }
 
 /// The fixed set of tier buckets a Tier List sorts comics into, in display order (best first).
@@ -96,10 +85,7 @@ struct TierList: Identifiable, Equatable, Hashable {
     let id: Int64
     var title: String
     var description: String
-    var createdAt: String
     var comicCount: Int = 0
-    var rating: Int? = nil
-    var review: String? = nil
     var coverImagePath: String? = nil
 
     // Explicit id-only equality -- see Run for why.
@@ -126,14 +112,13 @@ struct Tag: Identifiable, Hashable {
 
 struct PublisherStat { let publisher: String; let count: Int }
 struct SeriesStat     { let series: String; let publisher: String; let count: Int }
-struct GrowthPoint: Identifiable { let id = UUID(); let month: String; let label: String; let count: Int }
+struct GrowthPoint: Identifiable { let id = UUID(); let label: String; let count: Int }
 
 struct Bookmark: Identifiable {
     let id: Int64
     let comicId: Int64
     let page: Int
     let label: String
-    let createdAt: String
     var isFavorite: Bool = false
 }
 
@@ -155,15 +140,6 @@ struct HistoryEntry: Identifiable {
     let pageEnd: Int
     let readAt: String
     var pagesRead: Int { max(0, pageEnd - pageStart) }
-}
-
-struct DiaryEntry: Identifiable {
-    let id: Int64  // diary_entries row id -- NOT comic.id, since a reread produces a second row for the same comic
-    let comic: Comic
-    let rating: Int
-    let review: String?
-    let loggedAt: String
-    let isReread: Bool
 }
 
 struct LibraryStats {

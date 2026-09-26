@@ -41,14 +41,6 @@ struct MetadataInspectorView: View {
                         row("Issue Number", info.comic.issueNumber)
                     }
 
-                    Section("Reading Order") {
-                        row("Comic Type", info.comicType.rawValue)
-                        row("Legacy Number", info.legacyNumber.map { formatNumber($0) })
-                        row("Position", "\(info.comic.readingOrderPosition ?? info.comic.position)")
-                        row("Confidence", info.comic.readingOrderConfidence.map { "\($0)%" })
-                        row("Reason", info.comic.readingOrderReason)
-                    }
-
                     Section("ComicInfo.xml") {
                         if info.hasComicInfo == false {
                             Text("No ComicInfo.xml metadata was found for this file.")
@@ -239,7 +231,4 @@ struct MetadataInspectorView: View {
         return parts.joined(separator: "-")
     }
 
-    private func formatNumber(_ n: Double) -> String {
-        n == n.rounded(.towardZero) ? String(Int(n)) : String(n)
-    }
 }

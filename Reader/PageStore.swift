@@ -26,11 +26,28 @@ final class PageStore: @unchecked Sendable {
     /// comic's pages instead of waiting on `NSCache`'s own (opaque, not necessarily comic-aware)
     /// eviction heuristics or the total-cost budget to eventually reclaim them.
     private var insertedKeys: [Int64: Set<String>] = [:]
+    /// The `maxPixelSize` (`Int.max` for "decoded at full/native resolution") each cached entry
+    /// was actually decoded at. A cache hit only counts if the cached resolution is at least as
+    /// high as what the caller is asking for now -- without this, a page decoded small for a fit
+    /// mode (or a Mac paged-mode viewport size) would silently keep being served forever, even
+    /// after the caller asks for a bigger decode (zooming in, switching to "Original Size", or
+    /// scroll/iPad's own always-full-resolution requests) -- the exact "target-size-aware decode"
+    /// this store exists for would otherwise apply only to whichever request happened to reach a
+    /// page first.
+    private var decodedPixelSize: [String: Int] = [:]
 
     private func key(_ comicId: Int64, _ page: Int) -> String { "\(comicId):\(page)" }
 
-    func get(comicId: Int64, page: Int) -> PlatformImage? {
-        cache.object(forKey: key(comicId, page) as NSString)
+    /// Cache hit only if the cached decode is at least as high-resolution as `maxPixelSize`
+    /// requests (`nil` meaning "full resolution", i.e. only satisfied by a prior full-resolution
+    /// decode).
+    private func sufficientlyCached(_ k: String, maxPixelSize: Int?) -> PlatformImage? {
+        guard let image = cache.object(forKey: k as NSString) else { return nil }
+        let requested = maxPixelSize ?? Int.max
+        lock.lock()
+        let cachedResolution = decodedPixelSize[k] ?? 0
+        lock.unlock()
+        return cachedResolution >= requested ? image : nil
     }
 
     private func currentGeneration(_ comicId: Int64) -> Int {
@@ -44,9 +61,9 @@ final class PageStore: @unchecked Sendable {
     /// the old `PageCache` had no such dedup, so a direct navigation racing a prefetch (or two
     /// fast taps) could decode the same page twice.
     func request(document: ComicDocument, comicId: Int64, page: Int, maxPixelSize: Int?, completion: @escaping (PlatformImage?) -> Void) {
-        if let cached = get(comicId: comicId, page: page) { completion(cached); return }
-
         let k = key(comicId, page)
+        if let cached = sufficientlyCached(k, maxPixelSize: maxPixelSize) { completion(cached); return }
+
         lock.lock()
         if inFlight[k] != nil {
             inFlight[k]?.append(completion)
@@ -59,7 +76,7 @@ final class PageStore: @unchecked Sendable {
         let gen = currentGeneration(comicId)
         queue.async { [self] in
             let image = decode(document: document, page: page, maxPixelSize: maxPixelSize)
-            if let image { store(comicId: comicId, page: page, image: image, generation: gen) }
+            if let image { store(comicId: comicId, page: page, image: image, generation: gen, maxPixelSize: maxPixelSize) }
             lock.lock()
             let callbacks = inFlight.removeValue(forKey: k) ?? []
             lock.unlock()
@@ -72,11 +89,14 @@ final class PageStore: @unchecked Sendable {
         return PageDecoder.decode(source, maxPixelSize: maxPixelSize)
     }
 
-    private func store(comicId: Int64, page: Int, image: PlatformImage, generation requestGen: Int) {
+    private func store(comicId: Int64, page: Int, image: PlatformImage, generation requestGen: Int, maxPixelSize: Int?) {
         guard currentGeneration(comicId) == requestGen else { return }
         let k = key(comicId, page)
         cache.setObject(image, forKey: k as NSString, cost: image.byteSize)
-        lock.lock(); insertedKeys[comicId, default: []].insert(k); lock.unlock()
+        lock.lock()
+        insertedKeys[comicId, default: []].insert(k)
+        decodedPixelSize[k] = maxPixelSize ?? Int.max
+        lock.unlock()
     }
 
     /// Prefetch window shape, in pages, depends on reading mode -- continuous scroll can outrun a
@@ -108,8 +128,8 @@ final class PageStore: @unchecked Sendable {
 
         var items: [DispatchWorkItem] = []
         for target in targets {
-            guard get(comicId: comicId, page: target) == nil else { continue }
             let k = key(comicId, target)
+            guard sufficientlyCached(k, maxPixelSize: maxPixelSize) == nil else { continue }
             lock.lock()
             guard inFlight[k] == nil else { lock.unlock(); continue }
             lock.unlock()
@@ -117,7 +137,7 @@ final class PageStore: @unchecked Sendable {
             let item = DispatchWorkItem { [self] in
                 guard currentGeneration(comicId) == gen else { return }
                 if let image = decode(document: document, page: target, maxPixelSize: maxPixelSize) {
-                    store(comicId: comicId, page: target, image: image, generation: gen)
+                    store(comicId: comicId, page: target, image: image, generation: gen, maxPixelSize: maxPixelSize)
                 }
             }
             items.append(item)
@@ -150,6 +170,7 @@ final class PageStore: @unchecked Sendable {
         let items = pendingPrefetches[comicId] ?? []
         pendingPrefetches[comicId] = []
         let keys = insertedKeys.removeValue(forKey: comicId) ?? []
+        keys.forEach { decodedPixelSize.removeValue(forKey: $0) }
         lock.unlock()
         items.forEach { $0.cancel() }
         keys.forEach { cache.removeObject(forKey: $0 as NSString) }

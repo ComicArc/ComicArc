@@ -1,6 +1,6 @@
 import Foundation
 
-/// What `Run` and `TierList` genuinely have in common: a named, ordered, coverable, rateable
+/// What `Run` and `TierList` genuinely have in common: a named, ordered, coverable
 /// collection of comics. Their *list* screens, cards, and edit sheets were previously two
 /// separately-maintained, nearly line-for-line-identical implementations (`RunsView.swift` /
 /// `TierListsView.swift`) -- this protocol is what lets `CollectionListView`/`CollectionCard`/
@@ -11,8 +11,6 @@ import Foundation
 protocol NamedCollection: Identifiable, Equatable where ID == Int64 {
     var title: String { get }
     var description: String { get }
-    var rating: Int? { get }
-    var review: String? { get }
     var coverImagePath: String? { get }
 }
 

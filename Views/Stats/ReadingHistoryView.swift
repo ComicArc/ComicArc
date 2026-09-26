@@ -69,7 +69,7 @@ struct ReadingHistoryView: View {
                 publisher: entry.publisher, character: nil, series: entry.series,
                 issueNumber: nil, pageCount: 0, writer: nil, penciller: nil,
                 year: nil, storyArc: nil, languageIso: nil, notes: nil,
-                addedAt: "", deletedAt: nil, position: 0, fileHash: nil
+                addedAt: "", position: 0, fileHash: nil
             ))
             .frame(width: 36, height: 54)
 

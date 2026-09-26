@@ -24,6 +24,10 @@ final class LibraryScanner: @unchecked Sendable {
     }
     private var supported: Set<String> { Self.supportedExtensions }
 
+    /// What can be opened/dropped/imported directly as a comic file (Finder, Services menu, drag
+    /// and drop) -- loose images only count when scanned as part of a folder.
+    static let importableExtensions: Set<String> = ["cbz", "cbr", "pdf"]
+
     struct ScanState: Sendable {
         var running = false; var total = 0; var done = 0; var added = 0
         var removed = 0; var recovered = 0; var stillCorrupted = 0
@@ -32,14 +36,38 @@ final class LibraryScanner: @unchecked Sendable {
         /// indexSearchableItems is additive-only and would otherwise leave them permanently
         /// discoverable, the same gap already fixed for interactive delete in LibraryViewModel.
         var removedIds: [Int64] = []
+        /// Anything added, removed, moved, or renamed -- lets callers skip whole-library
+        /// follow-up work (Spotlight re-index, duplicate detection) after a no-op scan.
+        var changed = false
     }
 
     private let stateLock = NSLock()
     private var _state = ScanState()
+    /// Every caller's `onProgress` closure for the scan currently in flight -- not just the one
+    /// that happened to win the atomic check-and-set below. Without this, a caller that loses the
+    /// race (another scan already running) previously just `return`ed with its `onProgress` never
+    /// invoked even once, so whatever flag it set right before calling `scan()` (e.g.
+    /// `LibraryViewModel.isScanning`) never got reset -- permanently wedging that caller's "busy"
+    /// state until the app relaunches, since only the winning caller's own closure was ever told
+    /// the scan had finished. Cleared once the in-flight scan actually finishes.
+    private var observers: [(ScanState) -> Void] = []
 
     var state: ScanState { stateLock.lock(); defer { stateLock.unlock() }; return _state }
     private func setState(_ block: (inout ScanState) -> Void) { stateLock.lock(); defer { stateLock.unlock() }; block(&_state) }
     func cancel() { setState { $0.cancelled = true } }
+
+    /// Notifies every registered observer (the scan's original caller plus anyone who called
+    /// `scan()` again while it was already running) with the current state, on the main thread --
+    /// matching every previous direct `onProgress(...)` call site's dispatch. Once the state is no
+    /// longer `running`, the observer list is cleared so it doesn't leak into the next scan.
+    private func notifyObservers() {
+        stateLock.lock()
+        let currentObservers = observers
+        let currentState = _state
+        if !currentState.running { observers.removeAll() }
+        stateLock.unlock()
+        DispatchQueue.main.async { currentObservers.forEach { $0(currentState) } }
+    }
 
     func runAfterCurrentWork(_ block: @escaping () -> Void) {
         queue.async(execute: block)
@@ -62,19 +90,22 @@ final class LibraryScanner: @unchecked Sendable {
         // `queue`, leaves a window where two near-simultaneous callers (e.g. an auto-scan trigger
         // and a manual Resync click) both see `running == false` and both get enqueued.
         var shouldRun = false
-        setState { if !$0.running { $0 = ScanState(running: true); shouldRun = true } }
+        stateLock.lock()
+        if !_state.running { _state = ScanState(running: true); shouldRun = true }
+        observers.append(onProgress)
+        stateLock.unlock()
         guard shouldRun else { return }
-        queue.async { [self] in self._scan(libraryPaths: libraryPaths, onProgress: onProgress) }
+        queue.async { [self] in self._scan(libraryPaths: libraryPaths) }
     }
 
-    private func _scan(libraryPaths: [String], onProgress: @escaping (ScanState) -> Void) {
+    private func _scan(libraryPaths: [String]) {
         runImportPriorityAudit()
 
         let fm = FileManager.default
         let reachableRoots = libraryPaths.filter { fm.fileExists(atPath: $0) }
         guard !reachableRoots.isEmpty else {
             setState { $0.running = false; $0.error = "None of your configured library folders are accessible" }
-            DispatchQueue.main.async { onProgress(self.state) }
+            notifyObservers()
             return
         }
 
@@ -105,7 +136,6 @@ final class LibraryScanner: @unchecked Sendable {
             pending.removeAll()
         }
 
-        var touchedRawKeys: Set<String> = []
         var touchedEffectiveKeys: Set<String> = []
 
         func insertNewComic(url: URL, fp: String, hash: String?) {
@@ -136,7 +166,6 @@ final class LibraryScanner: @unchecked Sendable {
             ))
             added += 1; knownPaths.insert(fp)
             if let hash { knownHashes.insert(hash) }
-            touchedRawKeys.insert("\(meta.publisher):\(meta.series)")
             let effectiveSeries = meta.seriesGroup?.isEmpty == false ? meta.seriesGroup! : meta.series
             let effectiveKey = meta.volume?.isEmpty == false
                 ? "\(meta.publisher):\(effectiveSeries):\(meta.volume!)" : "\(meta.publisher):\(effectiveSeries)"
@@ -166,7 +195,7 @@ final class LibraryScanner: @unchecked Sendable {
             }
             let done = i + 1
             setState { $0.done = done; $0.added = added }
-            if i % 25 == 0 { onProgress(state) }
+            if i % 25 == 0 { notifyObservers() }
         }
         flushPending()
 
@@ -188,7 +217,6 @@ final class LibraryScanner: @unchecked Sendable {
                 updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename), group))
                 if let ser {
                     let key = "\(pub ?? "Unknown"):\(ser)"
-                    touchedRawKeys.insert(key)
                     touchedEffectiveKeys.insert(key)
                 }
             }
@@ -235,23 +263,14 @@ final class LibraryScanner: @unchecked Sendable {
         }
 
         let somethingChanged = added > 0 || anyRemoved || !movedComics.isEmpty
+        setState { $0.changed = somethingChanged }
         if !state.cancelled && somethingChanged {
             db.seedMissingPositions()
-            if anyRemoved {
-                db.positionSpecialsChronologically()
-                db.recomputeGCDMatches()
-                db.autoPopulateSeriesLinksFromGCD()
-                db.recomputeReadingOrder()
-            } else {
-                db.positionSpecialsChronologically(affectedGroupKeys: touchedRawKeys)
-                db.recomputeGCDMatches(affectedGroupKeys: touchedEffectiveKeys)
-                db.autoPopulateSeriesLinksFromGCD()
-                db.recomputeReadingOrder(affectedGroupKeys: touchedEffectiveKeys)
-            }
+            db.recomputeGCDMatches(affectedGroupKeys: anyRemoved ? nil : touchedEffectiveKeys)
         }
 
         setState { $0.running = false }
-        onProgress(state)
+        notifyObservers()
     }
 
     enum AddSingleResult: Equatable {
@@ -507,7 +526,7 @@ final class LibraryScanner: @unchecked Sendable {
     /// back identically, which is the write-back feature's core safety requirement. CBZ only (no
     /// RAR write support); a narrow, explicitly-listed field set deliberately smaller than every
     /// field this app tracks -- only the identity fields that map cleanly onto the standard
-    /// schema, not app-only concepts like ratings/tags/reading-order overrides.
+    /// schema, not app-only concepts like tags or manual issue orders.
     func writeComicInfoBack(comic: Comic) -> Result<Void, ComicInfoWriteError> {
         guard comic.filePath.lowercased().hasSuffix(".cbz") else { return .failure(.notACBZ) }
         guard let archive = try? Archive(url: URL(fileURLWithPath: comic.filePath), accessMode: .update, pathEncoding: nil) else {
@@ -752,12 +771,17 @@ final class LibraryScanner: @unchecked Sendable {
 #endif
     }
 
+    // Ordered most-specific-first: the bare `(?:^|\s|_)(\d{1,4})(?:\s|_|$)` fallback is tried
+    // LAST deliberately -- it used to run before the explicit "issue"/"no." pattern, so a
+    // filename like "Batman 2020 Issue 5.cbz" matched the bare pattern against "2020" (the first
+    // free-standing number in the string) and never reached the explicit "Issue 5" pattern at
+    // all, extracting the year as the issue number.
     private static let issuePatterns: [NSRegularExpression] = [
-        "#(\\d+(?:\\.\\d+)?)", "(?:^|\\s|_)(\\d{1,4})(?:\\s|_|$)",
-        "(?:issue|iss|no\\.?)\\s*(\\d+)", "v\\d+\\s*#(\\d+)"
+        "#(\\d+(?:\\.\\d+)?)", "(?:issue|iss|no\\.?)\\s*(\\d+)",
+        "v\\d+\\s*#(\\d+)", "(?:^|\\s|_)(\\d{1,4})(?:\\s|_|$)"
     ].compactMap { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
 
-    private func extractIssueNumber(from filename: String) -> String? {
+    func extractIssueNumber(from filename: String) -> String? {
         for regex in Self.issuePatterns {
             if let match = regex.firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)),
                let range = Range(match.range(at: 1), in: filename) { return String(filename[range]) }

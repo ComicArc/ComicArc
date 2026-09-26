@@ -119,6 +119,15 @@ struct EditComicView: View {
             ("issue_number", i.isEmpty ? nil : i),
             ("notes",        n.isEmpty ? nil : n)
         ])
+        // patchComicLocally (not just mutating this view's own `comic` binding) so
+        // `vm.selectedComic` picks up the edit immediately too -- previously only `vm.comics` got
+        // the fresh values (via the `reload()` below), so `selectedComic` kept showing the
+        // pre-edit title/series/publisher/notes until something else happened to reassign it.
+        LibraryViewModel.shared.patchComicLocally(comic.id) {
+            $0.title = t; $0.series = s; $0.publisher = p
+            $0.issueNumber = i.isEmpty ? nil : i
+            $0.notes = n.isEmpty ? nil : n
+        }
         comic.title       = t
         comic.series      = s
         comic.publisher   = p

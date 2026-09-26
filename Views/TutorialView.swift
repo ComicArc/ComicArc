@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum TStep: Int, CaseIterable {
-    case welcome, sidebar, library, openComic, reader, readingPaths, diaryTierListsAndMoments, readingOrder, renameAndCovers, toolbar, done
+    case welcome, sidebar, library, openComic, reader, readingPaths, tierListsAndMoments, readingOrder, renameAndCovers, toolbar, done
 }
 
 private struct TStepInfo {
@@ -31,7 +31,7 @@ private extension TStep {
         case .sidebar:
             return TStepInfo(icon: "sidebar.left",
                 title: "The Sidebar",
-                body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Statistics, and History under Discover. Tap More for the deeper tracking tools — Diary, Tier Lists, Highlights — plus anything that shows up automatically when there's something to review, like a possible duplicate.",
+                body: "Everything lives here: Library, Continue Reading, Favorites, and Reading List at the top; your Publishers and Tags below; and Reading Paths, Statistics, and History under Discover. Tap More for Tier Lists and Highlights, plus anything that shows up automatically when there's something to review, like a possible duplicate.",
                 spot: .sidebar, above: false)
 
         case .library:
@@ -43,7 +43,7 @@ private extension TStep {
         case .openComic:
             return TStepInfo(icon: "rectangle.stack.fill",
                 title: "Issue Detail",
-                body: "Click any comic to open its detail panel. Edit metadata, add tags, write a review, rate it, or tap Open in Reader to start reading. If the comics database matched it wrong (or not at all), use Fix Match to search and set the correct match yourself.",
+                body: "Click any comic to open its detail panel. Edit metadata, add tags, or tap Open in Reader to start reading. If the comics database matched it wrong (or not at all), use Fix Match to search and set the correct match yourself.",
                 spot: .content, above: false)
 
         case .reader:
@@ -58,16 +58,16 @@ private extension TStep {
                 body: "A Reading Path is an ordered list that can span multiple series — like a crossover event or a character's entire history. Build one from Reading Paths in the sidebar.",
                 spot: .sidebar, above: false)
 
-        case .diaryTierListsAndMoments:
-            return TStepInfo(icon: "text.book.closed.fill",
-                title: "Diary, Tier Lists & Highlights",
-                body: "Rate or review any comic and it's automatically logged in your Diary, rereads included. Tier Lists let you rank comics into S/A/B/C/D/F tiers — think \"Best Vertigo Runs.\" Star a bookmark in the reader to save it as a Highlight, browsable later as its own gallery. And Statistics includes a Year in Review recap once you've been reading a while.",
+        case .tierListsAndMoments:
+            return TStepInfo(icon: "square.stack.3d.up.fill",
+                title: "Tier Lists & Highlights",
+                body: "Tier Lists let you rank comics into S/A/B/C/D/F tiers — think \"Best Vertigo Runs.\" Star a bookmark in the reader to save it as a Highlight, browsable later as its own gallery. And Statistics includes a Year in Review recap once you've been reading a while.",
                 spot: .sidebar, above: false)
 
         case .readingOrder:
             return TStepInfo(icon: "arrow.up.arrow.down.circle.fill",
-                title: "Fixing Reading Order",
-                body: "Annuals and specials sometimes land in the wrong spot. Open a series and tap Manage Series to drag issues into place — no editing files required.",
+                title: "Fixing Issue Order",
+                body: "If issues land in the wrong spot, open a series and tap Manage Series to drag issues into place — no editing files required.",
                 spot: nil, above: true)
 
         case .renameAndCovers:
@@ -114,7 +114,6 @@ struct TutorialView: View {
     let onDismiss: () -> Void
 
     @State private var currentStep: TStep = .welcome
-    @State private var transitioning = false
 
     private var info: TStepInfo { currentStep.info }
     private var isFirst: Bool { currentStep == .welcome }
@@ -123,14 +122,14 @@ struct TutorialView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                spotlightLayer(geo: geo)
+                spotlightLayer
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
                 if info.spot != nil {
                     calloutPopup(geo: geo)
                 } else {
-                    centeredCard(geo: geo)
+                    centeredCard()
                 }
 
                 VStack {
@@ -153,7 +152,7 @@ struct TutorialView: View {
         .onKeyPress(.escape) { onDismiss(); return .handled }
     }
 
-    private func spotlightLayer(geo: GeometryProxy) -> some View {
+    private var spotlightLayer: some View {
         Canvas { ctx, size in
             var path = Path(CGRect(origin: .zero, size: size))
             if let region = info.spot {
@@ -202,7 +201,7 @@ struct TutorialView: View {
         )
     }
 
-    private func centeredCard(geo: GeometryProxy) -> some View {
+    private func centeredCard() -> some View {
         VStack {
             Spacer()
             calloutCard

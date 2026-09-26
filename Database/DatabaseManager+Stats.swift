@@ -47,13 +47,6 @@ extension DatabaseManager {
         }
     }
 
-    /// Same streak definition `loadStats()` uses, without paying for everything else it computes
-    /// -- for callers (the sidebar's ambient streak indicator) that just want this one number
-    /// refreshed on its own, more often than a full stats reload is worth doing.
-    func currentReadingStreak() -> Int {
-        queue.sync { computeStreak(dates: streakDates()) }
-    }
-
     // Not queue.sync'd itself -- `queue` is a serial DispatchQueue, so this must stay a plain
     // unwrapped helper (matching `readingActivityMap(days:)`'s convention below) to be safely
     // callable from inside another already-`queue.sync`'d block without deadlocking.
@@ -85,7 +78,7 @@ extension DatabaseManager {
         for offset in stride(from: months - 1, through: 0, by: -1) {
             guard let date = cal.date(byAdding: .month, value: -offset, to: Date()) else { continue }
             let key = fmt.string(from: date)
-            points.append(GrowthPoint(month: key, label: labelFmt.string(from: date), count: counts[key] ?? 0))
+            points.append(GrowthPoint(label: labelFmt.string(from: date), count: counts[key] ?? 0))
         }
         return points
     }
@@ -197,16 +190,12 @@ extension DatabaseManager {
         let pagesRead: Int
         let topSeries: (name: String, count: Int)?
         let topPublisher: (name: String, count: Int)?
-        let ratedCount: Int
-        let averageRating: Double?
-        let topRated: [(comicId: Int64, title: String, rating: Int)]
-        let rereadCount: Int
         let longestStreakDays: Int
         let busiestMonthLabel: String?
     }
 
     /// A "wrapped"-style recap for one calendar year, built entirely from data the app already
-    /// tracks day-to-day (reading sessions, diary entries) -- no new instrumentation needed, just
+    /// tracks day-to-day (reading sessions) -- no new instrumentation needed, just
     /// year-scoped aggregation over what's already there.
     func yearInReview(year: Int) -> YearInReviewStats {
         queue.sync {
@@ -232,21 +221,6 @@ extension DatabaseManager {
                 GROUP BY c.publisher ORDER BY n DESC LIMIT 1
                 """, args: [yearStr]) { (name: colText($0, 0) ?? "", count: colInt($0, 1)) }.first
 
-            let topRated = rows("""
-                SELECT c.id, c.title, d.rating FROM diary_entries d JOIN comics c ON c.id = d.comic_id
-                WHERE strftime('%Y', d.logged_at) = ? AND d.rating >= 4
-                ORDER BY d.rating DESC, d.logged_at DESC LIMIT 5
-                """, args: [yearStr]) { (comicId: colInt64($0, 0), title: colText($0, 1) ?? "", rating: colInt($0, 2)) }
-
-            let ratedCount = scalarInt(
-                "SELECT COUNT(*) FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND rating > 0", args: [yearStr])
-            let ratings: [Int] = rows(
-                "SELECT rating FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND rating > 0", args: [yearStr]) { colInt($0, 0) }
-            let averageRating = ratings.isEmpty ? nil : Double(ratings.reduce(0, +)) / Double(ratings.count)
-
-            let rereadCount = scalarInt(
-                "SELECT COUNT(*) FROM diary_entries WHERE strftime('%Y', logged_at) = ? AND is_reread = 1", args: [yearStr])
-
             let distinctDays: [String] = rows(
                 "SELECT DISTINCT date(read_at, 'localtime') as d FROM reading_history WHERE strftime('%Y', read_at) = ?",
                 args: [yearStr]) { colText($0, 0) ?? "" }
@@ -262,8 +236,7 @@ extension DatabaseManager {
             return YearInReviewStats(
                 year: year, issuesRead: issuesRead, pagesRead: pagesRead,
                 topSeries: topSeries, topPublisher: topPublisher,
-                ratedCount: ratedCount, averageRating: averageRating, topRated: topRated,
-                rereadCount: rereadCount, longestStreakDays: longestStreakDays,
+                longestStreakDays: longestStreakDays,
                 busiestMonthLabel: busiestMonthLabel
             )
         }

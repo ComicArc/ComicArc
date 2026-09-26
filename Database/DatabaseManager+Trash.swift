@@ -58,4 +58,33 @@ extension DatabaseManager {
             sqlite3_step(stmt); sqlite3_finalize(stmt)
         }
     }
+
+    /// Permanently deletes soft-deleted comic rows -- Trash previously had no purge path at all,
+    /// so a soft-deleted comic's row (and every joined bookmark/rating/progress/tag/run-item/
+    /// tier-list-item/diary-entry) lived forever, growing the DB unboundedly with no way to
+    /// actually reclaim it. Never touches the underlying file -- if `delete(fileService:)` already
+    /// moved it to the real system Trash, that's the user's Finder Trash to empty separately; if
+    /// it was soft-deleted without a file move (a "missing"/"folder_removed" row), there's no file
+    /// here to touch either way. Restricted to rows already in `deleted_at IS NOT NULL` as a safety
+    /// net against ever hard-deleting a live, visible comic by id mistake.
+    func purge(_ ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        queue.sync {
+            _ = inTransaction {
+                idChunks(ids).allSatisfy { chunk in
+                    let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+                    return run("DELETE FROM comics WHERE deleted_at IS NOT NULL AND id IN (\(placeholders))",
+                                args: chunk.map { $0 as Any? }) != -1
+                }
+            }
+        }
+    }
+
+    /// Purges every currently-trashed comic in one call -- backs the Trash screen's "Empty Trash"
+    /// action.
+    func purgeAllTrashed() {
+        queue.sync {
+            _ = run("DELETE FROM comics WHERE deleted_at IS NOT NULL")
+        }
+    }
 }

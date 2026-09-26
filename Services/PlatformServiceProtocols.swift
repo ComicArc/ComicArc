@@ -31,7 +31,6 @@ protocol WindowServiceProtocol {
     func toggleFullScreen()
     func enterImmersiveMode()
     func exitImmersiveMode()
-    func hideCursorUntilMouseMoves()
     func showCursor()
     func configureMainWindow()
 
@@ -60,7 +59,6 @@ struct NoOpWindowService: WindowServiceProtocol {
     func toggleFullScreen() {}
     func enterImmersiveMode() {}
     func exitImmersiveMode() {}
-    func hideCursorUntilMouseMoves() {}
     func showCursor() {}
     func configureMainWindow() {}
     func printImage(_ image: PlatformImage) {}

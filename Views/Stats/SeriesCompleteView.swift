@@ -15,16 +15,6 @@ struct SeriesCompleteView: View {
     @State private var accentColor: Color?
     @State private var shareCardURL: URL?
 
-    private var averageRating: Double? {
-        let rated = comics.filter { $0.rating > 0 }
-        guard !rated.isEmpty else { return nil }
-        return Double(rated.reduce(0) { $0 + $1.rating }) / Double(rated.count)
-    }
-
-    private var topRated: Comic? {
-        comics.filter { $0.rating > 0 }.max { $0.rating < $1.rating }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -37,17 +27,8 @@ struct SeriesCompleteView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         heroCard
 
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                            RecapStatTile(label: "ISSUES READ", value: "\(comics.count)", icon: "book.closed.fill",
-                                          tint: accentColor ?? Design.brandGold)
-                            RecapStatTile(label: "AVG RATING", value: averageRating.map { String(format: "%.1f★", $0) } ?? "—",
-                                          icon: "star.fill", tint: accentColor ?? Design.brandGold)
-                        }
-
-                        if let topRated {
-                            RecapHighlightRow(icon: "trophy.fill", label: "Highest Rated", value: topRated.title,
-                                               detail: "\(topRated.rating)★", tint: accentColor ?? Design.brandGold)
-                        }
+                        RecapStatTile(label: "ISSUES READ", value: "\(comics.count)", icon: "book.closed.fill",
+                                      tint: accentColor ?? Design.brandGold)
                     }
                     .padding(24)
                 }
@@ -123,7 +104,7 @@ struct SeriesCompleteView: View {
             title: series,
             subtitle: "\(loaded.count) issue\(loaded.count == 1 ? "" : "s") — series complete",
             covers: images,
-            stats: averageRating.map { [("Avg Rating", String(format: "%.1f★", $0))] } ?? []
+            stats: []
         )
         shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "SeriesComplete-\(series).png")
     }

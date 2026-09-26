@@ -6,8 +6,7 @@ import os
 extension LibraryViewModel {
     func saveCurrentAsView(name: String) {
         let view = SavedLibraryView(name: name, publisher: activePublisher, tag: activeTag,
-                                     sortOrder: sortOrder, unreadOnly: unreadOnly,
-                                     minRatingFilter: minRatingFilter, searchText: searchText)
+                                     sortOrder: sortOrder, unreadOnly: unreadOnly, searchText: searchText)
         savedViews.append(view)
         SavedLibraryViews.write(savedViews)
     }
@@ -16,7 +15,6 @@ extension LibraryViewModel {
         select(view.destination)
         sortOrder = view.sortOrder
         unreadOnly = view.unreadOnly
-        minRatingFilter = view.minRatingFilter
         searchText = view.searchText
         // select()'s own reload() already ran with the previous sort/filter/search values (and
         // sortOrder's didSet only persists to UserDefaults, it doesn't reload) -- this final call

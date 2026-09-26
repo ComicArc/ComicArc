@@ -305,12 +305,6 @@ private struct iPadSidebar: View {
                                         .tag(item.destination)
                                         .badge(vm.duplicateGroups.count)
                                 }
-                            } else if item == .readingOrderManager {
-                                if !vm.autoPlacedIssues.isEmpty {
-                                    Label(item.title, systemImage: item.icon)
-                                        .tag(item.destination)
-                                        .badge(vm.autoPlacedIssues.count)
-                                }
                             } else if item == .metadataConflicts {
                                 if !vm.pendingMetadataConflicts.isEmpty {
                                     Label(item.title, systemImage: item.icon)
@@ -435,106 +429,6 @@ private struct iPadReadNextShelf: View {
     }
 }
 
-private struct iPadOnThisDayShelf: View {
-    @EnvironmentObject var vm: LibraryViewModel
-
-    private func yearsAgo(_ entry: DiaryEntry) -> Int {
-        let loggedYear = Int(entry.loggedAt.prefix(4)) ?? Calendar.current.component(.year, from: Date())
-        return max(1, Calendar.current.component(.year, from: Date()) - loggedYear)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 12, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                Text("ON THIS DAY")
-                    .font(.system(size: 13, weight: .black))
-                    .kerning(1.5)
-            }
-            .padding(.horizontal, 16)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(vm.onThisDayEntries) { entry in
-                        let years = yearsAgo(entry)
-                        Button {
-                            vm.openReader(entry.comic)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                MiniComicCard(comic: entry.comic)
-                                    .frame(width: 90, height: 130)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                Text(entry.comic.title)
-                                    .font(.caption2).lineLimit(2)
-                                    .frame(width: 90, alignment: .leading)
-                                    .foregroundStyle(.secondary)
-                                Text(years == 1 ? "1 YEAR AGO" : "\(years) YEARS AGO")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(Design.brandGold)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(entry.comic.title)
-                        .accessibilityValue(years == 1 ? "Read 1 year ago today" : "Read \(years) years ago today")
-                        .accessibilityHint("Double-tap to start reading")
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
-        .padding(.vertical, 12)
-    }
-}
-
-private struct iPadRecommendedShelf: View {
-    @EnvironmentObject var vm: LibraryViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 12, weight: .black))
-                    .foregroundStyle(Design.brandGold)
-                Text("RECOMMENDED FOR YOU")
-                    .font(.system(size: 13, weight: .black))
-                    .kerning(1.5)
-            }
-            .padding(.horizontal, 16)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(vm.recommendations) { comic in
-                        Button {
-                            vm.openReader(comic)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                MiniComicCard(comic: comic)
-                                    .frame(width: 90, height: 130)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                Text(comic.title)
-                                    .font(.caption2).lineLimit(2)
-                                    .frame(width: 90, alignment: .leading)
-                                    .foregroundStyle(.secondary)
-                                Text(comic.series)
-                                    .font(.system(size: 9)).foregroundStyle(.tertiary).lineLimit(1)
-                                    .frame(width: 90, alignment: .leading)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(comic.title)
-                        .accessibilityValue("From \(comic.series), recommended based on your ratings")
-                        .accessibilityHint("Double-tap to start reading")
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
-        .padding(.vertical, 12)
-    }
-}
-
 private struct iPadContentColumn: View {
     @Binding var selectedComic: Comic?
     @EnvironmentObject var vm: LibraryViewModel
@@ -544,17 +438,11 @@ private struct iPadContentColumn: View {
             switch vm.destination {
             case .library, .continueReading, .favorites, .readingList, .publisher, .tag:
                 VStack(spacing: 0) {
-                    // Mac shows this same recommendation as an inline shelf on its home grid; iPad's
+                    // Mac shows Read Next as an inline shelf on its home grid; iPad's
                     // library view is a flat grid with no natural "home" section, so it's shown here
                     // only on the plain .library destination rather than every filtered view.
                     if case .library = vm.destination, !vm.readNextSuggestions.isEmpty {
                         iPadReadNextShelf()
-                    }
-                    if case .library = vm.destination, !vm.onThisDayEntries.isEmpty {
-                        iPadOnThisDayShelf()
-                    }
-                    if case .library = vm.destination, !vm.recommendations.isEmpty {
-                        iPadRecommendedShelf()
                     }
                     iPadComicGrid(comics: vm.comics, selectedComic: $selectedComic)
                 }
@@ -565,9 +453,6 @@ private struct iPadContentColumn: View {
             case .runs:
                 RunsView().environmentObject(vm)
                     .navigationTitle("Reading Paths")
-            case .diary:
-                DiaryView()
-                    .navigationTitle("Diary")
             case .tierLists:
                 TierListsView().environmentObject(vm)
                     .navigationTitle("Tier Lists")
@@ -580,9 +465,6 @@ private struct iPadContentColumn: View {
             case .duplicates:
                 DuplicatesView().environmentObject(vm)
                     .navigationTitle("Possible Duplicates")
-            case .readingOrderManager:
-                ReadingOrderManagerView().environmentObject(vm)
-                    .navigationTitle("Reading Order Suggestions")
             case .metadataConflicts:
                 MetadataConflictsView().environmentObject(vm)
                     .navigationTitle("Needs Review")
@@ -818,6 +700,7 @@ private struct iPadComicTile: View {
 
 private struct iPadComicHero: View {
     let comic: Comic
+    @EnvironmentObject var vm: LibraryViewModel
     @State private var thumbnail: PlatformImage?
 
     var body: some View {
@@ -846,6 +729,9 @@ private struct iPadComicHero: View {
                 }
                 if comic.pageCount > 0 {
                     Text("\(comic.pageCount) pages").font(.caption).foregroundStyle(.tertiary)
+                } else if vm.brokenComicIds.contains(comic.id) {
+                    Label("Corrupted or empty — try rescanning", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
                 }
             }
             .padding(.top, 4)
@@ -863,14 +749,6 @@ private struct iPadComicMeta: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Divider().padding(.horizontal)
-            HStack {
-                Label("Rating", systemImage: "star").foregroundStyle(.secondary)
-                Spacer()
-                StarRatingLarge(rating: comic.rating) { star in
-                    vm.setRating(comic, rating: star == comic.rating ? 0 : star)
-                }
-            }
-            .padding()
 
             if comic.progress > 0 {
                 metaRow("Progress",
@@ -960,7 +838,45 @@ private struct iPadImportButton: View {
         .accessibilityLabel("Import Comics")
         .sheet(isPresented: $showPicker) {
             iPadDocumentPicker { urls in
-                vm.importFiles(urls)
+                vm.importFiles(iPadImportStorage.copyIntoLibrary(urls, vm: vm))
+            }
+        }
+    }
+}
+
+/// `UIDocumentPickerViewController(forOpeningContentTypes:asCopy: true)` writes into a temporary,
+/// app-private staging area that Apple's own documentation only guarantees lives until the picker
+/// delegate callback returns -- not permanent storage. Previously the picked URLs were handed
+/// straight to `importFiles`/`addSingle`, which stored that ephemeral path verbatim as the
+/// comic's `file_path`; the comic could become permanently unreadable the next time iOS reclaimed
+/// that staging area (relaunch, low-disk purge), with no recovery path. This copies each picked
+/// file into a real, permanent, app-owned folder in Documents (visible in the Files app, so the
+/// user can find/back up their own comics) before it's ever inserted into the database.
+enum iPadImportStorage {
+    @MainActor
+    static func copyIntoLibrary(_ urls: [URL], vm: LibraryViewModel) -> [URL] {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return urls }
+        let dest = docs.appendingPathComponent("Comics", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        if !vm.libraryPaths.contains(dest.path) { vm.addLibraryFolder(dest.path) }
+
+        return urls.map { url in
+            let base = url.deletingPathExtension().lastPathComponent
+            let ext = url.pathExtension
+            var target = dest.appendingPathComponent(url.lastPathComponent)
+            var suffix = 1
+            while FileManager.default.fileExists(atPath: target.path) {
+                target = dest.appendingPathComponent(ext.isEmpty ? "\(base) \(suffix)" : "\(base) \(suffix).\(ext)")
+                suffix += 1
+            }
+            do {
+                try FileManager.default.copyItem(at: url, to: target)
+                return target
+            } catch {
+                // Copy failed (disk full, permissions) -- fall back to the ephemeral picker URL
+                // rather than dropping the import silently; `addSingle` already surfaces a
+                // per-file failure reason if the path turns out to be unreadable.
+                return url
             }
         }
     }

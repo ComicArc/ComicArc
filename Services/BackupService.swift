@@ -12,12 +12,12 @@ enum BackupService {
         fileService.pickSaveDestination(filename: filename) { savedURL in
             guard let url = savedURL else { return }
             let header = ["Title", "Series", "Publisher", "Issue Number", "Volume", "Format",
-                           "Year", "Rating", "Read", "File Path"]
+                           "Year", "Read", "File Path"]
             var rows = [header]
             for c in comics {
                 rows.append([
                     c.title, c.series, c.publisher, c.issueNumber ?? "", c.volume ?? "", c.format ?? "",
-                    c.year.map(String.init) ?? "", c.rating > 0 ? String(c.rating) : "",
+                    c.year.map(String.init) ?? "",
                     c.isFinished ? "Yes" : "No", c.filePath
                 ])
             }
@@ -53,11 +53,10 @@ enum BackupService {
                     let comicsJSON: [[String: Any]] = comics.map { c in
                         var d: [String: Any] = ["id": c.id, "title": c.title, "file_path": c.filePath,
                                                 "publisher": c.publisher, "series": c.series,
-                                                "progress": c.progress, "rating": c.rating,
+                                                "progress": c.progress,
                                                 "is_favorite": c.isFavorite, "in_reading_list": c.inReadingList]
                         if let i = c.issueNumber { d["issue_number"] = i }
                         if let n = c.notes, !n.isEmpty { d["notes"] = n }
-                        if let rv = c.review, !rv.isEmpty { d["review"] = rv }
                         let tagNames = db.tags(for: c.id).map(\.name)
                         if !tagNames.isEmpty { d["tags"] = tagNames }
                         let marks = db.bookmarks(comicId: c.id)
@@ -81,8 +80,6 @@ enum BackupService {
                     let runsJSON: [[String: Any]] = db.allRuns().map { run in
                         var d: [String: Any] = ["title": run.title, "description": run.description]
                         if let bl = run.buyLink { d["buy_link"] = bl }
-                        if let r = run.rating { d["rating"] = r }
-                        if let rv = run.review { d["review"] = rv }
                         d["items"] = db.runItems(runId: run.id).compactMap { item -> [String: Any]? in
                             guard let path = pathById[item.comic.id] else { return nil }
                             return ["file_path": path, "position": item.position, "notes": item.notes]
@@ -92,27 +89,11 @@ enum BackupService {
 
                     let tierListsJSON: [[String: Any]] = db.allTierLists().map { tierList in
                         var d: [String: Any] = ["title": tierList.title, "description": tierList.description]
-                        if let r = tierList.rating { d["rating"] = r }
-                        if let rv = tierList.review { d["review"] = rv }
                         d["items"] = db.tierListItems(tierListId: tierList.id).compactMap { item -> [String: Any]? in
                             guard let path = pathById[item.comic.id] else { return nil }
                             return ["file_path": path, "tier": item.tier, "position": item.position]
                         }
                         return d
-                    }
-
-                    let diaryJSON: [[String: Any]] = db.diaryEntries(limit: Int.max).compactMap { entry -> [String: Any]? in
-                        guard let path = pathById[entry.comic.id] else { return nil }
-                        var d: [String: Any] = ["file_path": path, "rating": entry.rating,
-                                                "is_reread": entry.isReread, "logged_at": entry.loggedAt]
-                        if let rv = entry.review, !rv.isEmpty { d["review"] = rv }
-                        return d
-                    }
-
-                    let seriesLinksJSON: [[String: Any]] = db.seriesLinks().map { link in
-                        ["parent_publisher": link.parentPublisher, "parent_series": link.parentSeries,
-                         "child_publisher": link.childPublisher, "child_series": link.childSeries,
-                         "sequence_order": link.sequenceOrder, "source": link.source]
                     }
 
                     let overridesJSON: [[String: Any]] = db.allReadingOrderOverrides().map { o in
@@ -139,7 +120,6 @@ enum BackupService {
 
                     return ["comics": comicsJSON, "runs": runsJSON,
                             "tier_lists": tierListsJSON,
-                            "diary": diaryJSON, "series_links": seriesLinksJSON,
                             "reading_order_overrides": overridesJSON,
                             "series_order": seriesOrderJSON, "character_order": characterOrderJSON,
                             "publisher_order": publisherOrderJSON, "series_covers": seriesCoversJSON]
@@ -183,7 +163,7 @@ enum BackupService {
                     // ids are reassigned after clearLibrary()/resyncLibrary(), both user-triggered,
                     // so a path that still exists can belong to a different row than the id
                     // recorded at backup time. Restoring against the wrong id would silently
-                    // overwrite an unrelated comic's rating/favorites/progress/notes/tags/bookmarks.
+                    // overwrite an unrelated comic's favorites/progress/notes/tags/bookmarks.
                     let pathsInBackup = comicsArr.compactMap { $0["file_path"] as? String }
                     let currentIdByPath = Dictionary(uniqueKeysWithValues: db.comics(withPaths: pathsInBackup).map { ($0.filePath, $0.id) })
                     var comicIdByPath: [String: Int64] = [:]
@@ -191,11 +171,9 @@ enum BackupService {
                         guard let path = item["file_path"] as? String,
                               let comicId = currentIdByPath[path] else { continue }
                         comicIdByPath[path] = comicId
-                        if let r = item["rating"] as? Int, r > 0 { db.setRating(comicId, rating: r) }
                         if let f = item["is_favorite"] as? Bool   { db.setFavorite(comicId, f) }
                         if let rl = item["in_reading_list"] as? Bool { db.setInReadingList(comicId, rl) }
                         if let p = item["progress"] as? Int, p > 0 { db.updateProgress(comicId: comicId, page: p) }
-                        if let rv = item["review"] as? String, !rv.isEmpty { db.setComicReview(comicId, review: rv) }
                         if let n = item["notes"] as? String, !n.isEmpty { db.setComicNotes(comicId, notes: n) }
                         if let tags = item["tags"] as? [String] {
                             for name in tags { db.addTag(name: name, to: comicId) }
@@ -231,9 +209,6 @@ enum BackupService {
                                 ?? db.createRun(title: title, description: r["description"] as? String ?? "")
                             db.addToRun(runId: runId, comicIds: orderedComicIds)
                             db.reorderRun(runId: runId, orderedIds: orderedComicIds)
-                            if let rating = r["rating"] as? Int {
-                                db.setRunRating(runId, rating: rating, review: r["review"] as? String)
-                            }
                             let notesByPath: [String: String] = Dictionary(uniqueKeysWithValues: items.compactMap { i in
                                 guard let path = i["file_path"] as? String, let notes = i["notes"] as? String, !notes.isEmpty else { return nil }
                                 return (path, notes)
@@ -262,34 +237,6 @@ enum BackupService {
                                 guard !orderedComicIds.isEmpty else { continue }
                                 db.addToTierList(tierListId: tierListId, comicIds: orderedComicIds, tier: tier)
                             }
-                            if let rating = tl["rating"] as? Int {
-                                db.setTierListRating(tierListId, rating: rating, review: tl["review"] as? String)
-                            }
-                        }
-                    }
-
-                    if let diaryArr = root?["diary"] as? [[String: Any]] {
-                        for entry in diaryArr {
-                            guard let path = entry["file_path"] as? String,
-                                  let comicId = currentIdByPath[path],
-                                  let rating = entry["rating"] as? Int,
-                                  let loggedAt = entry["logged_at"] as? String else { continue }
-                            db.restoreDiaryEntry(comicId: comicId, rating: rating,
-                                                  review: entry["review"] as? String,
-                                                  isReread: entry["is_reread"] as? Bool ?? false,
-                                                  loggedAt: loggedAt)
-                        }
-                    }
-
-                    if let linksArr = root?["series_links"] as? [[String: Any]] {
-                        for link in linksArr {
-                            guard let parentPub = link["parent_publisher"] as? String,
-                                  let parentSer = link["parent_series"] as? String,
-                                  let childPub = link["child_publisher"] as? String,
-                                  let childSer = link["child_series"] as? String else { continue }
-                            db.addSeriesLink(parentPublisher: parentPub, parentSeries: parentSer,
-                                              childPublisher: childPub, childSeries: childSer,
-                                              source: link["source"] as? String ?? "manual")
                         }
                     }
 

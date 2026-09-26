@@ -10,7 +10,6 @@ enum SettingsSearch {
     static let keywords: [String: [String]] = [
         "Appearance": ["theme", "accent", "color", "colour", "dark", "light", "sepia"],
         "Library": ["folder", "path", "scan", "cache", "comics imported"],
-        "Reading Order": ["smart", "annual", "special", "manual fixes", "order basis", "sort"],
         "Comics Database": ["gcd", "download", "offline", "publication date", "grand comics database"],
         "Reader": ["scroll", "slideshow", "autoplay", "speed"],
         "Import": ["cbr", "unar", "rar"],
@@ -53,19 +52,10 @@ struct SettingsView: View {
 
     @State private var folderToRemove: String?
     @State private var folderToRemoveComicCount = 0
-    #if DEBUG
-    @State private var iconExportResult = ""
-    @State private var showIconExportResult = false
-    #endif
 
     private var progressFormat: Binding<ProgressFormat> {
         Binding(get: { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction },
                 set: { progressFormatRaw = $0.rawValue })
-    }
-
-    private var smartReadingOrderIsOn: Binding<Bool> {
-        Binding(get: { vm.readingOrderMode == .intelligent },
-                set: { vm.readingOrderMode = $0 ? .intelligent : .filename })
     }
 
     private var gcdSizeLabel: String? {
@@ -76,7 +66,7 @@ struct SettingsView: View {
     // Kept platform-conditional so a search matching only a Mac-only section (e.g. "cbr") doesn't
     // leave `noSectionsMatch` false while nothing actually renders on iPad/visionOS.
     private static let sectionTitles: [String] = {
-        var titles = ["Appearance", "Library", "Reading Order", "Comics Database",
+        var titles = ["Appearance", "Library", "Comics Database",
                       "Reader", "Sidebar", "Fix Filenames", "Data", "Sync", "Help", "About"]
         #if os(macOS)
         titles.append("Import")
@@ -92,18 +82,7 @@ struct SettingsView: View {
         SettingsSearch.noneMatch(Self.sectionTitles, query: vm.searchText)
     }
 
-    private var readingOrderModeExplainer: String {
-        switch vm.readingOrderMode {
-        case .filename:        return "Issues sort by their original position, unaffected by any of the modes below."
-        case .legacyNumber:    return "Issues sort strictly by parsed issue number within each series."
-        case .publicationDate: return "Issues sort by cover date within each series."
-        case .comicInfoOrder:  return "Issues sort by the issue number embedded in ComicInfo.xml, where present."
-        case .intelligent:     return "Annuals and specials are placed using publication date, story arc, and other signals — not just issue number. Manual corrections in Manage Series always take priority."
-        }
-    }
-
     @State private var unarAvailable         = false
-    @State private var isFixingOrder         = false
     @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
     @State private var showTrash             = false
     @State private var showRenameFiles       = false
@@ -134,7 +113,6 @@ struct SettingsView: View {
             Form {
                 if sectionMatches("Appearance") { appearanceSection }
                 if sectionMatches("Library") { librarySection }
-                if sectionMatches("Reading Order") { readingOrderSection }
                 if sectionMatches("Comics Database") { comicsDatabaseSection }
                 if sectionMatches("Reader") { readerSection }
                 #if os(macOS)
@@ -148,9 +126,6 @@ struct SettingsView: View {
                 if sectionMatches("Data") { dataSection }
                 if sectionMatches("Sync") { syncSection }
                 if sectionMatches("Help") { helpSection }
-                #if DEBUG
-                if sectionMatches("Developer") { developerSection }
-                #endif
                 if sectionMatches("About") { aboutSection }
             }
             .formStyle(.grouped)
@@ -168,8 +143,7 @@ struct SettingsView: View {
         }
         .onChange(of: gcdDownloadState) { _, newValue in
             guard newValue == .success else { return }
-            isFixingOrder = true
-            vm.recomputeGCDMatchesAndReadingOrder { isFixingOrder = false }
+            vm.recomputeGCDMatches()
         }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
         .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
@@ -180,7 +154,7 @@ struct SettingsView: View {
         .confirmationDialog("Clear Library?", isPresented: $showClearConfirm, titleVisibility: .visible) {
             Button("Clear Library", role: .destructive) { vm.clearLibrary() }
         } message: {
-            Text("This will permanently remove all comics, reading progress, ratings, reviews, reading paths, tier lists, tags, bookmarks, and cached thumbnails. Your actual comic files will not be deleted.")
+            Text("This will permanently remove all comics, reading progress, reading paths, tier lists, tags, bookmarks, and cached thumbnails. Your actual comic files will not be deleted.")
         }
         .confirmationDialog("Run Setup Again?", isPresented: $showOnboardingConfirm, titleVisibility: .visible) {
             Button("Erase & Run Setup", role: .destructive) {
@@ -188,7 +162,7 @@ struct SettingsView: View {
                 completedBuild = ""
             }
         } message: {
-            Text("This will erase your entire library database, all reading progress, ratings, reviews, reading paths, tier lists, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
+            Text("This will erase your entire library database, all reading progress, reading paths, tier lists, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
         }
         .errorAlert("Backup Error", message: $backupErrorMessage)
     }
@@ -296,43 +270,12 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder private var readingOrderSection: some View {
-        Section("Reading Order") {
-            Toggle("Smart Reading Order", isOn: smartReadingOrderIsOn)
-            Text("Automatically places annuals and specials in their correct spot in a series instead of dumping them at the end. Turn this off to go back to the original order.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Button(isFixingOrder ? "Working…" : "Recheck My Library") { recheckReadingOrder() }
-                    .disabled(isFixingOrder)
-                    .help("Re-run automatic placement for every series, without touching anything you've manually fixed")
-                Button(isFixingOrder ? "Working…" : "Undo My Manual Fixes") { undoManualOrderFixes() }
-                    .foregroundStyle(.red)
-                    .disabled(isFixingOrder)
-                    .help("Forget every manual reading-order correction you've made and let automatic placement decide again")
-            }
-
-            DisclosureGroup("Advanced") {
-                Picker("Order Basis", selection: $vm.readingOrderMode) {
-                    ForEach(DatabaseManager.ReadingOrderMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.menu)
-                Text(readingOrderModeExplainer)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     @ViewBuilder private var comicsDatabaseSection: some View {
         Section("Comics Database") {
             if OfflineMetadataStore.shared.isAvailable {
                 Label("Downloaded" + (gcdSizeLabel.map { " · \($0)" } ?? ""), systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                Text("Annuals and specials with a real match are placed using their actual publication date, entirely offline.")
+                Text("Your comics are matched against it for canonical series names and issue details, entirely offline.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
@@ -345,7 +288,7 @@ struct SettingsView: View {
                     }
                 }
             } else {
-                Text("A free, one-time download that lets annuals and specials be placed using their real publication date instead of a guess. Works offline forever after — no account, no ongoing internet, no cost.")
+                Text("A free, one-time download that matches your comics to the Grand Comics Database for canonical series names and issue details. Works offline once downloaded.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 switch gcdDownloadState {
@@ -518,11 +461,11 @@ struct SettingsView: View {
             Button("Clear Thumbnail Cache") { clearCache() }
                 .help("Remove cached thumbnails — they regenerate on demand")
             Button("Clear Library…", role: .destructive) { confirmClear() }
-                .help("Remove all comics, progress, ratings, and runs from the database")
+                .help("Remove all comics, progress, and reading paths from the database")
         } header: {
             Text("Data")
         } footer: {
-            Text("Backup includes ratings, reviews, tags, bookmarks, reading orders, lists, diary entries, and series links. Comics themselves stay wherever they already are.")
+            Text("Backup includes reading progress, favorites, tags, bookmarks, manual issue orders, and lists. Comics themselves stay wherever they already are.")
         }
     }
 
@@ -541,23 +484,6 @@ struct SettingsView: View {
                 .help("Re-run the initial library setup wizard")
         }
     }
-
-    #if DEBUG
-    @ViewBuilder private var developerSection: some View {
-        Section("Developer") {
-            Button("Export App Icon Master (1024px)…") {
-                iconExportResult = AppIconExporter.exportMaster()
-                showIconExportResult = true
-            }
-            .help("Renders Views/AppIconArt.swift to icon_master_1024.png at the project root")
-        }
-        .alert("Icon Export", isPresented: $showIconExportResult) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(iconExportResult)
-        }
-    }
-    #endif
 
     @ViewBuilder private var aboutSection: some View {
         Section("About") {
@@ -598,22 +524,6 @@ struct SettingsView: View {
 
     private func confirmRerunOnboarding() { showOnboardingConfirm = true }
 
-    private func recheckReadingOrder() {
-        isFixingOrder = true
-        vm.recomputeGCDMatchesAndReadingOrder { isFixingOrder = false }
-    }
-
-    private func undoManualOrderFixes() {
-        isFixingOrder = true
-        Task.detached(priority: .userInitiated) {
-            DatabaseManager.shared.clearAllReadingOrderOverrides()
-            DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
-            await MainActor.run {
-                isFixingOrder = false
-                vm.reload()
-            }
-        }
-    }
     private func confirmClear()           { showClearConfirm = true }
 
     private func exportBackup() {
@@ -630,6 +540,8 @@ struct TrashView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var trashed: [Comic] = []
     @State private var stillMissingAlert: Comic?
+    @State private var purgeTarget: Comic?
+    @State private var confirmEmptyTrash = false
 
     /// "missing" (file vanished from disk) and "folder_removed" (its library folder was removed
     /// from Settings, file likely untouched) are both distinct from an explicit user delete (or
@@ -651,6 +563,10 @@ struct TrashView: View {
             HStack {
                 Text("Trash").font(.title2.bold())
                 Spacer()
+                if !trashed.isEmpty {
+                    Button("Empty Trash…", role: .destructive) { confirmEmptyTrash = true }
+                        .controlSize(.small)
+                }
                 Button("Done") { dismiss() }
             }
             .padding(20)
@@ -684,6 +600,8 @@ struct TrashView: View {
                             }
                         }
                         .buttonStyle(.bordered).controlSize(.small)
+                        Button("Delete Permanently", role: .destructive) { purgeTarget = comic }
+                            .buttonStyle(.bordered).controlSize(.small)
                     }
                 }
             }
@@ -708,6 +626,30 @@ struct TrashView: View {
             Button("Cancel", role: .cancel) { stillMissingAlert = nil }
         } message: {
             Text("This file still isn't at its original location. Restoring brings the entry back to your library, but ComicArc won't be able to open it until the file is back in place.")
+        }
+        .alert("Delete Permanently?", isPresented: Binding(
+            get: { purgeTarget != nil },
+            set: { if !$0 { purgeTarget = nil } }
+        )) {
+            Button("Delete Permanently", role: .destructive) {
+                if let comic = purgeTarget {
+                    vm.purgeFromTrash(id: comic.id)
+                    trashed.removeAll { $0.id == comic.id }
+                }
+                purgeTarget = nil
+            }
+            Button("Cancel", role: .cancel) { purgeTarget = nil }
+        } message: {
+            Text("This removes \"\(purgeTarget?.title ?? "")\" from ComicArc for good, including its progress and tags. This can't be undone. The file itself is untouched (already in Finder's Trash if you deleted it from here).")
+        }
+        .alert("Empty Trash?", isPresented: $confirmEmptyTrash) {
+            Button("Empty Trash", role: .destructive) {
+                vm.emptyTrash(trashed.map(\.id))
+                trashed.removeAll()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Permanently removes all \(trashed.count) comic\(trashed.count == 1 ? "" : "s") in Trash from ComicArc, including their progress and tags. This can't be undone. Files themselves are untouched.")
         }
     }
 }

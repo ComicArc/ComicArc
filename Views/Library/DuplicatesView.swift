@@ -111,7 +111,7 @@ struct DuplicatesView: View {
 
     private var emptyState: some View {
         EmptyStateView(icon: "checkmark.circle", title: "No Duplicates Found",
-                        message: "Comics that share the same publisher, series, and issue number will show up here.")
+                        message: "Comics with the exact same file name or the exact same cover thumbnail will show up here.")
     }
 }
 

@@ -77,10 +77,6 @@ struct MacWindowService: WindowServiceProtocol {
         win.styleMask.remove(.fullSizeContentView)
     }
 
-    func hideCursorUntilMouseMoves() {
-        NSCursor.setHiddenUntilMouseMoves(true)
-    }
-
     func showCursor() {
         NSCursor.setHiddenUntilMouseMoves(false)
     }

@@ -71,8 +71,4 @@ enum ShareCardCovers {
     static func fromCache(_ comics: [Comic], limit: Int = 6) -> [PlatformImage] {
         comics.prefix(limit).compactMap { ThumbnailCache.shared.thumbnailFromCache(comicId: $0.id) }
     }
-
-    static func fromCache(ids: [Int64], limit: Int = 6) -> [PlatformImage] {
-        ids.prefix(limit).compactMap { ThumbnailCache.shared.thumbnailFromCache(comicId: $0) }
-    }
 }

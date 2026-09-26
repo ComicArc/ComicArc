@@ -1,7 +1,6 @@
 import Foundation
 
-/// Shared by DiaryView and ReadingHistoryView, which both group a list of ISO-UTC timestamps into
-/// day-headers and need the same three conversions -- `loggedAt`/`readAt` are stored as
+/// Used by ReadingHistoryView to group a list of ISO-UTC timestamps into day-headers -- `loggedAt`/`readAt` are stored as
 /// CURRENT_TIMESTAMP (UTC), so grouping by the raw date substring would split/merge entries on a
 /// UTC midnight boundary that has nothing to do with the user's actual calendar day (e.g. a
 /// US-timezone evening reading session can straddle UTC midnight and get split across two day

@@ -13,13 +13,11 @@ enum AppDestination: Hashable, Codable {
     case publisher(String)
     case tag(String)
     case runs
-    case diary
     case tierLists
     case favoriteMoments
     case stats
     case history
     case duplicates
-    case readingOrderManager
     case metadataConflicts
     case settings
 
@@ -32,13 +30,11 @@ enum AppDestination: Hashable, Codable {
         case .publisher(let p):     return p
         case .tag(let t):           return "#\(t)"
         case .runs:                 return "Reading Paths"
-        case .diary:                return "Diary"
         case .tierLists:            return "Tier Lists"
         case .favoriteMoments:      return "Highlights"
         case .stats:                return "Statistics"
         case .history:              return "History"
         case .duplicates:           return "Possible Duplicates"
-        case .readingOrderManager:  return "Reading Order Suggestions"
         case .metadataConflicts:    return "Needs Review"
         case .settings:             return "Settings"
         }
@@ -53,13 +49,11 @@ enum AppDestination: Hashable, Codable {
         case .publisher:            return "building.columns"
         case .tag:                  return "tag"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
-        case .diary:                return "text.book.closed.fill"
         case .tierLists:            return "square.stack.3d.up.fill"
         case .favoriteMoments:      return "star.circle.fill"
         case .stats:                return "chart.bar.xaxis"
         case .history:              return "clock.fill"
         case .duplicates:           return "doc.on.doc"
-        case .readingOrderManager:  return "checkmark.seal"
         case .metadataConflicts:    return "exclamationmark.triangle"
         case .settings:             return "gear"
         }
@@ -79,21 +73,7 @@ final class LibraryViewModel: ObservableObject {
     // finished favorite series just vanished from the home screen with no nudge toward its
     // next unread issue.
     @Published var readNextSuggestions: [Comic] = []
-    // "Memories" callback -- diary entries logged on this same calendar day in a previous year.
-    // Computed once per launch (see refreshOnThisDay(), called from init()), not on every reload,
-    // since the result only ever changes once a day.
-    @Published var onThisDayEntries: [DiaryEntry] = []
     @Published var savedViews: [SavedLibraryView] = SavedLibraryViews.read()
-    // Cross-series taste-based discovery -- distinct from readNextSuggestions, which only ever
-    // continues a series the user already follows. This looks at what's rated highly (tags,
-    // publisher, writer overlap) and surfaces unread comics from OTHER series, deliberately
-    // excluding any series already represented in the liked set (that's readNextSuggestions'
-    // job, not this one's).
-    @Published var recommendations: [Comic] = []
-    /// Ambient, always-visible-while-browsing streak indicator (sidebar), distinct from the same
-    /// number already shown in Stats/Year in Review -- refreshed on its own cadence via
-    /// `refreshReadingStreak()` rather than piggybacking on a full `loadStats()` reload.
-    @Published var readingStreak: Int = 0
     @Published var destination: AppDestination = .library
     @Published var selectedSeries:    String? = nil
     @Published var searchText:        String = ""
@@ -102,28 +82,23 @@ final class LibraryViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "comicSortOrder") }
     }
 
-    /// `minRatingFilter == 0` means "no minimum" (every rating, including unrated). Both persist
-    /// across navigation the same way sortOrder does, rather than silently resetting -- so
-    /// "show me only what I haven't read" stays on while browsing from series to series.
-    @Published var unreadOnly:      Bool = false { didSet { reload() } }
-    @Published var minRatingFilter: Int  = 0     { didSet { reload() } }
+    /// Persists across navigation the same way sortOrder does, rather than silently resetting --
+    /// so "show me only what I haven't read" stays on while browsing from series to series.
+    @Published var unreadOnly: Bool = false { didSet { reload() } }
 
-    @Published var readingOrderMode: DatabaseManager.ReadingOrderMode = .current {
-        didSet {
-            guard oldValue != readingOrderMode else { return }
-            UserDefaults.standard.set(readingOrderMode.rawValue, forKey: "readingOrderMode")
-            Task.detached(priority: .userInitiated) {
-                DatabaseManager.shared.recomputeReadingOrder(mode: DatabaseManager.ReadingOrderMode.current)
-                await MainActor.run { self.reload() }
-            }
-        }
-    }
     @Published var scanState:           LibraryScanner.ScanState = .init()
     @Published var isScanning:          Bool = false
     @Published var showScanReport:      Bool = false
     @Published var showImportWizard:    Bool = false
     @Published var libraryHealthReport: LibraryHealthReport? = nil
     @Published var renameCandidateCount: Int = 0
+    /// Comics the scanner has given up retrying (zero-page after 3 rescans) -- lets the library
+    /// grid/detail view show a distinct "this file looks broken" marker instead of leaving a
+    /// permanently-unreadable comic looking identical to an ordinary unread one. Refreshed
+    /// alongside `libraryHealthReport` rather than added to `Comic`/`comicRow` -- that mapping is
+    /// shared by ~15 call sites across `Database/`, so a small, independently-refreshed side set
+    /// is the lower-risk way to surface this.
+    @Published var brokenComicIds: Set<Int64> = []
 
     struct ImportProgress: Equatable { var done: Int; var total: Int }
     struct ImportSummary: Equatable {
@@ -193,26 +168,23 @@ final class LibraryViewModel: ObservableObject {
     @Published var showSeriesManager: Bool = false
 
     @Published var duplicateGroups:   [[Comic]] = []
-    @Published var autoPlacedIssues:  [Comic] = []
     @Published var pendingMetadataConflicts: [MetadataConflictRow] = []
 
     /// So a collapsed "More" Discover section in the sidebar can't silently hide something that
     /// actually needs attention -- shown as a badge on the disclosure row itself even while
     /// collapsed. Shared by Mac's `SidebarView` and iPad's `iPadSidebar`.
     var moreDiscoverAlertCount: Int {
-        duplicateGroups.count + autoPlacedIssues.count + pendingMetadataConflicts.count
+        duplicateGroups.count + pendingMetadataConflicts.count
     }
 
     var selectedSection: SidebarSection {
         switch destination {
         case .runs:            return .runs
-        case .diary:           return .diary
         case .tierLists:       return .tierLists
         case .favoriteMoments: return .favoriteMoments
         case .stats:           return .stats
         case .history:         return .history
         case .duplicates:      return .duplicates
-        case .readingOrderManager: return .readingOrderManager
         case .metadataConflicts: return .metadataConflicts
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
@@ -232,7 +204,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, diary, tierLists, favoriteMoments, stats, history, duplicates, readingOrderManager, metadataConflicts, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, tierLists, favoriteMoments, stats, history, duplicates, metadataConflicts, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -328,9 +300,6 @@ final class LibraryViewModel: ObservableObject {
         reparseMetaIfNeeded()
         rehashLibraryIfNeeded()
         refreshDuplicates()
-        refreshOnThisDay()
-        refreshRecommendations()
-        refreshReadingStreak()
         refreshRuns()
         refreshTierLists()
 
@@ -394,7 +363,7 @@ final class LibraryViewModel: ObservableObject {
         let gen = reloadGeneration
         let section = selectedSection
 
-        let hasActiveFilter = unreadOnly || minRatingFilter > 0
+        let hasActiveFilter = unreadOnly
         if section == .library && useGroupedView && selectedSeries == nil && activeTag == nil
             && searchText.isEmpty && !hasActiveFilter {
             loadCharacterGroups()
@@ -408,7 +377,6 @@ final class LibraryViewModel: ObservableObject {
         let sort  = sortOrder
         let group = selectedGroup
         let unread = unreadOnly
-        let minRating = minRatingFilter > 0 ? minRatingFilter : nil
 
         Task.detached(priority: .userInitiated) { [db] in
             let pubs = db.publishers()
@@ -429,17 +397,17 @@ final class LibraryViewModel: ObservableObject {
                 loaded = db.inProgress()
             case .favorites:
                 loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, favoritesOnly: true,
-                                      unreadOnly: unread, minRating: minRating)
+                                      unreadOnly: unread)
             case .readingList:
                 loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, readingListOnly: true,
-                                      unreadOnly: unread, minRating: minRating)
+                                      unreadOnly: unread)
             default:
                 let character    = group?.character
                 let nullCharOnly = group != nil && character == nil
                 loaded = db.allComics(publisher: pub, character: character, series: ser,
                                       search: q, sortOrder: sort,
                                       nullCharacterOnly: nullCharOnly, tag: tag,
-                                      unreadOnly: unread, minRating: minRating)
+                                      unreadOnly: unread)
             }
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
@@ -485,7 +453,7 @@ final class LibraryViewModel: ObservableObject {
         var suggestions: [Comic] = []
         for (_, group) in bySeries {
             guard let lastFinished = group.filter(\.isFinished).max(by: {
-                ($0.readingOrderPosition ?? $0.position) < ($1.readingOrderPosition ?? $1.position)
+                $0.position < $1.position
             }) else { continue }
             guard let next = db.nextComic(after: lastFinished), next.progress == 0 else { continue }
             suggestions.append(next)
@@ -517,6 +485,13 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
+        // Bulk selection is scoped to whatever grid is currently on screen -- carrying it across
+        // a navigation change (unlike `select()`, which already clears it) let a selection made
+        // in one series/group silently apply to comics selected-looking in a completely
+        // different one the bulk bar reappears over, since only `browseLevel` gates the bar's
+        // visibility, not the selection itself.
+        bulkMode = false
+        selectedComicIds.removeAll()
         let pub = activePublisher
         reloadGeneration += 1
         let gen = reloadGeneration
@@ -524,27 +499,28 @@ final class LibraryViewModel: ObservableObject {
             let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
-                // springGentle, not springBouncy -- a bouncy overshoot on every drill-down read as
+                // springGentle -- a bouncy overshoot on every drill-down read as
                 // the library "shaking" on navigation, same complaint as the hover-lift jitter.
                 withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) {
+                    // Always land on the group's own series grid, even with a single series --
+                    // skipping straight into it made one-series groups behave differently.
                     self.selectedGroup = group
-                    if series.count == 1 {
-                        self.selectedSeries = series[0].series
-                    } else {
-                        self.seriesGroups = series
-                    }
+                    self.seriesGroups = series
                 }
-                if series.count == 1 { self.reload() }
             }
         }
     }
 
     func drillIntoSeries(_ sg: DatabaseManager.SeriesGroup) {
+        bulkMode = false
+        selectedComicIds.removeAll()
         withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { selectedSeries = sg.series }
         reload()
     }
 
     func navigateBack() {
+        bulkMode = false
+        selectedComicIds.removeAll()
         if selectedSeries != nil {
             withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) { selectedSeries = nil }
             comics = []
@@ -578,10 +554,28 @@ final class LibraryViewModel: ObservableObject {
     }
     func closeReader() {
         readerCoordinator.close()
-        // A reading session just ended -- today may now be the first day of a new streak, or
-        // extended an existing one, and the sidebar's ambient indicator should reflect that
-        // without waiting for the next launch.
-        refreshReadingStreak()
+        refreshHomeShelves()
+    }
+
+    /// Independent of the big character-group/comics reload. Every reader progress/finish write
+    /// goes through `patchComicLocally` (`updateProgress`/`markFinished`), which only ever
+    /// mutates `comics`/`selectedComic` -- it never touches `inProgressComics`/
+    /// `readNextSuggestions`, which are otherwise refreshed only inside `loadCharacterGroups()`.
+    /// Without this, reading a comic opened from a home shelf (Now Reading, Continue Reading,
+    /// Read Next) would leave that shelf showing pre-reading progress/finished state until the
+    /// user happened to drill into a group and back out again.
+    private func refreshHomeShelves() {
+        reloadGeneration += 1
+        let gen = reloadGeneration
+        Task.detached(priority: .utility) { [db] in
+            let shelf = db.inProgress(limit: 8)
+            let readNext = Self.computeReadNextSuggestions(db: db)
+            await MainActor.run {
+                guard gen == self.reloadGeneration else { return }
+                self.inProgressComics    = shelf
+                self.readNextSuggestions = readNext
+            }
+        }
     }
 
     func startWatcher() {

@@ -29,9 +29,6 @@ struct YearInReviewView: View {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
                             RecapStatTile(label: "PAGES READ", value: "\(stats.pagesRead)", icon: "book.pages", tint: Design.brandBlue)
                             RecapStatTile(label: "DAY STREAK", value: "\(stats.longestStreakDays)", icon: "flame.fill", tint: .orange)
-                            RecapStatTile(label: "REREADS", value: "\(stats.rereadCount)", icon: "arrow.counterclockwise", tint: Design.brandGold)
-                            RecapStatTile(label: "RATED", value: stats.averageRating.map { String(format: "%.1f★", $0) } ?? "—",
-                                          icon: "star.fill", tint: .yellow)
                         }
 
                         if let top = stats.topSeries {
@@ -47,10 +44,6 @@ struct YearInReviewView: View {
                         if let month = stats.busiestMonthLabel {
                             RecapHighlightRow(icon: "calendar", label: "Busiest Month", value: month, detail: nil,
                                                tint: Design.brandGold)
-                        }
-
-                        if !stats.topRated.isEmpty {
-                            topRatedSection(stats.topRated)
                         }
                     }
                     .padding(24)
@@ -109,35 +102,6 @@ struct YearInReviewView: View {
         .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
     }
 
-    private func topRatedSection(_ topRated: [(comicId: Int64, title: String, rating: Int)]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SignageLabel(text: "Top Rated", size: 12, kerning: 1.2)
-            VStack(spacing: 0) {
-                ForEach(Array(topRated.enumerated()), id: \.offset) { _, entry in
-                    HStack {
-                        Text(entry.title).font(.subheadline).lineLimit(1)
-                        Spacer()
-                        HStack(spacing: 1) {
-                            ForEach(1...5, id: \.self) { star in
-                                Image(systemName: star <= entry.rating ? "star.fill" : "star")
-                                    .font(.system(size: 9)).foregroundStyle(Design.brandGold)
-                            }
-                        }
-                        .accessibilityHidden(true)
-                    }
-                    .padding(.vertical, 8)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(entry.title), \(entry.rating) star\(entry.rating == 1 ? "" : "s")")
-                    if entry.title != topRated.last?.title { Divider() }
-                }
-            }
-            .padding(.horizontal, 14)
-            .background(Design.cardBg)
-            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
-            .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
-        }
-    }
-
     private var emptyState: some View {
         EmptyStateView(
             icon: "calendar.badge.clock",
@@ -174,28 +138,14 @@ struct YearInReviewView: View {
             DatabaseManager.shared.yearInReview(year: year)
         }.value
         stats = result
-
-        // Covers for the share card specifically: topRated comics were rated sometime over the
-        // whole year, not necessarily viewed recently, so (unlike Tier Lists/Reading Paths, whose
-        // item cards are on-screen right before Share is tapped) the thumbnail cache is often
-        // cold here -- worth a small background fetch rather than settling for empty covers on
-        // the one recap screen most likely to actually get shared.
-        let ids = result.topRated.map(\.comicId)
-        let images = await Task.detached(priority: .utility) {
-            ids.compactMap { id -> PlatformImage? in
-                guard let comic = DatabaseManager.shared.comic(id: id) else { return nil }
-                return ThumbnailCache.shared.thumbnailSync(for: comic)
-            }
-        }.value
         guard selectedYear == year else { return }
         let card = ShareCardView(
             title: "\(year) in Review",
             subtitle: "\(result.issuesRead) issue\(result.issuesRead == 1 ? "" : "s") read",
-            covers: images,
+            covers: [],
             stats: [
                 ("Pages", "\(result.pagesRead)"),
-                ("Streak", "\(result.longestStreakDays)d"),
-                ("Rereads", "\(result.rereadCount)")
+                ("Streak", "\(result.longestStreakDays)d")
             ]
         )
         shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "YearInReview-\(year).png")

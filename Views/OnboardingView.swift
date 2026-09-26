@@ -78,7 +78,7 @@ struct OnboardingView: View {
                 Circle()
                     .stroke(Design.brandGold.opacity(0.3), lineWidth: 1.5)
                     .frame(width: 130, height: 130)
-                // The app's own mark -- same shape as the real app icon (`AppIconArt.swift`), so
+                // The app's own mark -- same shape as the real app icon, so
                 // this reads as brand consistency, not an extra decoration.
                 ComicBurstShape()
                     .fill(Design.goldGradient)
@@ -101,7 +101,7 @@ struct OnboardingView: View {
             HStack(spacing: 40) {
                 featureBullet(icon: "books.vertical.fill", label: "Organize", sub: "CBZ, CBR & PDF")
                 featureBullet(icon: "book.fill",           label: "Read",     sub: "Built right in")
-                featureBullet(icon: "chart.bar.fill",      label: "Track",    sub: "Ratings & stats")
+                featureBullet(icon: "chart.bar.fill",      label: "Track",    sub: "Progress & stats")
             }
 
             Button("Get Started") {
@@ -438,7 +438,7 @@ struct OnboardingView: View {
         .onChange(of: gcdDownloadState) { _, newValue in
             guard newValue == .success else { return }
             isMatchingAfterDownload = true
-            LibraryViewModel.shared.recomputeGCDMatchesAndReadingOrder { isMatchingAfterDownload = false }
+            LibraryViewModel.shared.recomputeGCDMatches { isMatchingAfterDownload = false }
         }
     }
 
