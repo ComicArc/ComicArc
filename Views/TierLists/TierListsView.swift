@@ -59,9 +59,6 @@ struct TierListDetailView: View {
     @State private var items:           [TierListItem] = []
     @State private var itemsLoading     = true
     @State private var showingAddComics = false
-    @State private var tierListRating:  Int    = 0
-    @State private var showReviewSheet  = false
-    @State private var reviewText:      String = ""
     @State private var showEditSheet    = false
     @State private var showDeleteConfirm = false
     @State private var exportErrorMessage: String?
@@ -135,13 +132,9 @@ struct TierListDetailView: View {
         .ambientBackground()
         .task {
             loadItems()
-            tierListRating = tierList.rating ?? 0
-            reviewText     = tierList.review ?? ""
         }
         .onChange(of: tierList) { _, tl in
             currentTierList = tl
-            tierListRating  = tl.rating ?? 0
-            reviewText      = tl.review ?? ""
             loadItems()
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
@@ -158,9 +151,6 @@ struct TierListDetailView: View {
                     loadItems()
                 }
             )
-        }
-        .sheet(isPresented: $showReviewSheet) {
-            reviewSheet
         }
         .sheet(isPresented: $showEditSheet) {
             EditCollectionView(noun: "Tier List", item: $currentTierList) { t, d, _ in
@@ -205,25 +195,9 @@ struct TierListDetailView: View {
             Spacer(minLength: 10)
 
             VStack(alignment: .trailing, spacing: 10) {
-                StarRating(rating: tierListRating) { star in
-                    let newVal = star == tierListRating ? 0 : star
-                    tierListRating = newVal
-                    LibraryViewModel.shared.setTierListRating(currentTierList.id,
-                                                              rating: newVal,
-                                                              review: reviewText.isEmpty ? nil : reviewText)
-                    rebuildShareCard()
-                }
-
                 HStack(spacing: 6) {
                     Button("Edit") { showEditSheet = true }
                         .buttonStyle(.bordered)
-
-                    Button { showReviewSheet = true } label: {
-                        Image(systemName: "star.bubble")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Rate & Review")
 
                     Button {
                         BackupService.exportCSV(
@@ -255,42 +229,6 @@ struct TierListDetailView: View {
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
         .background(Design.navBackground)
-    }
-
-    private var reviewSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Reads `currentTierList` (the synced @State copy), not the immutable `tierList` init
-            // parameter -- otherwise this sheet keeps showing the pre-edit title after
-            // EditCollectionView updates currentTierList, since `tierList` itself never changes
-            // for this view's lifetime.
-            Text("Rate & Review: \(currentTierList.title)")
-                .font(.title2.bold())
-
-            Text("Rating").font(.headline)
-            StarRating(rating: tierListRating) { star in
-                tierListRating = star == tierListRating ? 0 : star
-            }
-            .scaleEffect(1.4, anchor: .leading)
-
-            Text("Review").font(.headline)
-            TextEditor(text: $reviewText)
-                .frame(minHeight: 120)
-                .border(Design.borderColor)
-
-            HStack {
-                Button("Cancel") { showReviewSheet = false }.keyboardShortcut(.escape)
-                Spacer()
-                Button("Save") {
-                    LibraryViewModel.shared.setTierListRating(currentTierList.id,
-                                                              rating: tierListRating,
-                                                              review: reviewText.isEmpty ? nil : reviewText)
-                    showReviewSheet = false
-                }
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24).frame(width: 440)
     }
 
     @ViewBuilder
@@ -353,10 +291,7 @@ struct TierListDetailView: View {
             title: currentTierList.title,
             subtitle: "Tier List • \(items.count) comic\(items.count == 1 ? "" : "s")",
             covers: ShareCardCovers.fromCache(ranked.map(\.comic)),
-            stats: [
-                ("Comics", "\(items.count)"),
-                ("Rating", tierListRating > 0 ? String(repeating: "★", count: tierListRating) : "—")
-            ]
+            stats: [("Comics", "\(items.count)")]
         )
         shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "TierList-\(currentTierList.id).png")
     }

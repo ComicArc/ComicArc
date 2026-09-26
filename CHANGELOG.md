@@ -8,6 +8,25 @@ All notable changes to ComicArc are documented here, starting from the 1.0 launc
 
 Work since the 1.0.0 launch, not yet tagged as a new release.
 
+### Scope reduction
+ComicArc is refocused on being a library and a reader. Removed:
+- Ratings and reviews (comics, Reading Paths, Tier Lists) and the Diary built on them. Existing data is left untouched in the database but no longer shown or backed up.
+- Intelligent reading order (automatic annual/special placement, the order-basis picker, series continuation links, and the Reading Order Suggestions review screen). Series sort by issue number with specials after regular issues; manual Series Manager orders are kept.
+- The Recommended For You and On This Day home shelves.
+- Character themes, themed backgrounds and hover effects, decorative illustrations and animations, emojis, and the sidebar streak banner.
+- The test suite and debug-only developer tools.
+
+### Changed
+- Duplicate detection only flags exact file-name matches, byte-identical cover thumbnails, or byte-identical files.
+- Clicking a character or category always opens its own page, even when it holds a single series.
+- The macOS reader fits the page to the window, scrolls naturally when zoomed, and only shows its controls when the pointer is near the top or bottom edge.
+- The Mac app scans the library once per launch; the live folder watcher covers changes after that.
+- Navigate menu shortcuts: Statistics ⌘6, History ⌘7, Tier Lists ⌘8, Highlights ⌘9.
+
+### Fixed
+- Bulk Mark Read/Unread and Mark All as Read now actually set/clear finished status.
+- The iPad and visionOS targets build again (missing BackupService membership, an actor-isolation error in iPad import, and UIScreen use on visionOS).
+
 ### Platform
 - Added a third native target, **ComicArcVision**, for visionOS — reuses the iPad interface.
 

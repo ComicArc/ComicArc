@@ -51,9 +51,9 @@ Series Name #123.cbz
   (`Series Name 123.cbz`) also works, but `#` is unambiguous.
 - Decimals work too: `#12.1`.
 - **Annuals, specials, one-shots**: include the word right in the name
-  — `Series Name Annual #1.cbz`, `Series Name Special #1.cbz`. This is
-  also what tells ComicArc to place it as a special in the reading
-  order rather than a regular numbered issue.
+  — `Series Name Annual #1.cbz`, `Series Name Special #1.cbz`. That's
+  what tells ComicArc it's a special rather than a regular numbered
+  issue, so it sorts after the regular issues instead of among them.
 - The **title** shown in the app is just the filename (minus the
   extension), so a clean filename directly means a clean title too.
 
@@ -90,7 +90,4 @@ above doesn't give a clean answer — `Series`, `Publisher`, `Writer`,
 `Penciller`, `Year`, `Month`, `StoryArc`, `LanguageISO`. **Folder and
 filename always win when they disagree** — the assumption throughout
 is that how you've organized your files on disk is more trustworthy
-than whatever an old scrape wrote into an XML file years ago. If you
-want ComicInfo.xml's `Year`/`Month` to also power chronological
-placement of annuals in the reading order, no extra step is needed —
-that already happens automatically wherever the data exists.
+than whatever an old scrape wrote into an XML file years ago.

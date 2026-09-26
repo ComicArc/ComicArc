@@ -4,28 +4,28 @@ import SQLite3
 extension DatabaseManager {
     func bookmarks(comicId: Int64) -> [Bookmark] {
         queue.sync {
-            rows("SELECT id, comic_id, page, label, created_at, is_favorite FROM bookmarks WHERE comic_id = ? ORDER BY page",
+            rows("SELECT id, comic_id, page, label, is_favorite FROM bookmarks WHERE comic_id = ? ORDER BY page",
                  args: [comicId]) { s in
                 Bookmark(id: colInt64(s, 0), comicId: colInt64(s, 1),
                          page: colInt(s, 2), label: colText(s, 3) ?? "",
-                         createdAt: colText(s, 4) ?? "", isFavorite: colInt(s, 5) != 0)
+                         isFavorite: colInt(s, 4) != 0)
             }
         }
     }
 
     /// Every bookmark flagged as a favorite moment, across the whole library, newest first --
-    /// backing the standalone "Favorite Moments" browsing screen. Same two-step shape as
-    /// `diaryEntries`: fetch the child rows, then batch-resolve their comics via one IN query.
+    /// backing the standalone "Favorite Moments" browsing screen. Fetches the child rows, then
+    /// batch-resolves their comics via one IN query.
     func favoriteMoments() -> [FavoriteMoment] {
         queue.sync {
             let raw: [Bookmark] = rows("""
-                SELECT id, comic_id, page, label, created_at, is_favorite
+                SELECT id, comic_id, page, label, is_favorite
                 FROM bookmarks WHERE is_favorite = 1
                 ORDER BY created_at DESC
                 """) { s in
                 Bookmark(id: colInt64(s, 0), comicId: colInt64(s, 1),
                           page: colInt(s, 2), label: colText(s, 3) ?? "",
-                          createdAt: colText(s, 4) ?? "", isFavorite: colInt(s, 5) != 0)
+                          isFavorite: colInt(s, 4) != 0)
             }
             guard !raw.isEmpty else { return [] }
 

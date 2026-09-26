@@ -1,14 +1,5 @@
 import SwiftUI
 
-/// The accent-color lookup a selected character group's theme detection needs -- shared by
-/// `SeriesGroupGridView` (this file) and `LibraryGridView`, which both react to `vm.selectedGroup`
-/// changing but previously each hand-rolled an identical `guard`+`groupAccentColor` call.
-func loadSelectedGroupMoodColor(_ group: DatabaseManager.CharacterGroup?, into color: Binding<Color?>) {
-    guard let group else { color.wrappedValue = nil; return }
-    ThumbnailCache.shared.groupAccentColor(key: group.id, coverImagePath: group.coverImagePath,
-                                            representativeComicId: group.coverId) { color.wrappedValue = $0 }
-}
-
 struct CharacterGroupGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var draggedGroup: DatabaseManager.CharacterGroup?
@@ -34,14 +25,6 @@ struct CharacterGroupGridView: View {
                 }
                 if !vm.readNextSuggestions.isEmpty {
                     ReadNextShelf()
-                    Divider().overlay(Design.borderColor).padding(.vertical, 6)
-                }
-                if !vm.onThisDayEntries.isEmpty {
-                    OnThisDayShelf()
-                    Divider().overlay(Design.borderColor).padding(.vertical, 6)
-                }
-                if !vm.recommendations.isEmpty {
-                    RecommendedShelf()
                     Divider().overlay(Design.borderColor).padding(.vertical, 6)
                 }
                 LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
@@ -95,8 +78,7 @@ struct CharacterGroupGridView: View {
             title: "Your Shelf Is Empty",
             message: vm.libraryPaths.isEmpty
                 ? "Set your library folder(s) in Settings to start stocking it"
-                : "Scan your library to bring your comics to the shelf",
-            illustration: vm.libraryPaths.isEmpty ? nil : AnyView(LongBoxesIllustration())
+                : "Scan your library to bring your comics to the shelf"
         ) {
             if !vm.libraryPaths.isEmpty {
                 Button("Scan Library") { vm.scan() }.buttonStyle(.borderedProminent)
@@ -109,7 +91,6 @@ struct SeriesGroupGridView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var draggedSeries: String?
     @State private var dropTargetSeries: String?
-    @State private var moodColor: Color?
 
     private let columns = [GridItem(.adaptive(minimum: Design.groupCardWidth,
                                               maximum: Design.groupCardWidth + 20),
@@ -152,15 +133,6 @@ struct SeriesGroupGridView: View {
                 .padding(.vertical, Design.gridSpacing)
             }
         }
-        // A themed backdrop for this character -- name-matched first (generic decoration only,
-        // see `Design.ComicTheme`), falling back to a scene derived from the character's own
-        // cover-art color for anything unmatched. The same detected theme is also injected into
-        // the environment, so every `GroupCard` inside automatically scales its own existing
-        // hover spotlight/lift/shadow to match -- no card needs to know which theme it is.
-        .background(ThemeBackdrop(name: vm.selectedGroup?.groupName, color: moodColor))
-        .environment(\.comicTheme, ComicTheme.detect(name: vm.selectedGroup?.groupName, color: moodColor))
-        .onAppear { loadSelectedGroupMoodColor(vm.selectedGroup, into: $moodColor) }
-        .onChange(of: vm.selectedGroup?.id) { _, _ in loadSelectedGroupMoodColor(vm.selectedGroup, into: $moodColor) }
     }
 
     @ViewBuilder
@@ -365,31 +337,17 @@ private struct GroupCard: View {
     @State private var identityColor: Color?
     @State private var isHovered = false
     @AppStorage("progressFormat") private var progressFormatRaw = ProgressFormat.fraction.rawValue
-    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.comicTheme) private var theme
-
     private var progressFormat: ProgressFormat { ProgressFormat(rawValue: progressFormatRaw) ?? .fraction }
-    private var restingTint: Color? {
-        Design.atmosphericTint(identityColor,
-                                increaseContrast: colorSchemeContrast == .increased,
-                                differentiateWithoutColor: differentiateWithoutColor)
-    }
-    private var scrimColor: Color {
-        Design.scrimTint(identityColor,
-                          increaseContrast: colorSchemeContrast == .increased,
-                          differentiateWithoutColor: differentiateWithoutColor)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
                 coverImage
                     .frame(width: Design.groupCardWidth, height: Design.groupCardHeight)
-                    .comicCardStyle(accentColor: identityColor, isHovered: isHovered, restingTint: restingTint, theme: theme)
+                    .comicCardStyle(accentColor: identityColor, isHovered: isHovered)
 
-                LinearGradient(colors: [.clear, scrimColor.opacity(0.82)],
+                LinearGradient(colors: [.clear, Color.black.opacity(0.82)],
                                startPoint: .center, endPoint: .bottom)
                     .frame(width: Design.groupCardWidth, height: Design.groupCardHeight)
                     .clipShape(Rectangle())
@@ -420,7 +378,7 @@ private struct GroupCard: View {
                     .frame(width: Design.groupCardWidth, alignment: .leading)
             }
         }
-        .hoverLift(scale: theme.interaction.hoverLiftScale, duration: theme.interaction.hoverAnimationDuration, isHovered: $isHovered)
+        .hoverLift(isHovered: $isHovered)
         .animation(Design.motion(Design.easeStandard, reduce: reduceMotion), value: identityColor)
         .onAppear { loadThumbnail() }
     }

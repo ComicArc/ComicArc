@@ -68,6 +68,14 @@ final class ReaderSession {
     private var sessionStartPage: Int
     private var hideWorkItem: DispatchWorkItem?
     private var autoplayTask: Task<Void, Never>?
+    /// Whether the *last* page change was genuine sequential reading vs. a jump -- mirrors the
+    /// `isSequential` argument of the most recent `setPage` call, so `teardown()`/
+    /// `handleScenePhaseChange()` can flush with the same completion semantics that governed that
+    /// change instead of assuming sequential unconditionally. Without this, scrubbing straight to
+    /// the last page and then closing the reader (or backgrounding the app) would flush as if that
+    /// jump were genuine forward reading and incorrectly, permanently mark the issue finished
+    /// (`finished_at` is sticky -- see `ReadingProgressStore`/`DatabaseManager.markFinished`).
+    private var lastPositionWasSequential = true
 
     /// What happened when the reader tried to advance/retreat past the current page. `.advanced`
     /// needs no action from the caller; `.atBoundary` hands back the adjacent issue (if any) so
@@ -124,7 +132,7 @@ final class ReaderSession {
     func teardown() {
         hideWorkItem?.cancel()
         autoplayTask?.cancel()
-        progressStore.flush(comic: comic, page: currentPage, isSequential: true)
+        progressStore.flush(comic: comic, page: currentPage, isSequential: lastPositionWasSequential)
         DatabaseManager.shared.logReadingSession(comicId: comic.id, pageStart: min(sessionStartPage, currentPage), pageEnd: max(sessionStartPage, currentPage))
         PageStore.shared.evict(comicId: comic.id)
         document?.close()
@@ -132,7 +140,7 @@ final class ReaderSession {
 
     func handleScenePhaseChange(isActive: Bool) {
         guard !isActive else { return }
-        progressStore.flush(comic: comic, page: currentPage, isSequential: true)
+        progressStore.flush(comic: comic, page: currentPage, isSequential: lastPositionWasSequential)
     }
 
     // MARK: - Viewport / target-size decode
@@ -151,12 +159,16 @@ final class ReaderSession {
 
     // MARK: - Page loading
 
-    private func loadCurrentPage() {
+    /// `keepingCurrentImage` is for zoom-driven re-decodes of the same page: the current image
+    /// stays on screen until the sharper one arrives, instead of blanking mid-zoom.
+    private func loadCurrentPage(keepingCurrentImage: Bool = false) {
         guard let document else { return }
-        isLoading = true
         loadFailed = false
-        currentImage = nil
-        secondaryImage = nil
+        if !keepingCurrentImage {
+            isLoading = true
+            currentImage = nil
+            secondaryImage = nil
+        }
         let page = currentPage
         let maxPixelSize = maxPixelSizeForCurrentZoom
         PageStore.shared.request(document: document, comicId: comic.id, page: page, maxPixelSize: maxPixelSize) { [weak self] image in
@@ -235,6 +247,7 @@ final class ReaderSession {
 
     private func setPage(_ page: Int, isSequential: Bool) {
         currentPage = page
+        lastPositionWasSequential = isSequential
         resetZoom()
         loadCurrentPage()
         isBookmarked = bookmarks.contains { $0.page == page }
@@ -260,7 +273,8 @@ final class ReaderSession {
             let siblings = DatabaseManager.shared.allComics(publisher: pub, series: ser)
             guard siblings.count > 1, siblings.allSatisfy(\.isFinished) else { return }
             try? await Task.sleep(nanoseconds: 1_200_000_000)
-            await MainActor.run { self?.showSeriesComplete = true }
+            guard let self else { return }
+            await MainActor.run { self.showSeriesComplete = true }
         }
     }
 
@@ -279,9 +293,10 @@ final class ReaderSession {
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = NextIssueResolver.resolve(for: comic, runId: runId)
             NextIssueResolver.prefetchCover(for: result.next)
+            guard let self else { return }
             await MainActor.run {
-                self?.nextIssue = result.next
-                self?.previousIssue = result.previous
+                self.nextIssue = result.next
+                self.previousIssue = result.previous
             }
         }
     }
@@ -318,7 +333,7 @@ final class ReaderSession {
             guard zoomLevel != 1.0 || zoomAnchor != .center else { return }
             zoomLevel = 1.0
             zoomAnchor = .center
-            loadCurrentPage()
+            loadCurrentPage(keepingCurrentImage: true)
             return
         }
         if let point, viewportSize.width > 0, viewportSize.height > 0 {
@@ -328,7 +343,7 @@ final class ReaderSession {
             zoomAnchor = clampAnchor(zoomAnchor, zoom: clampedLevel)
         }
         zoomLevel = clampedLevel
-        loadCurrentPage()
+        loadCurrentPage(keepingCurrentImage: true)
     }
 
     func pan(anchorDelta delta: CGSize) {

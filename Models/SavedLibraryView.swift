@@ -12,18 +12,16 @@ struct SavedLibraryView: Identifiable, Codable, Equatable {
     var tag: String?
     var sortOrder: DatabaseManager.SortOrder
     var unreadOnly: Bool
-    var minRatingFilter: Int
     var searchText: String
 
     init(id: UUID = UUID(), name: String, publisher: String?, tag: String?,
-         sortOrder: DatabaseManager.SortOrder, unreadOnly: Bool, minRatingFilter: Int, searchText: String) {
+         sortOrder: DatabaseManager.SortOrder, unreadOnly: Bool, searchText: String) {
         self.id = id
         self.name = name
         self.publisher = publisher
         self.tag = tag
         self.sortOrder = sortOrder
         self.unreadOnly = unreadOnly
-        self.minRatingFilter = minRatingFilter
         self.searchText = searchText
     }
 

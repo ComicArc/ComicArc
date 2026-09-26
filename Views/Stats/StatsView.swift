@@ -177,7 +177,7 @@ struct StatsView: View {
                 .accessibilityLabel("Reading goal progress: \(Int(pct * 100))%")
 
                 if pct >= 1 {
-                    Label("Goal achieved! 🎉", systemImage: "star.fill")
+                    Label("Goal achieved", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green).font(.subheadline)
                 } else {
                     Text("\(goalCount - issuesReadThisYear) issues to go")
@@ -300,7 +300,7 @@ struct StatsView: View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 12) {
                 sectionHeader("READING ACTIVITY")
-                HeatmapView(activityMap: s.activityMap, days: 365)
+                HeatmapView(activityMap: s.activityMap)
                     .frame(height: 7 * (12 + 2))
             }
         }
@@ -367,7 +367,6 @@ private struct DashboardCard<Content: View>: View {
 
 struct HeatmapView: View {
     let activityMap: [String: Int]
-    let days: Int
 
     // Computed once and cached in @State instead of being rebuilt (including a fresh
     // Calendar/DateFormatter) on every single body evaluation -- SwiftUI re-evaluates body far

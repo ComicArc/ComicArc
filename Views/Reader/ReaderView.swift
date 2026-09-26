@@ -8,26 +8,14 @@ struct ReaderView: View {
     /// this whole view (and its `ReaderSession`) fresh for it, the same as opening any other
     /// comic normally.
     let onOpenComic: (Comic) -> Void
-    /// Set when this comic was opened from inside a Run's reading path. When present, next/
-    /// previous navigation is scoped to that run's ordered items instead of series order.
-    let runId: Int64?
 
     @State private var session: ReaderSession
 
     @Environment(\.windowService) private var windowService
     @Environment(\.readerNamespace) private var readerNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var isFocused: Bool
-
-    @State private var accentColor: Color?
-    private var backdropColor: Color {
-        Design.deepBackdropTint(accentColor,
-                                 increaseContrast: colorSchemeContrast == .increased,
-                                 differentiateWithoutColor: differentiateWithoutColor)
-    }
 
     /// A brief hero layer that grows from wherever this comic's cover was on screen (a grid card
     /// or IssueDetailPage) into the reader, then fades to reveal the real paginated content
@@ -40,10 +28,6 @@ struct ReaderView: View {
     @State private var showHeroCover = true
     @State private var isClosing = false
 
-    /// Rating isn't reading state -- it's a library concern that happens to have a control in the
-    /// reader's bottom bar, so it stays local rather than living on `ReaderSession`.
-    @State private var comicRating: Int
-
     @State private var showShortcuts = false
     @State private var showFilmstrip = false
     @State private var showBookmarks = false
@@ -53,28 +37,31 @@ struct ReaderView: View {
     @AppStorage("readerToolbarLocked") private var toolbarLockedPref = false
     @AppStorage("autoplaySpeed") private var autoplayIntervalPref: Double = 6.0
 
-    @GestureState private var pinchScale: CGFloat = 1.0
-    @GestureState private var dragOffset: CGSize = .zero
-    @State private var cursorPosition: CGPoint = .zero
+    /// Reader chrome is hover-driven only: the top bar shows while the pointer is near the top
+    /// edge, the bottom bar while it's near the bottom edge. Page turns never reveal either.
+    @State private var hoveringTop = false
+    @State private var hoveringBottom = false
+    private static let topHoverZone: CGFloat = 72
+    private static let bottomHoverZone: CGFloat = 130
+
+    private var showTopBar: Bool { session.toolbarLocked || hoveringTop }
+    private var showBottomBar: Bool { session.toolbarLocked || hoveringBottom || showPageJump }
 
     init(comic: Comic, initialPage: Int? = nil, runId: Int64? = nil, onClose: @escaping () -> Void,
          onOpenComic: @escaping (Comic) -> Void) {
         self.comic       = comic
         self.onClose     = onClose
         self.onOpenComic = onOpenComic
-        self.runId       = runId
         _session      = State(initialValue: ReaderSession(comic: comic, runId: runId, initialPage: initialPage))
-        _comicRating  = State(initialValue: comic.rating)
     }
 
     var body: some View {
         @Bindable var session = session
         GeometryReader { geo in
             ZStack(alignment: .top) {
-                backdropColor.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
 
-                pageContent
-                    .colorEffect(session.colorFilter)
+                pageContent(viewportSize: geo.size)
 
                 if showHeroCover, let heroCoverImage {
                     Image(platformImage: heroCoverImage)
@@ -87,7 +74,7 @@ struct ReaderView: View {
                 }
 
                 VStack(spacing: 0) {
-                    if session.shouldShowChrome {
+                    if showTopBar {
                         topBar
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -96,7 +83,7 @@ struct ReaderView: View {
                         filmstrip
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    if session.shouldShowChrome {
+                    if showBottomBar {
                         bottomBar
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -125,18 +112,15 @@ struct ReaderView: View {
                 }
             }
             .onContinuousHover { phase in
-                if case .active(let loc) = phase {
-                    cursorPosition = loc
-                    session.interactionOccurred()
+                var top = false, bottom = false
+                if case .active(let location) = phase {
+                    top = location.y < Self.topHoverZone
+                    bottom = location.y > geo.size.height - Self.bottomHoverZone
                 }
-            }
-            .onTapGesture(count: 2) {
-                withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) {
-                    if session.isZoomed {
-                        session.setZoom(1.0)
-                    } else {
-                        session.setZoom(2.0, anchorInViewport: cursorPosition)
-                    }
+                guard top != hoveringTop || bottom != hoveringBottom else { return }
+                withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) {
+                    hoveringTop = top
+                    hoveringBottom = bottom
                 }
             }
             .onChange(of: geo.size) { _, size in
@@ -148,12 +132,12 @@ struct ReaderView: View {
                 session.resetZoom()
             }
         }
-        .accessibilityLabel("Comic reader — \(comic.title), page \(session.currentPage + 1) of \(comic.pageCount)")
-        .accessibilityHint("Double-tap to zoom. Swipe to navigate pages.")
+        .accessibilityLabel("Comic reader — \(comic.title), page \(session.currentPage + 1) of \(session.pageCount)")
+        .accessibilityHint("Double-click to zoom. Use the arrow keys to turn pages.")
         .focusable()
         .focused($isFocused)
-        .onKeyPress(.leftArrow)  { session.rtl ? session.advance() : session.retreat(); return .handled }
-        .onKeyPress(.rightArrow) { session.rtl ? session.retreat() : session.advance(); return .handled }
+        .onKeyPress(.leftArrow)  { if session.rtl { session.advance() } else { session.retreat() }; return .handled }
+        .onKeyPress(.rightArrow) { if session.rtl { session.retreat() } else { session.advance() }; return .handled }
         .onKeyPress(.upArrow)    { session.retreat(); return .handled }
         .onKeyPress(.downArrow)  { session.advance(); return .handled }
         .onKeyPress(.escape) {
@@ -167,12 +151,11 @@ struct ReaderView: View {
         .onKeyPress(KeyEquivalent("?")) { showShortcuts.toggle(); return .handled }
         .onKeyPress(KeyEquivalent("g")) { withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showFilmstrip.toggle() }; return .handled }
         .onKeyPress(.home) { session.jump(to: 0); return .handled }
-        .onKeyPress(.end)  { session.jump(to: comic.pageCount - 1); return .handled }
+        .onKeyPress(.end)  { session.jump(to: session.pageCount - 1); return .handled }
         .onKeyPress(KeyEquivalent("=")) { zoomIn(); return .handled }
         .onKeyPress(KeyEquivalent("+")) { zoomIn(); return .handled }
         .onKeyPress(KeyEquivalent("-")) { zoomOut(); return .handled }
         .onKeyPress(KeyEquivalent("0")) { session.setZoom(1.0); return .handled }
-        .onChange(of: session.currentPage) { _, _ in comicRating = comic.rating }
         .onChange(of: scenePhase) { _, phase in session.handleScenePhaseChange(isActive: phase == .active) }
         .onKeyPress(KeyEquivalent("w"), action: { handleClose(); return .handled })
         .onKeyPress(KeyEquivalent("f")) { windowService.toggleFullScreen(); return .handled }
@@ -186,14 +169,12 @@ struct ReaderView: View {
             session.toolbarLocked = toolbarLockedPref
             session.autoplayInterval = autoplayIntervalPref
             session.onRequestIssueTransition = { onOpenComic($0) }
-            session.interactionOccurred()
             windowService.enterImmersiveMode()
             // Cache-only: this exact cover was almost certainly just on screen (a grid card or
             // IssueDetailPage) a moment ago, so this is normally an instant hit, not a fresh
             // decode -- matches the hero layer's own job of bridging that already-loaded image
             // into the reader, not doing new work.
             heroCoverImage = ThumbnailCache.shared.thumbnailFromCache(comicId: comic.id)
-            ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
                 withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { showHeroCover = false }
             }
@@ -233,51 +214,51 @@ struct ReaderView: View {
     }
 
     @ViewBuilder
-    private var pageContent: some View {
+    private func pageContent(viewportSize: CGSize) -> some View {
         if session.scrollMode {
             ScrollModeView(session: session)
+                .colorEffect(session.colorFilter)
         } else {
-            PagedModeView(session: session)
-                .scaleEffect(liveZoom)
-                .offset(session.isZoomed ? liveOffset : .zero)
-                .onGeometryChange(for: CGSize.self, of: { $0.size }, action: {
-                    session.updateViewport(size: $0, screenScale: PlatformImage.pdfRenderScale)
-                })
-                .gesture(
-                    MagnifyGesture()
-                        .updating($pinchScale) { val, state, _ in state = val.magnification }
-                        .onEnded { val in
-                            session.setZoom(session.zoomLevel * val.magnification)
-                        }
-                )
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 4)
-                        .updating($dragOffset) { val, state, _ in
-                            guard session.isZoomed else { return }
-                            state = val.translation
-                        }
-                        .onEnded { val in
-                            guard session.isZoomed else { return }
-                            session.pan(anchorDelta: val.translation)
-                        }
-                )
-                .onTapGesture { }
-                // No `.animation(value:)` on the live zoom/offset here on purpose -- both update
-                // every frame during an active pinch/drag, so animating them fought the user's
-                // own finger movement with a lagging spring. Discrete, committed changes
-                // (zoomIn/zoomOut/setZoom below) already wrap themselves in withAnimation.
+            #if os(macOS)
+            ZoomablePageView(
+                images: pagedImages, page: session.currentPage, fitMode: session.fitMode,
+                zoomLevel: session.zoomLevel, colorFilter: session.colorFilter, viewportSize: viewportSize,
+                onZoomCommitted: { session.setZoom($0) },
+                onSwipe: { towardNext in
+                    if towardNext != session.rtl { session.advance() } else { session.retreat() }
+                }
+            )
+            .overlay { pageStatusOverlay }
+            .onGeometryChange(for: CGSize.self, of: { $0.size }, action: {
+                session.updateViewport(size: $0, screenScale: PlatformImage.pdfRenderScale)
+            })
+            #else
+            EmptyView()  // This reader is macOS-only; iPad and visionOS use iPadReaderView.
+            #endif
         }
     }
 
-    /// Live-gesture preview: the committed `session.zoomLevel`/`panOffsetInPoints` composed with
-    /// whatever the in-flight pinch/drag gesture is currently reporting, so panning/pinching
-    /// tracks the user's fingers in real time without waiting for the gesture to end and commit.
-    /// `pinchScale` resets to 1.0 the instant the gesture ends, in the same update cycle
-    /// `.onEnded` commits the new `session.zoomLevel` -- no visible jump at the handoff.
-    private var liveZoom: CGFloat { session.zoomLevel * pinchScale }
-    private var liveOffset: CGSize {
-        let base = session.panOffsetInPoints
-        return CGSize(width: base.width + dragOffset.width, height: base.height + dragOffset.height)
+    /// The current page, or both pages of a spread in on-screen (left-to-right) order.
+    private var pagedImages: [PlatformImage] {
+        guard let first = session.currentImage else { return [] }
+        guard session.effectiveDoublePage, let second = session.secondaryImage else { return [first] }
+        return session.rtl ? [second, first] : [first, second]
+    }
+
+    @ViewBuilder
+    private var pageStatusOverlay: some View {
+        if session.isLoading && session.currentImage == nil {
+            ProgressView().tint(.white)
+        } else if session.loadFailed {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.largeTitle).foregroundStyle(.secondary)
+                Text("Couldn't load page \(session.currentPage + 1)")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Retry") { session.retryCurrentPage() }
+                    .buttonStyle(.bordered)
+            }
+        }
     }
 
     private func zoomIn() { session.setZoom(session.zoomLevel * 1.25) }
@@ -299,25 +280,15 @@ struct ReaderView: View {
 
     private var finishToast: some View {
         HStack(spacing: 10) {
-            FinishToastIcon()
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.green)
             Text("Finished!")
                 .font(.subheadline.bold())
                 .foregroundStyle(.white)
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
         .background(.black.opacity(0.75), in: Capsule())
-    }
-
-    private struct FinishToastIcon: View {
-        @State private var scale: CGFloat = 0.01
-        @Environment(\.accessibilityReduceMotion) private var reduceMotion
-        var body: some View {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.title3)
-                .foregroundStyle(.green)
-                .scaleEffect(scale)
-                .onAppear { withAnimation(Design.motion(Design.springBouncy, reduce: reduceMotion)) { scale = 1 } }
-        }
     }
 
     private func boundaryToast(_ text: String) -> some View {
@@ -482,29 +453,29 @@ struct ReaderView: View {
 
     private var bottomBar: some View {
         HStack {
-            Button { session.rtl ? session.advance() : session.retreat() } label: {
+            Button { if session.rtl { session.advance() } else { session.retreat() } } label: {
                 Image(systemName: "chevron.left.circle.fill")
                     .font(.title).foregroundStyle(.white.opacity(0.85))
             }
             .buttonStyle(.plain)
-            .disabled(session.rtl ? session.currentPage >= comic.pageCount - 1 : session.currentPage == 0)
+            .disabled(session.rtl ? session.currentPage >= session.pageCount - 1 : session.currentPage == 0)
             .accessibilityLabel(session.rtl ? "Next page" : "Previous page")
             .help(session.rtl ? "Next page (→)" : "Previous page (←)")
 
             VStack(spacing: 6) {
-                if comic.pageCount > 1 {
+                if session.pageCount > 1 {
                     Slider(
                         value: Binding(
                             get: { Double(session.currentPage) },
                             set: { session.jump(to: Int($0.rounded())) }
                         ),
-                        in: 0...Double(max(1, comic.pageCount - 1)),
+                        in: 0...Double(max(1, session.pageCount - 1)),
                         step: 1
                     )
                     .frame(maxWidth: .infinity)
                     .tint(Design.brandBlue)
                     .accessibilityLabel("Page scrubber")
-                    .accessibilityValue("Page \(session.currentPage + 1) of \(comic.pageCount)")
+                    .accessibilityValue("Page \(session.currentPage + 1) of \(session.pageCount)")
                     .help("Drag to jump to any page")
                 }
 
@@ -512,13 +483,13 @@ struct ReaderView: View {
                     pageJumpText = "\(session.currentPage + 1)"
                     showPageJump = true
                 } label: {
-                    Text("Page \(session.currentPage + 1) of \(comic.pageCount)")
+                    Text("Page \(session.currentPage + 1) of \(session.pageCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 4)
                         .background(.ultraThinMaterial).clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Page \(session.currentPage + 1) of \(comic.pageCount) — tap to jump")
+                .accessibilityLabel("Page \(session.currentPage + 1) of \(session.pageCount) — tap to jump")
                 .help("Click to jump to page")
                 .popover(isPresented: $showPageJump) {
                     HStack(spacing: 8) {
@@ -530,26 +501,21 @@ struct ReaderView: View {
                                 if let n = Int(pageJumpText) { session.jump(to: n - 1) }
                                 showPageJump = false
                             }
-                        Text("of \(comic.pageCount)")
+                        Text("of \(session.pageCount)")
                             .foregroundStyle(.secondary)
                     }
                     .padding(12)
                 }
 
-                StarRating(rating: comicRating, size: 13, unfilledColor: .white.opacity(0.55)) { star in
-                    let newRating = star == comicRating ? 0 : star
-                    comicRating = newRating
-                    LibraryViewModel.shared.setRating(comic, rating: newRating)
-                }
             }
             .padding(.horizontal, 20)
 
-            Button { session.rtl ? session.retreat() : session.advance() } label: {
+            Button { if session.rtl { session.retreat() } else { session.advance() } } label: {
                 Image(systemName: "chevron.right.circle.fill")
                     .font(.title).foregroundStyle(.white.opacity(0.85))
             }
             .buttonStyle(.plain)
-            .disabled(session.rtl ? session.currentPage == 0 : session.currentPage >= comic.pageCount - 1)
+            .disabled(session.rtl ? session.currentPage == 0 : session.currentPage >= session.pageCount - 1)
             .accessibilityLabel(session.rtl ? "Previous page" : "Next page")
             .help(session.rtl ? "Previous page (←)" : "Next page (→)")
         }
@@ -561,7 +527,7 @@ struct ReaderView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 6) {
-                    ForEach(0..<comic.pageCount, id: \.self) { idx in
+                    ForEach(0..<session.pageCount, id: \.self) { idx in
                         Button { session.jump(to: idx) } label: {
                             FilmstripThumb(session: session, index: idx, isCurrent: idx == session.currentPage)
                         }
@@ -658,6 +624,9 @@ struct ReaderView: View {
                 ("R",            "Toggle RTL reading direction"),
                 ("+ / -",        "Zoom in / out"),
                 ("0",            "Reset zoom"),
+                ("Double-click", "Zoom in / back to fit"),
+                ("Scroll",       "Move around a zoomed page"),
+                ("Swipe",        "Two-finger swipe to turn pages"),
                 ("F",            "Toggle fullscreen"),
                 ("G",            "Toggle page filmstrip"),
                 ("Escape / W",   "Close reader"),
@@ -696,94 +665,6 @@ extension View {
                 .colorMultiply(Color(red: 1.12, green: 0.96, blue: 0.82))
         case .grayscale:
             self.grayscale(1.0)
-        }
-    }
-}
-
-/// A thin renderer over `session.currentImage`/`secondaryImage` -- no independent loading state
-/// of its own, unlike the old `PagedModeView`, since `ReaderSession` already owns page loading
-/// (including the double-page/spread pairing) as the one shared implementation every platform uses.
-struct PagedModeView: View {
-    let session: ReaderSession
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color.black
-
-                if session.isLoading {
-                    ProgressView().tint(.white)
-                        .transition(.opacity)
-                } else if session.effectiveDoublePage, let left = session.currentImage {
-                    HStack(spacing: 1) {
-                        if session.rtl {
-                            if let right = session.secondaryImage { pageImage(right, size: geo.size) }
-                            pageImage(left, size: geo.size)
-                        } else {
-                            pageImage(left, size: geo.size)
-                            if let right = session.secondaryImage { pageImage(right, size: geo.size) }
-                        }
-                    }
-                    .id(session.currentPage)
-                    .transition(.opacity)
-                } else if let img = session.currentImage {
-                    pageImage(img, size: geo.size)
-                        .id(session.currentPage)
-                        .transition(.opacity)
-                } else if session.loadFailed {
-                    // A real dead end before this: no explanation, no way forward except backing
-                    // out of the reader entirely -- one bad page (a flaky external drive, a
-                    // genuinely corrupt page inside an otherwise-fine archive) shouldn't strand
-                    // the whole session.
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.largeTitle).foregroundStyle(.secondary)
-                        Text("Couldn't load page \(session.currentPage + 1)")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Button("Retry") { session.retryCurrentPage() }
-                            .buttonStyle(.bordered)
-                    }
-                    .transition(.opacity)
-                }
-            }
-            // Keyed on `currentPage`, not the image itself -- `PlatformImage` (NSImage/UIImage)
-            // isn't Equatable, and the page index is a perfectly good proxy for "the displayed
-            // page just changed" anyway.
-            .animation(Design.motion(Design.easeStandard, reduce: reduceMotion), value: session.currentPage)
-        }
-        .gesture(
-            DragGesture(minimumDistance: 40).onEnded { val in
-                guard !session.isZoomed else { return }
-                let forward  = val.translation.width < -40
-                let backward = val.translation.width >  40
-                let goForward = session.rtl ? backward : forward
-                let goBackward = session.rtl ? forward : backward
-                if goForward { session.advance() }
-                if goBackward { session.retreat() }
-            }
-        )
-    }
-
-    @ViewBuilder
-    private func pageImage(_ img: PlatformImage, size: CGSize) -> some View {
-        let imgSize = img.size
-        switch session.fitMode {
-        case .fitPage:
-            Image(platformImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .fitWidth:
-            let h = imgSize.height > 0 ? (size.width * imgSize.height / imgSize.width) : size.height
-            Image(platformImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
-                .frame(width: size.width, height: h)
-        case .fitHeight:
-            let w = imgSize.width > 0 ? (size.height * imgSize.width / imgSize.height) : size.width
-            Image(platformImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
-                .frame(width: w, height: size.height)
-        case .original:
-            ScrollView([.horizontal, .vertical]) {
-                Image(platformImage: img).interpolation(.high).frame(width: imgSize.width, height: imgSize.height)
-            }
         }
     }
 }
@@ -846,6 +727,19 @@ struct ScrollPageView: View {
     let index: Int
     @State private var image: PlatformImage?
     @State private var loadFailed = false
+    @State private var viewportWidth: CGFloat = 0
+
+    /// Scroll mode always fits to width (height flows with aspect ratio), unlike Mac paged mode
+    /// (fitPage) or iPad's TabView (fitWidth/fitHeight/fitPage), where the long edge in either
+    /// direction can be the binding constraint -- width is the one fixed, known dimension here,
+    /// so it's the right basis for a target-size-aware decode. Previously always requested
+    /// `maxPixelSize: nil` (full/native resolution) for every page, unconditionally -- the one
+    /// reading surface most exposed to that cost, since `LazyVStack` can have several of these
+    /// alive near the viewport at once during a fast scroll.
+    private var targetMaxPixelSize: Int? {
+        guard viewportWidth > 0 else { return nil }
+        return Int(viewportWidth * PlatformImage.pdfRenderScale)
+    }
 
     var body: some View {
         Group {
@@ -859,11 +753,227 @@ struct ScrollPageView: View {
                     .overlay(ProgressView().tint(.white))
             }
         }
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }, action: { viewportWidth = $0 })
         .task {
             guard let document = session.document else { return }
-            PageStore.shared.request(document: document, comicId: session.comic.id, page: index, maxPixelSize: nil) { img in
+            PageStore.shared.request(document: document, comicId: session.comic.id, page: index, maxPixelSize: targetMaxPixelSize) { img in
                 if let img { image = img } else { loadFailed = true }
             }
         }
     }
 }
+
+#if os(macOS)
+import AppKit
+import CoreImage
+
+/// The Mac paged reader surface: a real `NSScrollView`, so a zoomed page moves with ordinary
+/// two-finger/mouse-wheel scrolling and scrollbars instead of click-and-drag. Magnification is
+/// the zoom level (1 = the chosen fit mode), pinch zooms around the cursor, double-click toggles
+/// 2x, and a horizontal two-finger swipe turns the page whenever nothing is scrollable sideways.
+struct ZoomablePageView: NSViewRepresentable {
+    let images: [PlatformImage]
+    let page: Int
+    let fitMode: FitMode
+    let zoomLevel: CGFloat
+    let colorFilter: ColorFilter
+    let viewportSize: CGSize
+    let onZoomCommitted: (CGFloat) -> Void
+    let onSwipe: (_ towardNextPage: Bool) -> Void
+
+    final class Coordinator {
+        var parent: ZoomablePageView
+        var lastPage: Int?
+        var isLiveMagnifying = false
+        var observers: [NSObjectProtocol] = []
+        init(_ parent: ZoomablePageView) { self.parent = parent }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> PageScrollView {
+        let scrollView = PageScrollView()
+        scrollView.contentView = CenteringClipView()
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .black
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 1
+        scrollView.maxMagnification = 5
+        let canvas = PageCanvasView()
+        scrollView.documentView = canvas
+
+        let coordinator = context.coordinator
+        scrollView.onSwipe = { coordinator.parent.onSwipe($0) }
+        canvas.onDoubleClick = { [weak scrollView] point in
+            guard let scrollView else { return }
+            let target: CGFloat = scrollView.magnification > 1.05 ? 1 : 2
+            scrollView.setMagnification(target, centeredAt: point)
+            coordinator.parent.onZoomCommitted(target)
+        }
+        let center = NotificationCenter.default
+        coordinator.observers = [
+            center.addObserver(forName: NSScrollView.willStartLiveMagnifyNotification, object: scrollView, queue: .main) { _ in
+                coordinator.isLiveMagnifying = true
+            },
+            center.addObserver(forName: NSScrollView.didEndLiveMagnifyNotification, object: scrollView, queue: .main) { [weak scrollView] _ in
+                coordinator.isLiveMagnifying = false
+                if let scrollView { coordinator.parent.onZoomCommitted(scrollView.magnification) }
+            },
+        ]
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: PageScrollView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        guard let canvas = scrollView.documentView as? PageCanvasView else { return }
+        canvas.setImages(images, filter: colorFilter)
+
+        if !images.isEmpty {
+            let size = fittedSize()
+            if canvas.frame.size != size { canvas.setFrameSize(size) }
+        }
+        if !coordinator.isLiveMagnifying, abs(scrollView.magnification - zoomLevel) > 0.01 {
+            let visible = scrollView.contentView.bounds
+            scrollView.setMagnification(zoomLevel, centeredAt: NSPoint(x: visible.midX, y: visible.midY))
+        }
+        if coordinator.lastPage != page, !images.isEmpty {
+            coordinator.lastPage = page
+            canvas.scroll(.zero)
+        }
+    }
+
+    static func dismantleNSView(_ scrollView: PageScrollView, coordinator: Coordinator) {
+        coordinator.observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    /// The page (or spread) size at magnification 1 for the current fit mode. Only aspect
+    /// ratios are used, except for Original Size, since decode resolution changes with zoom.
+    private func fittedSize() -> CGSize {
+        let aspects = images.map { $0.size.height > 0 ? $0.size.width / $0.size.height : 1 }
+        let unitWidth = aspects.reduce(0, +)
+        guard unitWidth > 0, viewportSize.width > 0, viewportSize.height > 0 else { return viewportSize }
+        let height: CGFloat
+        switch fitMode {
+        case .fitPage:   height = min(viewportSize.height, viewportSize.width / unitWidth)
+        case .fitWidth:  height = viewportSize.width / unitWidth
+        case .fitHeight: height = viewportSize.height
+        case .original:  height = images[0].size.height
+        }
+        return CGSize(width: (height * unitWidth).rounded(), height: height.rounded())
+    }
+}
+
+final class PageScrollView: NSScrollView {
+    var onSwipe: ((Bool) -> Void)?
+    private var swipeDistance: CGFloat = 0
+    private var trackingSwipe = false
+
+    /// Trackpad horizontal swipes turn the page only when the page has no horizontal room to
+    /// scroll; otherwise (zoomed in, Fit Height on a wide spread) they scroll as usual.
+    override func scrollWheel(with event: NSEvent) {
+        let hasHorizontalRoom = (documentView?.frame.width ?? 0) * magnification > contentSize.width + 1
+        guard event.hasPreciseScrollingDeltas, !hasHorizontalRoom, event.momentumPhase.isEmpty else {
+            super.scrollWheel(with: event)
+            return
+        }
+        switch event.phase {
+        case .began:
+            swipeDistance = 0
+            trackingSwipe = true
+        case .changed where trackingSwipe:
+            swipeDistance += event.scrollingDeltaX
+        case .ended, .cancelled:
+            if trackingSwipe, abs(swipeDistance) > 60 { onSwipe?(swipeDistance < 0) }
+            trackingSwipe = false
+        default:
+            break
+        }
+        if abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) { super.scrollWheel(with: event) }
+    }
+}
+
+/// Keeps a page smaller than the window centered instead of pinned to the top-left corner.
+final class CenteringClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposedBounds)
+        guard let documentView else { return rect }
+        let doc = documentView.frame
+        if rect.width > doc.width { rect.origin.x = (doc.width - rect.width) / 2 }
+        if rect.height > doc.height { rect.origin.y = (doc.height - rect.height) / 2 }
+        return rect
+    }
+}
+
+/// Draws one page, or two side by side for a spread, filling its own bounds at a shared height.
+final class PageCanvasView: NSView {
+    var onDoubleClick: ((NSPoint) -> Void)?
+    private var sourceImages: [NSImage] = []
+    private var filter: ColorFilter = .none
+    private var displayImages: [NSImage] = []
+    private static let ciContext = CIContext()
+
+    override var isFlipped: Bool { true }
+
+    func setImages(_ images: [NSImage], filter: ColorFilter) {
+        guard images.count != sourceImages.count
+                || zip(images, sourceImages).contains(where: { $0 !== $1 })
+                || filter != self.filter else { return }
+        sourceImages = images
+        self.filter = filter
+        displayImages = images.map { Self.apply(filter, to: $0) }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.current?.imageInterpolation = .high
+        let aspects = displayImages.map { $0.size.height > 0 ? $0.size.width / $0.size.height : 1 }
+        var x: CGFloat = 0
+        for (image, aspect) in zip(displayImages, aspects) {
+            let width = bounds.height * aspect
+            image.draw(in: NSRect(x: x, y: 0, width: width, height: bounds.height),
+                       from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            x += width
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?(convert(event.locationInWindow, from: nil))
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+
+    /// Same looks as the SwiftUI `colorEffect(_:)` modifier, applied to the bitmap since SwiftUI
+    /// color modifiers don't reach into an AppKit view.
+    private static func apply(_ filter: ColorFilter, to image: NSImage) -> NSImage {
+        guard filter != .none,
+              let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let luma = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        func scaled(_ v: CIVector, _ k: CGFloat) -> CIVector { CIVector(x: v.x * k, y: v.y * k, z: v.z * k, w: 0) }
+        let matrix: (r: CIVector, g: CIVector, b: CIVector, bias: CIVector)
+        switch filter {
+        case .none:
+            return image
+        case .night:
+            matrix = (CIVector(x: 1, y: 0, z: 0, w: 0), CIVector(x: 0, y: 0.85, z: 0, w: 0),
+                      CIVector(x: 0, y: 0, z: 0.65, w: 0), CIVector(x: -0.05, y: -0.05, z: -0.05, w: 0))
+        case .sepia:
+            matrix = (scaled(luma, 1.12), scaled(luma, 0.96), scaled(luma, 0.82), CIVector(x: 0, y: 0, z: 0, w: 0))
+        case .grayscale:
+            matrix = (luma, luma, luma, CIVector(x: 0, y: 0, z: 0, w: 0))
+        }
+        let output = CIImage(cgImage: cg).applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": matrix.r, "inputGVector": matrix.g, "inputBVector": matrix.b,
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1), "inputBiasVector": matrix.bias,
+        ])
+        guard let result = ciContext.createCGImage(output, from: output.extent) else { return image }
+        return NSImage(cgImage: result, size: image.size)
+    }
+}
+#endif

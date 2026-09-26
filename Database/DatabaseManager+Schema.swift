@@ -27,14 +27,14 @@ extension DatabaseManager {
         """)
         exec("""
         CREATE TABLE IF NOT EXISTS reading_progress (
-            comic_id     INTEGER PRIMARY KEY REFERENCES comics(id),
+            comic_id     INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
             current_page INTEGER DEFAULT 0,
             last_read    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
         exec("""
         CREATE TABLE IF NOT EXISTS ratings (
-            comic_id INTEGER PRIMARY KEY REFERENCES comics(id),
+            comic_id INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
             rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
             review   TEXT
         )
@@ -363,7 +363,6 @@ extension DatabaseManager {
 
         resortSpecialIssuesIfNeeded()
         widenMainlinePositionStrideIfNeeded()
-        recomputeOnceAfterUpgradeIfNeeded()
         allowUnratedReviewsIfNeeded()
 
         // Decouples "finished" from the raw resume position: `current_page` alone used to double
@@ -372,15 +371,95 @@ extension DatabaseManager {
         // markFinished()/markUnfinished() -- sticky once set, and only from genuine sequential
         // reading or an explicit Mark Read/Unread action, never from jump-style navigation.
         exec("ALTER TABLE reading_progress ADD COLUMN finished_at TIMESTAMP")
+
+        addCascadeToProgressAndRatingsIfNeeded()
+        applyManualOrdersToPositionIfNeeded()
     }
 
-    func recomputeOnceAfterUpgradeIfNeeded() {
+    /// Series order now comes from `comics.position` alone (the intelligent reading-order engine
+    /// and its `reading_order_position` column are gone). Manual Series Manager orders used to
+    /// live only in `reading_order_overrides` and were re-applied through that column, so rescans
+    /// had long since reseeded `position` underneath them -- copy them back once. Only whole-series
+    /// overrides are real Series Manager orders; a partial set can only come from the removed
+    /// "confirm auto-placement" review, whose positions used the old engine's numbering, so those
+    /// are dropped rather than mixed into a series ordered on a different scale. Every other
+    /// comic's position is reseeded (issue number, specials after regular issues) since the old
+    /// engine also moved specials' base positions.
+    func applyManualOrdersToPositionIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
-        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'readingOrderRecomputeGateV1'") > 0
+        guard scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'manualOrdersToPositionV1'") == 0 else { return }
+        _ = inTransaction {
+            let pruned = exec("""
+            DELETE FROM reading_order_overrides WHERE comic_id IN (
+                SELECT c.id FROM comics c
+                WHERE EXISTS (
+                    SELECT 1 FROM comics s
+                    WHERE s.publisher = c.publisher AND s.series = c.series AND s.deleted_at IS NULL
+                      AND s.id NOT IN (SELECT comic_id FROM reading_order_overrides)
+                )
+            )
+            """)
+            let reseeded = exec("""
+            UPDATE comics SET position =
+                is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+                + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
+            WHERE id NOT IN (SELECT comic_id FROM reading_order_overrides)
+            """)
+            let applied = exec("""
+            UPDATE comics SET position = (SELECT o.position FROM reading_order_overrides o WHERE o.comic_id = comics.id)
+            WHERE id IN (SELECT comic_id FROM reading_order_overrides)
+            """)
+            return pruned && reseeded && applied
+        }
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('manualOrdersToPositionV1')")
+    }
+
+    /// `reading_progress`/`ratings` were the only two comic-joined tables missing `ON DELETE
+    /// CASCADE` (every other one -- favorites, reading_list, comic_tags, bookmarks,
+    /// reading_history, diary_entries, run_items, tier_list_items, metadata_conflicts -- already
+    /// has it). Inert as long as nothing ever hard-deletes a `comics` row, but `purge()` (Trash's
+    /// new permanent-delete action) does exactly that -- without this, purging a comic with saved
+    /// progress or a rating would leave its `reading_progress`/`ratings` rows orphaned, pointing
+    /// at a comic id that no longer exists. Rebuilds both tables (SQLite can't add a REFERENCES
+    /// clause to an existing table in place), preserving `reading_progress.finished_at` added
+    /// just above and `ratings`' 0-5 CHECK range from `allowUnratedReviewsIfNeeded` -- run only
+    /// after both of those, matching the order they're applied in above.
+    func addCascadeToProgressAndRatingsIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'progressRatingsCascadeV1'") > 0
         guard !alreadyRun else { return }
-        positionSpecialsChronologically()
-        recomputeReadingOrder()
-        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('readingOrderRecomputeGateV1')")
+        _ = inTransaction {
+            exec("ALTER TABLE reading_progress RENAME TO reading_progress_old_cascadeV1")
+            exec("""
+            CREATE TABLE reading_progress (
+                comic_id     INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
+                current_page INTEGER DEFAULT 0,
+                last_read    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                finished_at  TIMESTAMP
+            )
+            """)
+            exec("""
+            INSERT INTO reading_progress (comic_id, current_page, last_read, finished_at)
+            SELECT comic_id, current_page, last_read, finished_at FROM reading_progress_old_cascadeV1
+            """)
+            exec("DROP TABLE reading_progress_old_cascadeV1")
+
+            exec("ALTER TABLE ratings RENAME TO ratings_old_cascadeV1")
+            exec("""
+            CREATE TABLE ratings (
+                comic_id INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
+                rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
+                review   TEXT
+            )
+            """)
+            exec("""
+            INSERT INTO ratings (comic_id, rating, review)
+            SELECT comic_id, rating, review FROM ratings_old_cascadeV1
+            """)
+            exec("DROP TABLE ratings_old_cascadeV1")
+            return true
+        }
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('progressRatingsCascadeV1')")
     }
 
     func resortSpecialIssuesIfNeeded() {
@@ -446,29 +525,37 @@ extension DatabaseManager {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'seriesLinksVolumeAwareV1'") > 0
         guard !alreadyRun else { return }
-        exec("ALTER TABLE series_links RENAME TO series_links_old")
-        exec("""
-        CREATE TABLE series_links (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            parent_publisher TEXT NOT NULL,
-            parent_series    TEXT NOT NULL,
-            parent_volume    TEXT,
-            child_publisher  TEXT NOT NULL,
-            child_series     TEXT NOT NULL,
-            child_volume     TEXT,
-            sequence_order   INTEGER NOT NULL,
-            created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            source           TEXT NOT NULL DEFAULT 'manual'
-        )
-        """)
-        exec("""
-        INSERT INTO series_links (id, parent_publisher, parent_series, parent_volume,
-                                   child_publisher, child_series, child_volume,
-                                   sequence_order, created_at, source)
-        SELECT id, parent_publisher, parent_series, NULL, child_publisher, child_series, NULL,
-               sequence_order, created_at, source FROM series_links_old
-        """)
-        exec("DROP TABLE series_links_old")
+        // Same rename/create/insert/drop rebuild as `allowUnratedReviewsIfNeeded` just above,
+        // and it needs the same `inTransaction` wrapping: unwrapped, a crash/force-quit between
+        // any two of these statements can leave `series_links` missing entirely (dropped by the
+        // RENAME, `series_links_old` never cleaned up) or duplicated, silently degrading every
+        // series-link-dependent feature (reading order, GCD matching) on an existing install.
+        _ = inTransaction {
+            exec("ALTER TABLE series_links RENAME TO series_links_old")
+            exec("""
+            CREATE TABLE series_links (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_publisher TEXT NOT NULL,
+                parent_series    TEXT NOT NULL,
+                parent_volume    TEXT,
+                child_publisher  TEXT NOT NULL,
+                child_series     TEXT NOT NULL,
+                child_volume     TEXT,
+                sequence_order   INTEGER NOT NULL,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                source           TEXT NOT NULL DEFAULT 'manual'
+            )
+            """)
+            exec("""
+            INSERT INTO series_links (id, parent_publisher, parent_series, parent_volume,
+                                       child_publisher, child_series, child_volume,
+                                       sequence_order, created_at, source)
+            SELECT id, parent_publisher, parent_series, NULL, child_publisher, child_series, NULL,
+                   sequence_order, created_at, source FROM series_links_old
+            """)
+            exec("DROP TABLE series_links_old")
+            return true
+        }
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('seriesLinksVolumeAwareV1')")
     }
 

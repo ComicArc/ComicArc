@@ -8,7 +8,7 @@ extension DatabaseManager {
                    search: String? = nil, sortOrder: SortOrder = .publisher,
                    favoritesOnly: Bool = false, readingListOnly: Bool = false,
                    nullCharacterOnly: Bool = false, tag: String? = nil,
-                   unreadOnly: Bool = false, minRating: Int? = nil) -> [Comic] {
+                   unreadOnly: Bool = false) -> [Comic] {
         queue.sync {
             var conds = ["c.deleted_at IS NULL"]
             var args: [Any?] = []
@@ -17,22 +17,19 @@ extension DatabaseManager {
             else if let chr = character { conds.append("c.character = ?"); args.append(chr) }
             if let ser = series { conds.append("c.series = ?"); args.append(ser) }
             if let q = search, !q.isEmpty {
-                // Covers everything a user might reasonably remember tagging/writing about a
-                // comic, not just its catalog metadata -- previously notes, reviews, and tags
-                // were all things you could attach to a comic but never actually search by.
+                // Covers catalog metadata plus the notes and tags a user attached themselves.
                 conds.append("""
                     (c.title LIKE ? ESCAPE '\\' OR c.series LIKE ? ESCAPE '\\' OR c.publisher LIKE ? ESCAPE '\\'
                      OR c.writer LIKE ? ESCAPE '\\' OR c.penciller LIKE ? ESCAPE '\\' OR c.character LIKE ? ESCAPE '\\'
-                     OR c.notes LIKE ? ESCAPE '\\' OR r.review LIKE ? ESCAPE '\\'
+                     OR c.notes LIKE ? ESCAPE '\\'
                      OR c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name LIKE ? ESCAPE '\\'))
                     """)
                 let p = "%\(Self.likeEscaped(q))%"
-                args += [p, p, p, p, p, p, p, p, p]
+                args += [p, p, p, p, p, p, p, p]
             }
             if favoritesOnly   { conds.append("f.comic_id IS NOT NULL") }
             if readingListOnly { conds.append("rl.comic_id IS NOT NULL") }
             if unreadOnly      { conds.append("COALESCE(rp.current_page, 0) = 0") }
-            if let minRating   { conds.append("COALESCE(r.rating, 0) >= ?"); args.append(minRating) }
             if let tag {
                 conds.append("c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name = ?)")
                 args.append(tag)
@@ -49,12 +46,8 @@ extension DatabaseManager {
     }
 
     /// The next comic after `comic` in the same (publisher, series), using the exact same
-    /// ordering as `.manual` sort (reading_order_position, falling back to position, then id) --
-    /// the same order Series Manager and the reading-order engine already treat as authoritative,
-    /// so "next" here always matches what a user would see if they scrolled the series manually.
-    /// Returns nil at the end of the series -- deliberately doesn't cross into a linked child
-    /// series (e.g. a legacy renumbering); that's a real reading-order continuation, but a
-    /// different, larger question than "what's the next file after this one."
+    /// ordering as `.manual` sort (position, then id) -- the order Series Manager edits, so
+    /// "next" always matches what a user sees when scrolling the series. Nil at the end.
     func nextComic(after comic: Comic) -> Comic? { adjacentComic(to: comic, forward: true) }
 
     /// Same series-scoped ordering as `nextComic(after:)`, opposite direction -- lets the reader
@@ -63,13 +56,13 @@ extension DatabaseManager {
 
     private func adjacentComic(to comic: Comic, forward: Bool) -> Comic? {
         queue.sync {
-            let orderExpr = "COALESCE(c.reading_order_position, c.position, c.id)"
+            let orderExpr = "COALESCE(c.position, c.id)"
             let comparison = forward ? ">" : "<"
             let direction = forward ? "" : " DESC"
             let sql = """
                 \(comicSelect)
                 WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ?
-                  AND \(orderExpr) \(comparison) (SELECT COALESCE(reading_order_position, position, id) FROM comics WHERE id = ?)
+                  AND \(orderExpr) \(comparison) (SELECT COALESCE(position, id) FROM comics WHERE id = ?)
                 ORDER BY \(orderExpr)\(direction), c.title\(direction) LIMIT 1
                 """
             return rows(sql, args: [comic.publisher, comic.series, comic.id], map: comicRow).first
@@ -78,8 +71,6 @@ extension DatabaseManager {
 
     struct MetadataInspectorInfo {
         let comic: Comic
-        let comicType: ComicType
-        let legacyNumber: Double?
         let coverMonth: Int?
         let coverDay: Int?
         let comicInfoIssueNumber: String?
@@ -115,12 +106,8 @@ extension DatabaseManager {
                       gcdMatchSource: colText(s, 8) ?? "auto")
             }).first else { return nil }
 
-            let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
-                                                         series: comic.series, format: comic.format)
-            let legacyNumber = ReadingOrderEngine.parseLegacyNumber(comic.issueNumber)
-
             return MetadataInspectorInfo(
-                comic: comic, comicType: comicType, legacyNumber: legacyNumber,
+                comic: comic,
                 coverMonth: extra.coverMonth, coverDay: extra.coverDay,
                 comicInfoIssueNumber: extra.comicInfoIssueNumber, alternateNumber: extra.alternateNumber,
                 storyArcNumber: extra.storyArcNumber, seriesGroup: extra.seriesGroup,
@@ -386,20 +373,6 @@ extension DatabaseManager {
         }
     }
 
-    func updateProgress(_ updates: [(comicId: Int64, page: Int)]) {
-        guard !updates.isEmpty else { return }
-        queue.sync {
-            _ = inTransaction {
-                runBatch("""
-                    INSERT INTO reading_progress (comic_id, current_page, last_read)
-                    VALUES (?, ?, datetime('now'))
-                    ON CONFLICT(comic_id) DO UPDATE
-                      SET current_page = ?, last_read = datetime('now')
-                    """, rows: updates.map { [$0.comicId, $0.page, $0.page] })
-            }
-        }
-    }
-
     /// Sticky completion flag, deliberately separate from `current_page` -- `current_page` is
     /// just the resume position (freely moves backward on a reread), while `finished_at` should
     /// only ever be set by genuine sequential reading reaching the end, or an explicit Mark Read.
@@ -425,47 +398,21 @@ extension DatabaseManager {
         }
     }
 
-    func setRating(_ comicId: Int64, rating: Int) {
+    /// Batch Mark Read/Unread: resume position and the sticky `finished_at` flag in one
+    /// transaction -- a bulk action that only moved `current_page` would leave `isFinished`
+    /// (driven solely by `finished_at`) untouched.
+    func setFinished(_ comics: [(comicId: Int64, lastPage: Int)], finished: Bool) {
+        guard !comics.isEmpty else { return }
         queue.sync {
-            _ = run("""
-                INSERT INTO ratings (comic_id, rating) VALUES (?,?)
-                ON CONFLICT(comic_id) DO UPDATE SET rating = excluded.rating
-            """, args: [comicId, rating])
-            _logDiaryEntryUnlocked(comicId: comicId)
-        }
-    }
-
-    /// Snapshots the current rating/review into `diary_entries`, called after every
-    /// `setRating`/`setComicReview` write. Same-day edits collapse into the existing
-    /// entry (rapid star-taps in one sitting shouldn't spam the diary); a genuinely new
-    /// day always starts a new entry, marked `is_reread` if any prior entry exists.
-    /// Must run already inside `queue.sync` — not itself queue-wrapped.
-    func _logDiaryEntryUnlocked(comicId: Int64) {
-        guard let current: (rating: Int, review: String?) = rows(
-            "SELECT rating, review FROM ratings WHERE comic_id = ?", args: [comicId],
-            map: { s in (colInt(s, 0), colText(s, 1)) }
-        ).first, current.rating > 0 else { return }
-
-        // logged_at is stored as CURRENT_TIMESTAMP (UTC). Comparing raw date(...) without a
-        // 'localtime' conversion collapses/splits entries on a UTC midnight boundary that has
-        // nothing to do with the user's actual calendar day -- e.g. for US timezones, UTC
-        // midnight falls in the late afternoon/evening local time, a common reading window,
-        // so two ratings minutes apart could get split into two entries; conversely, in
-        // timezones ahead of UTC, two ratings on different local days could collapse into one,
-        // silently overwriting the earlier day's rating/review.
-        let todayId: Int64? = rows(
-            "SELECT id FROM diary_entries WHERE comic_id = ? AND date(logged_at, 'localtime') = date('now', 'localtime') ORDER BY id DESC LIMIT 1",
-            args: [comicId], map: { colInt64($0, 0) }
-        ).first
-
-        if let todayId {
-            _ = run("UPDATE diary_entries SET rating = ?, review = ? WHERE id = ?",
-                    args: [current.rating, current.review, todayId])
-        } else {
-            let hasPriorEntry = scalarInt("SELECT COUNT(*) FROM diary_entries WHERE comic_id = ?", args: [comicId]) > 0
-            _ = run("""
-                INSERT INTO diary_entries (comic_id, rating, review, is_reread) VALUES (?,?,?,?)
-            """, args: [comicId, current.rating, current.review, hasPriorEntry ? 1 : 0])
+            _ = inTransaction {
+                runBatch("""
+                    INSERT INTO reading_progress (comic_id, current_page, last_read, finished_at)
+                    VALUES (?, ?, datetime('now'), CASE WHEN ? THEN datetime('now') END)
+                    ON CONFLICT(comic_id) DO UPDATE
+                      SET current_page = excluded.current_page, last_read = excluded.last_read,
+                          finished_at = CASE WHEN ? THEN COALESCE(finished_at, excluded.finished_at) END
+                    """, rows: comics.map { [$0.comicId, finished ? $0.lastPage : 0, finished ? 1 : 0, finished ? 1 : 0] })
+            }
         }
     }
 
@@ -474,17 +421,6 @@ extension DatabaseManager {
         queue.sync {
             _ = run("UPDATE comics SET notes = ? WHERE id = ?",
                     args: [(text?.isEmpty == false) ? text : nil, comicId])
-        }
-    }
-
-    func setComicReview(_ comicId: Int64, review: String?) {
-        let text = review?.trimmingCharacters(in: .whitespacesAndNewlines)
-        queue.sync {
-            _ = run("""
-                INSERT INTO ratings (comic_id, rating, review) VALUES (?,COALESCE((SELECT rating FROM ratings WHERE comic_id=?),0),?)
-                ON CONFLICT(comic_id) DO UPDATE SET review = excluded.review
-            """, args: [comicId, comicId, (text?.isEmpty == false) ? text : nil])
-            _logDiaryEntryUnlocked(comicId: comicId)
         }
     }
 
@@ -552,6 +488,17 @@ extension DatabaseManager {
         }
     }
 
+    func comics(ids: [Int64]) -> [Comic] {
+        guard !ids.isEmpty else { return [] }
+        return queue.sync {
+            idChunks(ids).flatMap { chunk -> [Comic] in
+                let ph = chunk.map { _ in "?" }.joined(separator: ",")
+                return rows("\(comicSelect) WHERE c.id IN (\(ph)) AND c.deleted_at IS NULL",
+                            args: chunk.map { $0 as Any? }, map: comicRow)
+            }
+        }
+    }
+
     func allComicPaths() -> [(id: Int64, path: String)] {
         queue.sync {
             rows("SELECT id, file_path FROM comics WHERE deleted_at IS NULL") { s in
@@ -582,10 +529,8 @@ extension DatabaseManager {
         _ = queue.sync {
             inTransaction {
                 let ok1 = runBatch("""
-                    UPDATE comics SET position = ?, reading_order_position = ?,
-                           reading_order_confidence = 100, reading_order_reason = 'Manually placed'
-                    WHERE id = ?
-                    """, rows: orderedIds.enumerated().map { [$0.offset, $0.offset, $0.element] })
+                    UPDATE comics SET position = ? WHERE id = ?
+                    """, rows: orderedIds.enumerated().map { [$0.offset, $0.element] })
                 let ok2 = runBatch("""
                     INSERT OR REPLACE INTO reading_order_overrides (comic_id, position, reason) VALUES (?, ?, 'Manually placed')
                     """, rows: orderedIds.enumerated().map { [$0.element, $0.offset] })
@@ -683,10 +628,9 @@ extension DatabaseManager {
                 UPDATE comics SET position =
                     is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
                     + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
+                WHERE id NOT IN (SELECT comic_id FROM reading_order_overrides)
             """)
         }
-        positionSpecialsChronologically()
-        recomputeReadingOrder()
     }
 
     func updateFileHash(id: Int64, hash: String) {
@@ -717,7 +661,7 @@ extension DatabaseManager {
     /// Reading progress for every comic that has actually been started, keyed by file hash rather
     /// than id -- ids are meaningless across two devices' separate databases (different scan
     /// history/order), but a comic's file hash identifies the same underlying file wherever it
-    /// was imported. Used by local Mac<->iPad progress sync; no ratings/tags/diary/reviews here,
+    /// was imported. Used by local Mac<->iPad progress sync; no tags here,
     /// since those have much messier merge semantics than a single scalar page number.
     func progressSyncSnapshot() -> [(fileHash: String, progress: Int, pageCount: Int, lastRead: String)] {
         queue.sync {

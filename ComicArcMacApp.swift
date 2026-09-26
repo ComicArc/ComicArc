@@ -11,8 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
-              let bundleID = Bundle.main.bundleIdentifier else { return }
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if let existing = others.first {
@@ -23,16 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = servicesProvider
-        #if DEBUG
-        // Headless icon-export path for automated/CI-style regeneration -- avoids needing to
-        // click the Settings button by hand. `AppIconExporter` is `@MainActor`; this delegate
-        // callback already runs on the main actor by the time the app has finished launching.
-        if CommandLine.arguments.contains("--export-icon") {
-            let result = AppIconExporter.exportMaster()
-            print("ICON_EXPORT_RESULT: \(result)")
-            NSApp.terminate(nil)
-        }
-        #endif
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -43,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        let comics = urls.filter { ["cbz", "cbr", "pdf"].contains($0.pathExtension.lowercased()) }
+        let comics = urls.filter { LibraryScanner.importableExtensions.contains($0.pathExtension.lowercased()) }
         guard !comics.isEmpty else { return }
         LibraryViewModel.shared.importFiles(comics)
     }
@@ -79,7 +68,7 @@ final class ComicArcServicesProvider: NSObject {
             error.pointee = "No comic files found on the pasteboard"
             return
         }
-        let comics = urls.filter { ["cbz", "cbr", "pdf"].contains($0.pathExtension.lowercased()) }
+        let comics = urls.filter { LibraryScanner.importableExtensions.contains($0.pathExtension.lowercased()) }
         guard !comics.isEmpty else {
             error.pointee = "No .cbz, .cbr, or .pdf files selected"
             return
@@ -100,6 +89,7 @@ struct ComicArcApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
+    @State private var didLaunchScan = false
 
     private let fileService   = makePlatformFileService()
     private let windowService = makePlatformWindowService()
@@ -128,10 +118,12 @@ struct ComicArcApp: App {
                 vm.openComicFromSpotlight(activity)
             }
             .onChange(of: scenePhase) { _, phase in
-                // Covers both "scan on cold launch" (the first .active transition) and "scan
-                // when the app is brought back to the foreground" (every subsequent one) --
-                // same trigger the iPad app already uses, so both platforms behave identically.
-                if phase == .active, !vm.libraryPaths.isEmpty { vm.scan() }
+                // One scan per launch catches anything changed while the app wasn't running;
+                // after that the FSEvents watcher (`FileWatcher`) picks up adds/removes live, so
+                // rescanning on every window activation would just repeat work.
+                guard phase == .active, !didLaunchScan, !vm.libraryPaths.isEmpty else { return }
+                didLaunchScan = true
+                vm.scan()
             }
         }
         #if os(macOS)
@@ -174,7 +166,7 @@ struct ComicArcApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 Divider()
-                Button("Mark All as Read") { vm.markAllRead() }
+                Button("Mark All as Read") { vm.markRead(vm.comics) }
                     .disabled(vm.comics.isEmpty)
             }
 
@@ -185,11 +177,10 @@ struct ComicArcApp: App {
                 Button("Reading List")     { vm.select(.readingList) }      .keyboardShortcut("4", modifiers: .command)
                 Divider()
                 Button("Reading Paths") { vm.select(.runs) }    .keyboardShortcut("5", modifiers: .command)
-                Button("Diary")          { vm.select(.diary) }   .keyboardShortcut("6", modifiers: .command)
-                Button("Statistics")     { vm.select(.stats) }   .keyboardShortcut("7", modifiers: .command)
-                Button("History")        { vm.select(.history) } .keyboardShortcut("8", modifiers: .command)
-                Button("Tier Lists")      { vm.select(.tierLists) }      .keyboardShortcut("9", modifiers: .command)
-                Button("Highlights") { vm.select(.favoriteMoments) }.keyboardShortcut("0", modifiers: [.command, .shift])
+                Button("Statistics")    { vm.select(.stats) }           .keyboardShortcut("6", modifiers: .command)
+                Button("History")       { vm.select(.history) }         .keyboardShortcut("7", modifiers: .command)
+                Button("Tier Lists")    { vm.select(.tierLists) }       .keyboardShortcut("8", modifiers: .command)
+                Button("Highlights")    { vm.select(.favoriteMoments) } .keyboardShortcut("9", modifiers: .command)
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }

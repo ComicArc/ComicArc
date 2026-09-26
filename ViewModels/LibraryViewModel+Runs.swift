@@ -2,7 +2,7 @@ import Foundation
 
 extension LibraryViewModel {
     /// Called at launch and after any mutation that changes the run *list* (create/delete/
-    /// reorder) -- edits to a single run's fields (rating, cover, notes) don't need this since
+    /// reorder) -- edits to a single run's fields (title, cover, notes) don't need this since
     /// they don't change membership/order of `runs` itself.
     func refreshRuns() {
         runsGeneration += 1
@@ -22,7 +22,6 @@ extension LibraryViewModel {
         refreshRuns()
         return id
     }
-    func deleteRun(_ runId: Int64) { db.deleteRun(runId); refreshRuns() }
 
     func deleteRunWithUndo(_ run: Run) {
         let items = db.runItems(runId: run.id)
@@ -34,9 +33,6 @@ extension LibraryViewModel {
             let newId = self.db.createRun(title: run.title, description: run.description)
             if let buyLink = run.buyLink, !buyLink.isEmpty {
                 self.db.updateRun(id: newId, title: run.title, description: run.description, buyLink: buyLink)
-            }
-            if let rating = run.rating {
-                self.db.setRunRating(newId, rating: rating, review: run.review)
             }
             if let cover = run.coverImagePath {
                 self.db.setRunCover(runId: newId, imagePath: cover)
@@ -55,7 +51,6 @@ extension LibraryViewModel {
     }
 
     func addToRun(runId: Int64, comicIds: [Int64]) { db.addToRun(runId: runId, comicIds: comicIds) }
-    func removeFromRun(runId: Int64, comicIds: [Int64]) { db.removeFromRun(runId: runId, comicIds: comicIds) }
 
     func removeFromRunWithUndo(runId: Int64, items: [RunItem], onRestored: @escaping () -> Void = {}) {
         let ids = items.map(\.comic.id)
@@ -94,10 +89,6 @@ extension LibraryViewModel {
 
     func updateRun(id: Int64, title: String, description: String, buyLink: String?) {
         db.updateRun(id: id, title: title, description: description, buyLink: buyLink)
-        NotificationCenter.default.post(name: .runUpdated, object: nil)
-    }
-    func setRunRating(_ runId: Int64, rating: Int, review: String?) {
-        db.setRunRating(runId, rating: rating, review: review)
         NotificationCenter.default.post(name: .runUpdated, object: nil)
     }
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }

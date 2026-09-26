@@ -7,6 +7,11 @@ final class DatabaseManager: @unchecked Sendable {
     static let shared = DatabaseManager()
     let queue = DispatchQueue(label: "com.comicarc.mac.db", qos: .userInitiated)
     var db: OpaquePointer?
+    /// This instance's own database file. Backups and the covers folder are derived from it,
+    /// so a test database never touches the real library's `comics.db.bak` or `covers/`.
+    let dbURL: URL
+    var backupURL: URL { URL(fileURLWithPath: dbURL.path + ".bak") }
+    var coversDir: URL { dbURL.deletingLastPathComponent().appendingPathComponent("covers") }
 
     static let dataDir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -21,7 +26,7 @@ final class DatabaseManager: @unchecked Sendable {
     }
 
     init(dbPath path: String) {
-        let dbURL = URL(fileURLWithPath: path)
+        dbURL = URL(fileURLWithPath: path)
         guard sqlite3_open(path, &db) == SQLITE_OK else { return }
         exec("PRAGMA foreign_keys = ON")
         exec("PRAGMA journal_mode = WAL")
@@ -51,7 +56,7 @@ final class DatabaseManager: @unchecked Sendable {
                 guard let p = sqlite3_value_text(argv[Int(i)]) else { return "" }
                 return String(cString: p)
             }
-            let special = ComicSortClassifier.isSpecialIssue(issueNumber: text(0), title: text(1), series: text(2))
+            let special = ComicSortClassifier.isSpecialIssue(issueNumber: text(0), title: text(1))
             sqlite3_result_int(context, special ? 1 : 0)
         }, nil, nil, nil)
 
@@ -61,7 +66,7 @@ final class DatabaseManager: @unchecked Sendable {
                 guard let p = sqlite3_value_text(argv[Int(i)]) else { return "" }
                 return String(cString: p)
             }
-            let type = ReadingOrderEngine.classify(issueNumber: text(0), title: text(1), series: text(2), format: text(3))
+            let type = ComicTypeClassifier.classify(issueNumber: text(0), title: text(1), format: text(3))
             sqlite3_result_text(context, type.rawValue, -1, SQLITE_TRANSIENT)
         }, nil, nil, nil)
     }
@@ -77,7 +82,7 @@ final class DatabaseManager: @unchecked Sendable {
            String(cString: p) == "ok" { ok = true }
         guard !ok else { return }
 
-        let bakURL = Self.dataDir.appendingPathComponent("comics.db.bak")
+        let bakURL = backupURL
         guard FileManager.default.fileExists(atPath: bakURL.path) else { return }
         sqlite3_close(db); db = nil
         try? FileManager.default.removeItem(at: dbURL)
@@ -162,16 +167,24 @@ final class DatabaseManager: @unchecked Sendable {
     /// Once the backfill lands, the row's real composite groupKey gains a suffix the caller's
     /// bare key never had, silently dropping it from a scoped WHERE ... IN filter. Expand every
     /// bare key to every real composite groupKey currently sharing that publisher/series so
-    /// scoped recomputes (`recomputeReadingOrder`, `recomputeGCDMatches`) never miss a row purely
+    /// a scoped `recomputeGCDMatches` never misses a row purely
     /// because the caller's key predates a backfill.
     func expandBareGroupKeys(_ keys: Set<String>) -> Set<String> {
         let bareKeys = keys.filter { $0.split(separator: ":", omittingEmptySubsequences: false).count <= 2 }
         guard !bareKeys.isEmpty else { return keys }
-        let placeholders = bareKeys.map { _ in "?" }.joined(separator: ",")
-        let resolvedKeys: [String] = rows("""
-            SELECT DISTINCT publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))
-            FROM comics WHERE deleted_at IS NULL AND (publisher || ':' || series) IN (\(placeholders))
-            """, args: bareKeys.map { $0 as Any? }) { s in colText(s, 0) ?? "" }
+        // Library-size-driven (one key per distinct series touched in a scan), so it needs the
+        // same chunking every other unbounded id/key array in this file goes through -- past
+        // SQLite's bound-parameter ceiling, `sqlite3_prepare_v2` fails and `rows()` silently
+        // returns `[]`, meaning a large first-time import would resolve zero bare keys with no
+        // error, and `recomputeGCDMatches` would then miss every affected group with no error surfaced.
+        var resolvedKeys: [String] = []
+        for chunk in idChunks(Array(bareKeys)) {
+            let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+            resolvedKeys += rows("""
+                SELECT DISTINCT publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))
+                FROM comics WHERE deleted_at IS NULL AND (publisher || ':' || series) IN (\(placeholders))
+                """, args: chunk.map { $0 as Any? }) { s in colText(s, 0) ?? "" }
+        }
         return keys.union(resolvedKeys)
     }
     func colBool(_ stmt: OpaquePointer, _ col: Int32) -> Bool { sqlite3_column_int(stmt, col) != 0 }
@@ -252,8 +265,8 @@ final class DatabaseManager: @unchecked Sendable {
     /// file copy, not a full re-export.
     func refreshBackup() {
         queue.sync {
-            let dbPath = Self.dataDir.appendingPathComponent("comics.db")
-            let bakPath = Self.dataDir.appendingPathComponent("comics.db.bak")
+            let dbPath = dbURL
+            let bakPath = backupURL
             guard FileManager.default.fileExists(atPath: dbPath.path) else { return }
             // Checkpoint first so the backup reflects all committed data, not just whatever has
             // landed in the main file so far -- WAL-mode commits can live only in the -wal file
@@ -286,21 +299,16 @@ final class DatabaseManager: @unchecked Sendable {
             series: colText(s, offset + 5) ?? "General", issueNumber: colText(s, offset + 6),
             pageCount: colInt(s, offset + 7), writer: colText(s, offset + 8), penciller: colText(s, offset + 9),
             year: sqlite3_column_type(s, offset + 10) != SQLITE_NULL ? colInt(s, offset + 10) : nil,
-            volume: colText(s, offset + 30), format: colText(s, offset + 31),
+            volume: colText(s, offset + 25), format: colText(s, offset + 26),
             storyArc: colText(s, offset + 11), languageIso: colText(s, offset + 12), notes: colText(s, offset + 13),
-            addedAt: colText(s, offset + 14) ?? "", deletedAt: colText(s, offset + 15),
+            addedAt: colText(s, offset + 14) ?? "",
             position: colInt(s, offset + 16), fileHash: colText(s, offset + 17),
-            progress: colInt(s, offset + 18), lastRead: colText(s, offset + 19),
-            rating: colInt(s, offset + 20),
-            review: colText(s, offset + 23),
-            isFavorite: colBool(s, offset + 21), inReadingList: colBool(s, offset + 22),
-            readingOrderPosition: sqlite3_column_type(s, offset + 24) != SQLITE_NULL ? colInt(s, offset + 24) : nil,
-            readingOrderConfidence: sqlite3_column_type(s, offset + 25) != SQLITE_NULL ? colInt(s, offset + 25) : nil,
-            readingOrderReason: colText(s, offset + 26),
-            gcdMatchConfidence: sqlite3_column_type(s, offset + 27) != SQLITE_NULL ? colInt(s, offset + 27) : nil,
-            gcdSeriesName: colText(s, offset + 28), gcdIssueNumber: colText(s, offset + 29),
-            deletedReason: colText(s, offset + 32),
-            finishedAt: colText(s, offset + 33)
+            progress: colInt(s, offset + 18),
+            isFavorite: colBool(s, offset + 20), inReadingList: colBool(s, offset + 21),
+            gcdMatchConfidence: sqlite3_column_type(s, offset + 22) != SQLITE_NULL ? colInt(s, offset + 22) : nil,
+            gcdSeriesName: colText(s, offset + 23), gcdIssueNumber: colText(s, offset + 24),
+            deletedReason: colText(s, offset + 27),
+            finishedAt: colText(s, offset + 28)
         )
     }
 
@@ -313,22 +321,19 @@ final class DatabaseManager: @unchecked Sendable {
         c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
         COALESCE(c.position, c.id), c.file_hash,
         COALESCE(rp.current_page, 0) as progress, rp.last_read,
-        COALESCE(r.rating, 0) as rating,
         (f.comic_id IS NOT NULL) as is_favorite,
         (rl.comic_id IS NOT NULL) as in_reading_list,
-        r.review, c.reading_order_position, c.reading_order_confidence, c.reading_order_reason,
         c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format,
         c.deleted_reason, rp.finished_at
     """
 
-    /// The per-comic annotation joins (progress/rating/favorite/reading-list) every comic query
+    /// The per-comic annotation joins (progress/favorite/reading-list) every comic query
     /// needs -- shared so `runItems`/`tierListItems` (which need their own leading columns
     /// alongside a comic's, so they can't just use `comicSelect` outright) don't each hand-roll
-    /// their own copy of the same four lines.
+    /// their own copy of the same three lines.
     var comicJoins: String {
         """
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
-        LEFT JOIN ratings r           ON c.id = r.comic_id
         LEFT JOIN favorites f         ON c.id = f.comic_id
         LEFT JOIN reading_list rl     ON c.id = rl.comic_id
         """
@@ -342,31 +347,27 @@ final class DatabaseManager: @unchecked Sendable {
         """
     }
 
-    enum ReadingOrderMode: String, CaseIterable, Identifiable {
-        case filename = "Filename", legacyNumber = "Legacy Number",
-             publicationDate = "Publication Date", comicInfoOrder = "ComicInfo Order",
-             intelligent = "Intelligent Reading Order"
-        var id: String { rawValue }
-
-        static var current: ReadingOrderMode {
-            ReadingOrderMode(rawValue: UserDefaults.standard.string(forKey: "readingOrderMode") ?? "") ?? .intelligent
-        }
-    }
-
     enum SortOrder: String, CaseIterable, Identifiable, Codable {
         case publisher = "Publisher", title = "Title", dateAdded = "Recently Added",
-             rating = "Top Rated", progress = "Most Read", manual = "Custom",
+             progress = "Most Read", manual = "Custom",
              year = "Year", storyArc = "Story Arc", pageCount = "Page Count",
              dateRead = "Recently Read", writer = "Writer"
         var id: String { rawValue }
+
+        /// Unknown stored values (e.g. a sort that no longer exists) fall back to Custom instead
+        /// of failing to decode -- one bad value would otherwise drop every saved view.
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = SortOrder(rawValue: raw) ?? .manual
+        }
+
         var clause: String {
             switch self {
-            case .publisher: return "c.publisher, c.series, COALESCE(c.reading_order_position, c.position, is_special_issue(c.issue_number, c.title, c.series) * \(ComicSortClassifier.specialBandOffset) + c.id), c.title"
+            case .publisher: return "c.publisher, c.series, COALESCE(c.position, is_special_issue(c.issue_number, c.title, c.series) * \(ComicSortClassifier.specialBandOffset) + c.id), c.title"
             case .title:     return "c.title"
             case .dateAdded: return "c.added_at DESC"
-            case .rating:    return "COALESCE(r.rating, 0) DESC, c.title"
             case .progress:  return "COALESCE(rp.current_page, 0) DESC, c.title"
-            case .manual:    return "COALESCE(c.reading_order_position, c.position, c.id), c.title"
+            case .manual:    return "COALESCE(c.position, c.id), c.title"
             case .year:      return "COALESCE(c.year, 0) DESC, c.title"
             case .storyArc:  return "COALESCE(c.story_arc, ''), c.title"
             case .pageCount: return "c.page_count DESC, c.title"

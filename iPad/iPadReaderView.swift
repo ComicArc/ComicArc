@@ -100,8 +100,8 @@ struct iPadReaderView: View {
         .accessibilityHint("Double-tap to zoom. Swipe to navigate pages.")
         .focusable()
         .focused($isFocused)
-        .onKeyPress(.leftArrow)  { session.rtl ? session.advance() : session.retreat(); return .handled }
-        .onKeyPress(.rightArrow) { session.rtl ? session.retreat() : session.advance(); return .handled }
+        .onKeyPress(.leftArrow)  { if session.rtl { session.advance() } else { session.retreat() }; return .handled }
+        .onKeyPress(.rightArrow) { if session.rtl { session.retreat() } else { session.advance() }; return .handled }
         .onKeyPress(.upArrow)    { session.retreat(); return .handled }
         .onKeyPress(.downArrow)  { session.advance(); return .handled }
         .onKeyPress(.home) { session.jump(to: 0); return .handled }
@@ -238,7 +238,8 @@ struct iPadReaderView: View {
         SpatialTapGesture()
             .onEnded { value in
                 let x = value.location.x
-                let width = viewportSize.width > 0 ? viewportSize.width : UIScreen.main.bounds.width
+                guard viewportSize.width > 0 else { return }
+                let width = viewportSize.width
                 if x < width * 0.25 {
                     session.retreat()
                 } else if x > width * 0.75 {
@@ -488,6 +489,22 @@ private struct ReaderPageView: View {
     @State private var image: PlatformImage?
     @State private var loadFailed = false
     @State private var retryToken = UUID()
+    @State private var viewportSize: CGSize = .zero
+
+    /// Mirrors `ReaderSession.maxPixelSizeForCurrentZoom` (Mac paged mode's own target-size
+    /// computation) -- previously always requested `maxPixelSize: nil` (full/native resolution)
+    /// for every page in the `TabView`, unconditionally. Since `TabView` keeps swipe-adjacent
+    /// pages mounted alongside the current one, that meant iPad's primary reading surface never
+    /// got the "target-size-aware decode" the reader rebuild is built around at all -- every page
+    /// a user ever swiped past stayed decoded (and cached) at up to the 8000px safety cap.
+    /// `.original` fit mode is the one deliberate exception, same as Mac: it explicitly wants
+    /// full/native resolution.
+    private var targetMaxPixelSize: Int? {
+        guard session.fitMode != .original else { return nil }
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return nil }
+        let longEdge = max(viewportSize.width, viewportSize.height)
+        return Int(longEdge * PlatformImage.pdfRenderScale * max(1.0, session.zoomLevel))
+    }
 
     @ViewBuilder
     private func fittedImage(_ img: PlatformImage, size: CGSize) -> some View {
@@ -542,9 +559,18 @@ private struct ReaderPageView: View {
                 }
             }
         }
+        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { viewportSize = $0 })
+        // Re-requests only when THIS page is the one currently being viewed -- zooming shouldn't
+        // trigger a redecode storm across every TabView-mounted neighbor page, only the one the
+        // user is actually looking at. A cache hit at the new target size (e.g. zooming back out)
+        // resolves synchronously with no visible flicker -- see `PageStore.sufficientlyCached`.
+        .onChange(of: session.zoomLevel) { _, _ in
+            guard pageIndex == session.currentPage else { return }
+            retryToken = UUID()
+        }
         .task(id: retryToken) {
             guard let document = session.document else { return }
-            PageStore.shared.request(document: document, comicId: session.comic.id, page: pageIndex, maxPixelSize: nil) { img in
+            PageStore.shared.request(document: document, comicId: session.comic.id, page: pageIndex, maxPixelSize: targetMaxPixelSize) { img in
                 if let img { image = img } else { loadFailed = true }
             }
         }

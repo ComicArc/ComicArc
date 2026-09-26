@@ -2,16 +2,11 @@ import Foundation
 import UserNotifications
 
 extension LibraryViewModel {
-    /// Re-derives GCD matches, auto-links series, and recomputes reading order -- the exact same
-    /// 3-call sequence previously duplicated in `SettingsView` (twice, in two different buttons)
-    /// and `OnboardingView` (once, after downloading the GCD database for the first time). Runs
-    /// off the main thread; `onComplete` fires back on main once `reload()` has also finished, so
-    /// callers can flip a local "is this button busy" flag back off.
-    func recomputeGCDMatchesAndReadingOrder(onComplete: @escaping () -> Void = {}) {
+    /// Re-derives GCD matches off the main thread; `onComplete` fires back on main once
+    /// `reload()` has also finished, so callers can flip a local "busy" flag back off.
+    func recomputeGCDMatches(onComplete: @escaping () -> Void = {}) {
         Task.detached(priority: .userInitiated) { [db] in
             db.recomputeGCDMatches()
-            db.autoPopulateSeriesLinksFromGCD()
-            db.recomputeReadingOrder()
             await MainActor.run { [weak self] in
                 self?.reload()
                 onComplete()
@@ -56,14 +51,15 @@ extension LibraryViewModel {
                 self.isScanning = state.running
                 if !state.running {
                     self.reload()
-                    self.indexSpotlight()
+                    if state.changed {
+                        self.indexSpotlight()
+                        self.refreshDuplicates()
+                    }
                     if !state.removedIds.isEmpty { self.removeFromSpotlight(state.removedIds) }
                     self.notifyScanComplete(added: state.added)
-                    self.refreshDuplicates()
                     self.presentScanReport(state)
                     self.refreshLibraryHealth()
                     self.refreshRenameCandidates()
-                    self.refreshRecommendations()
                     // The corruption-recovery safety net (DatabaseManager.recoverIfCorrupted)
                     // previously only had a backup from launch time -- a scan is exactly the kind
                     // of session that adds a lot of new, otherwise-unbacked-up data.

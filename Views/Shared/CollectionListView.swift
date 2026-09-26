@@ -235,13 +235,6 @@ private struct CollectionCard<T: NamedCollection>: View {
                     }
 
                     HStack(spacing: 6) {
-                        if let r = item.rating, r > 0 {
-                            HStack(spacing: 1) {
-                                ForEach(1...r, id: \.self) { _ in
-                                    Image(systemName: "star.fill").font(Design.Typography.starGlyph).foregroundStyle(Design.brandGold)
-                                }
-                            }
-                        }
                         Text(config.subtitle(item)).font(Design.Typography.microLabel).foregroundStyle(.tertiary)
                         Image(systemName: "chevron.right")
                             .font(Design.Typography.microGlyph)

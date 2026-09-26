@@ -5,13 +5,10 @@ import Foundation
 /// manual review rather than silently applied in either direction.
 struct MetadataConflict: Identifiable, Equatable {
     let id: Int64
-    let comicId: Int64
     let field: String            // "series" | "publisher" | "issue_number"
     let currentValue: String?
     let proposedValue: String?
     let proposedSource: String   // e.g. "ComicInfo.xml"
-    let detectedAt: String
-    let status: String           // "pending" | "applied" | "dismissed"
 }
 
 /// A conflict paired with the comic it's about -- what the review UI actually displays.

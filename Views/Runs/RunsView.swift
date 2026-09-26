@@ -34,9 +34,9 @@ struct RunsListView: View {
                 vm.refreshRuns(); reloadToken = UUID()
             }
             .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in
-                // Renaming/re-rating a Run in its detail view only updates that view's own local
+                // Renaming a Run in its detail view only updates that view's own local
                 // @State copy and the DB -- without this, this list's row keeps showing the
-                // pre-edit title/rating until an unrelated reload happens.
+                // pre-edit title until an unrelated reload happens.
                 reloadToken = UUID()
             }
     }
@@ -51,9 +51,6 @@ struct RunDetailView: View {
     @State private var items:           [RunItem] = []
     @State private var itemsLoading     = true
     @State private var showingAddComics = false
-    @State private var runRating:       Int       = 0
-    @State private var showReviewSheet  = false
-    @State private var reviewText:      String    = ""
     @State private var showEditSheet    = false
     @State private var exportErrorMessage: String?
     @State private var shareCardURL:    URL?
@@ -128,13 +125,9 @@ struct RunDetailView: View {
         .ambientBackground()
         .task {
             loadItems()
-            runRating  = run.rating ?? 0
-            reviewText = run.review ?? ""
         }
         .onChange(of: run) { _, r in
             currentRun = r
-            runRating  = r.rating ?? 0
-            reviewText = r.review ?? ""
             loadItems()
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
@@ -152,9 +145,6 @@ struct RunDetailView: View {
                     loadItems()
                 }
             )
-        }
-        .sheet(isPresented: $showReviewSheet) {
-            reviewSheet
         }
         .sheet(isPresented: $showEditSheet) {
             EditCollectionView(noun: "Reading Path", item: $currentRun,
@@ -194,15 +184,6 @@ struct RunDetailView: View {
             Spacer(minLength: 10)
 
             VStack(alignment: .trailing, spacing: 10) {
-                StarRating(rating: runRating) { star in
-                    let newVal = star == runRating ? 0 : star
-                    runRating  = newVal
-                    LibraryViewModel.shared.setRunRating(run.id,
-                                                        rating: newVal,
-                                                        review: reviewText.isEmpty ? nil : reviewText)
-                    rebuildShareCard()
-                }
-
                 HStack(spacing: 6) {
                     if let comic = firstUnfinished {
                         Button {
@@ -219,13 +200,6 @@ struct RunDetailView: View {
 
                     Button("Edit") { showEditSheet = true }
                         .buttonStyle(.bordered)
-
-                    Button { showReviewSheet = true } label: {
-                        Image(systemName: "star.bubble")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Rate & Review")
 
                     Button {
                         BackupService.exportCSV(
@@ -263,49 +237,6 @@ struct RunDetailView: View {
         .background(Design.navBackground)
     }
 
-    private var reviewSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Reads `currentRun` (the synced @State copy), not the immutable `run` init
-            // parameter -- otherwise this sheet keeps showing the pre-edit title/buy link after
-            // EditCollectionView updates currentRun, since `run` itself never changes for this
-            // view's lifetime.
-            Text("Rate & Review: \(currentRun.title)")
-                .font(.title2.bold())
-
-            Text("Rating").font(.headline)
-            StarRating(rating: runRating) { star in
-                runRating = star == runRating ? 0 : star
-            }
-            .scaleEffect(1.4, anchor: .leading)
-
-            Text("Review").font(.headline)
-            TextEditor(text: $reviewText)
-                .frame(minHeight: 120)
-                .border(Design.borderColor)
-
-            if let link = currentRun.buyLink {
-                HStack {
-                    Text("Buy Link:").foregroundStyle(.secondary).font(.caption)
-                    Text(link).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-
-            HStack {
-                Button("Cancel") { showReviewSheet = false }.keyboardShortcut(.escape)
-                Spacer()
-                Button("Save") {
-                    LibraryViewModel.shared.setRunRating(currentRun.id,
-                                                        rating: runRating,
-                                                        review: reviewText.isEmpty ? nil : reviewText)
-                    showReviewSheet = false
-                }
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24).frame(width: 440)
-    }
-
     private func reorder(from: IndexSet, to: Int) {
         items.move(fromOffsets: from, toOffset: to)
         LibraryViewModel.shared.reorderRun(runId: run.id, orderedIds: items.map(\.id))
@@ -325,10 +256,7 @@ struct RunDetailView: View {
             title: currentRun.title,
             subtitle: "Reading Path • \(items.count) issue\(items.count == 1 ? "" : "s")",
             covers: ShareCardCovers.fromCache(items.map(\.comic)),
-            stats: [
-                ("Issues", "\(items.count)"),
-                ("Rating", runRating > 0 ? String(repeating: "★", count: runRating) : "—")
-            ]
+            stats: [("Issues", "\(items.count)")]
         )
         shareCardURL = ShareCardRenderer.renderToTempPNG(card, filename: "ReadingPath-\(currentRun.id).png")
     }

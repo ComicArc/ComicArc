@@ -14,19 +14,12 @@ struct SeriesManagerView: View {
     @State private var coverComicId:   Int64?   = nil
     @State private var selectedIssueId: Int64?  = nil
     @State private var showMergeConfirm = false
-    @State private var showOnlyFlagged  = false
-    @State private var showSeriesLinkPicker = false
     @State private var pagePickerIssue: Comic? = nil
     @State private var exportErrorMessage: String? = nil
     // Bumped whenever a custom cover is set for a row -- IssueThumbnail's `.task` only runs once
     // per view identity, so merely refetching `issues` (same comic ids, same ForEach identity)
     // would never make an already-appeared row re-query ThumbnailCache and pick up the new image.
     @State private var thumbnailRefreshToken = 0
-
-    private var flaggedCount: Int { issues.filter { ($0.readingOrderConfidence ?? 100) < 85 }.count }
-    private var visibleIssues: [Comic] {
-        showOnlyFlagged ? issues.filter { ($0.readingOrderConfidence ?? 100) < 85 } : issues
-    }
 
     init(series: String, publisher: String?) {
         self.series    = series
@@ -46,7 +39,6 @@ struct SeriesManagerView: View {
                 }
                 Spacer()
                 Menu {
-                    Button("Link as Continuation of Another Series…") { showSeriesLinkPicker = true }
                     Button("Export Series as CSV…") {
                         BackupService.exportCSV(
                             comics: issues, fileService: fileService, filename: "\(series).csv"
@@ -56,16 +48,12 @@ struct SeriesManagerView: View {
                     Image(systemName: "ellipsis.circle")
                 }
                 .menuStyle(.borderlessButton).frame(width: 28)
-                .help("Advanced: chain this series to another series' numbering (e.g. a relaunch)")
+                .help("More actions")
                 Button("Done") { dismiss() }
                     .goldButton()
             }
             .padding(24)
             .background(Design.navBackground)
-            .sheet(isPresented: $showSeriesLinkPicker) {
-                SeriesLinkPickerView(childSeries: series, childPublisher: publisher ?? "Unknown")
-                    .environmentObject(vm)
-            }
             .errorAlert("Export Failed", message: $exportErrorMessage)
 
             Rectangle().fill(Design.borderColor).frame(height: 1)
@@ -131,8 +119,7 @@ struct SeriesManagerView: View {
     private var issuesSection: some View {
         // Hoisted so each filter over `issues` runs once per render instead of once per
         // reference below -- both are computed properties re-derived on every access.
-        let flagged = flaggedCount
-        let visible = visibleIssues
+        let visible = issues
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 sectionLabel("Issue Order")
@@ -148,15 +135,6 @@ struct SeriesManagerView: View {
                     .font(.caption).foregroundStyle(.tertiary)
             }
 
-            if flagged > 0 {
-                Toggle(isOn: $showOnlyFlagged) {
-                    Label("Show only possibly misplaced (\(flagged))", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                }
-                .toggleStyle(.switch).controlSize(.mini)
-            }
-
             List(selection: $selectedIssueId) {
                 ForEach(visible) { issue in
                     issueRow(issue)
@@ -165,7 +143,6 @@ struct SeriesManagerView: View {
                         .tag(issue.id)
                 }
                 .onMove { from, to in
-                    guard !showOnlyFlagged else { return }
                     issues.move(fromOffsets: from, toOffset: to)
                     saveOrder()
                 }
@@ -200,11 +177,6 @@ struct SeriesManagerView: View {
                     Text(issue.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    if let confidence = issue.readingOrderConfidence, confidence < 85 {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2).foregroundStyle(.orange)
-                            .help(issue.readingOrderReason ?? "Position estimated with low confidence — worth checking")
-                    }
                 }
                 HStack(spacing: 6) {
                     if let n = issue.issueNumber {

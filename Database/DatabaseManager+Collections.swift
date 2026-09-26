@@ -5,13 +5,12 @@ extension DatabaseManager {
     func runsContaining(comicId: Int64) -> [Run] {
         queue.sync {
             rows("""
-                SELECT r.id, r.title, COALESCE(r.description,''), COALESCE(r.rating,0), r.review, r.buy_link, r.created_at
+                SELECT r.id, r.title, COALESCE(r.description,''), r.buy_link
                 FROM runs r JOIN run_items ri ON ri.run_id = r.id
                 WHERE ri.comic_id = ? ORDER BY r.created_at
             """, args: [comicId]) { r in
                 Run(id: colInt64(r, 0), title: colText(r, 1) ?? "", description: colText(r, 2) ?? "",
-                    rating: { let v = colInt(r, 3); return v > 0 ? v : nil }(),
-                    review: colText(r, 4), buyLink: colText(r, 5), createdAt: colText(r, 6) ?? "")
+                    buyLink: colText(r, 3))
             }
         }
     }
@@ -32,15 +31,12 @@ extension DatabaseManager {
     func tierListsContaining(comicId: Int64) -> [TierList] {
         queue.sync {
             rows("""
-                SELECT tl.id, tl.title, COALESCE(tl.description,''), tl.created_at,
-                       COALESCE(tl.rating,0), tl.review, tl.cover_image_path
+                SELECT tl.id, tl.title, COALESCE(tl.description,''), tl.cover_image_path
                 FROM tier_lists tl JOIN tier_list_items tli ON tli.tier_list_id = tl.id
                 WHERE tli.comic_id = ? ORDER BY tl.created_at
             """, args: [comicId]) { r in
                 TierList(id: colInt64(r, 0), title: colText(r, 1) ?? "", description: colText(r, 2) ?? "",
-                          createdAt: colText(r, 3) ?? "",
-                          rating: colInt(r, 4) > 0 ? colInt(r, 4) : nil,
-                          review: colText(r, 5), coverImagePath: colText(r, 6))
+                          coverImagePath: colText(r, 3))
             }
         }
     }
@@ -61,7 +57,7 @@ extension DatabaseManager {
     func allRuns() -> [Run] {
         queue.sync {
             let sql = """
-                SELECT r.id, r.title, COALESCE(r.description,''), COALESCE(r.rating,0), r.review, r.buy_link, r.created_at,
+                SELECT r.id, r.title, COALESCE(r.description,''), r.buy_link,
                        COUNT(ri.id) as total,
                        SUM(CASE WHEN c.page_count > 1 AND COALESCE(rp.current_page,0) >= c.page_count - 1 THEN 1 ELSE 0 END) as read_ct,
                        r.cover_image_path
@@ -74,9 +70,8 @@ extension DatabaseManager {
             """
             return rows(sql, map: { s in
                 Run(id: colInt64(s, 0), title: colText(s, 1) ?? "", description: colText(s, 2) ?? "",
-                    rating: colInt(s, 3) > 0 ? colInt(s, 3) : nil,
-                    review: colText(s, 4), buyLink: colText(s, 5), createdAt: colText(s, 6) ?? "",
-                    comicCount: colInt(s, 7), readCount: colInt(s, 8), coverImagePath: colText(s, 9))
+                    buyLink: colText(s, 3),
+                    comicCount: colInt(s, 4), readCount: colInt(s, 5), coverImagePath: colText(s, 6))
             })
         }
     }
@@ -164,8 +159,8 @@ extension DatabaseManager {
     func allTierLists() -> [TierList] {
         queue.sync {
             let sql = """
-                SELECT tl.id, tl.title, COALESCE(tl.description,''), tl.created_at, COUNT(tli.id) as total,
-                       COALESCE(tl.rating,0), tl.review, tl.cover_image_path
+                SELECT tl.id, tl.title, COALESCE(tl.description,''), COUNT(tli.id) as total,
+                       tl.cover_image_path
                 FROM tier_lists tl
                 LEFT JOIN tier_list_items tli ON tli.tier_list_id = tl.id
                 GROUP BY tl.id
@@ -173,9 +168,8 @@ extension DatabaseManager {
             """
             return rows(sql, map: { s in
                 TierList(id: colInt64(s, 0), title: colText(s, 1) ?? "", description: colText(s, 2) ?? "",
-                          createdAt: colText(s, 3) ?? "", comicCount: colInt(s, 4),
-                          rating: colInt(s, 5) > 0 ? colInt(s, 5) : nil,
-                          review: colText(s, 6), coverImagePath: colText(s, 7))
+                          comicCount: colInt(s, 3),
+                          coverImagePath: colText(s, 4))
             })
         }
     }
@@ -263,13 +257,6 @@ extension DatabaseManager {
         }
     }
 
-    func setRunRating(_ runId: Int64, rating: Int, review: String?) {
-        queue.sync {
-            _ = run("UPDATE runs SET rating = ?, review = ? WHERE id = ?",
-                    args: [rating > 0 ? rating : nil, review, runId])
-        }
-    }
-
     func setRunItemNotes(_ itemId: Int64, notes: String) {
         queue.sync {
             _ = run("UPDATE run_items SET notes = ? WHERE id = ?",
@@ -277,11 +264,5 @@ extension DatabaseManager {
         }
     }
 
-    func setTierListRating(_ tierListId: Int64, rating: Int, review: String?) {
-        queue.sync {
-            _ = run("UPDATE tier_lists SET rating = ?, review = ? WHERE id = ?",
-                    args: [rating > 0 ? rating : nil, review, tierListId])
-        }
-    }
 
 }

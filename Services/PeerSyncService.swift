@@ -10,11 +10,9 @@ import UIKit
 /// MultipeerConnectivity -- no account, no server, nothing leaves the local network. Deliberately
 /// scoped to reading progress only (current page + last-read timestamp), matched by file hash
 /// rather than database id, since ids are meaningless across two independently-scanned libraries
-/// but a file's hash identifies the same underlying comic wherever it was imported. Ratings,
-/// reviews, tags, diary entries, and reading-order overrides are NOT synced -- those have far
-/// messier merge semantics (what does "merging" two different reviews even mean?) than a single
-/// last-write-wins scalar page number, and folding them in later is a deliberate, separate step,
-/// not an oversight.
+/// but a file's hash identifies the same underlying comic wherever it was imported. Tags and
+/// manual issue orders are NOT synced -- they have far messier merge semantics than a single
+/// last-write-wins scalar page number.
 @MainActor
 final class PeerSyncService: NSObject, ObservableObject {
     static let shared = PeerSyncService()

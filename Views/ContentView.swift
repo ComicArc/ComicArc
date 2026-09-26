@@ -215,8 +215,6 @@ struct ContentView: View {
             }
         case .runs:
             runsContent
-        case .diary:
-            DiaryView()
         case .tierLists:
             tierListsContent
         case .favoriteMoments:
@@ -227,8 +225,6 @@ struct ContentView: View {
             ReadingHistoryView()
         case .duplicates:
             DuplicatesView()
-        case .readingOrderManager:
-            ReadingOrderManagerView()
         case .metadataConflicts:
             MetadataConflictsView()
         case .settings:
@@ -415,8 +411,7 @@ struct ContentView: View {
             }
             if let url { urls.append(url) }
         }
-        let supported: Set<String> = ["cbz", "cbr", "pdf"]
-        let comics = urls.filter { supported.contains($0.pathExtension.lowercased()) }
+        let comics = urls.filter { LibraryScanner.importableExtensions.contains($0.pathExtension.lowercased()) }
         if !comics.isEmpty { vm.importFiles(comics) }
     }
 }
@@ -524,11 +519,6 @@ struct SidebarView: View {
                                     navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
                                            trailingText: "\(vm.duplicateGroups.count)")
                                 }
-                            } else if discoverItem == .readingOrderManager {
-                                if !vm.autoPlacedIssues.isEmpty {
-                                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
-                                           trailingText: "\(vm.autoPlacedIssues.count)")
-                                }
                             } else if discoverItem == .metadataConflicts {
                                 if !vm.pendingMetadataConflicts.isEmpty {
                                     navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
@@ -572,11 +562,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle("ComicArc")
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if vm.readingStreak > 0 {
-                streakIndicator
-            }
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if !vm.isLibraryAvailable {
@@ -595,20 +580,6 @@ struct SidebarView: View {
         .sheet(isPresented: $showAllTags) {
             AllTagsView().environmentObject(vm)
         }
-    }
-
-    /// Ambient, always-visible-while-browsing echo of the same number Stats/Year in Review
-    /// already show -- pinned above the scrollable sidebar content (not just the first row in
-    /// it) specifically so it stays put while scrolling through Publishers/Tags/Discover.
-    private var streakIndicator: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "flame.fill").foregroundStyle(.orange)
-            Text("\(vm.readingStreak)-day streak").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16).padding(.vertical, 8)
-        .background(.orange.opacity(0.08))
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder

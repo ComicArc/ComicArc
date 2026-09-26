@@ -7,9 +7,7 @@ struct ImportWizardView: View {
     @State private var report: LibraryHealthReport
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var vm: LibraryViewModel
-    @State private var isRepositioning = false
     @State private var showRenameFiles = false
-    @State private var isBreakingCycles = false
 
     init(report: LibraryHealthReport) {
         _report = State(initialValue: report)
@@ -35,28 +33,11 @@ struct ImportWizardView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if !report.needsSpecialReposition.isEmpty {
-                        section(
-                            title: "Some annuals or specials may be in the wrong spot",
-                            icon: "arrow.up.arrow.down.circle.fill",
-                            detail: "\(report.needsSpecialReposition.reduce(0) { $0 + $1.count }) issue(s) across \(report.needsSpecialReposition.count) series. This tries to place them better using their cover date and story."
-                        ) {
-                            HStack {
-                                Button(isRepositioning ? "Fixing…" : "Fix Automatically") { repositionSpecials() }
-                                    .buttonStyle(.borderedProminent).tint(Design.brandGold)
-                                    .disabled(isRepositioning)
-                                Button("Review Individually") {
-                                    vm.destination = .readingOrderManager
-                                    dismiss()
-                                }.buttonStyle(.bordered)
-                            }
-                        }
-                    }
                     if report.duplicateGroupCount > 0 {
                         section(
                             title: "Possible duplicate issues",
                             icon: "doc.on.doc.fill",
-                            detail: "\(report.duplicateGroupCount) group(s) of comics that look like the same issue twice."
+                            detail: "\(report.duplicateGroupCount) group(s) of comics with the same file name or cover."
                         ) {
                             Button("Review Duplicates") {
                                 vm.destination = .duplicates
@@ -84,7 +65,7 @@ struct ImportWizardView: View {
                         seriesListSection(
                             title: "Multiple volumes under one series name",
                             icon: "square.stack.fill",
-                            detail: "These series have more than one distinct volume filed together. Link them as a continuation in Manage Series if they're really one story.",
+                            detail: "These series have more than one distinct volume filed together.",
                             items: report.multipleVolumes
                         )
                     }
@@ -95,17 +76,6 @@ struct ImportWizardView: View {
                             detail: "Issue numbers that are the same value but written differently (like #1 and #01) — could be a real duplicate, or just inconsistent naming.",
                             items: report.numberingMismatches
                         )
-                    }
-                    if !report.brokenSeriesLinkCycles.isEmpty {
-                        section(
-                            title: "Broken reading-order links",
-                            icon: "link.badge.plus",
-                            detail: "\(report.brokenSeriesLinkCycles.count) series-link chain(s) form a loop, which silently breaks their reading order. This removes the most recently added link in each loop."
-                        ) {
-                            Button(isBreakingCycles ? "Fixing…" : "Fix Automatically") { breakCycles() }
-                                .buttonStyle(.borderedProminent).tint(Design.brandGold)
-                                .disabled(isBreakingCycles)
-                        }
                     }
                     if report.missingComicInfoCount > 0 {
                         section(
@@ -186,34 +156,5 @@ struct ImportWizardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private func repositionSpecials() {
-        isRepositioning = true
-        let keys = Set(report.needsSpecialReposition.map { "\($0.publisher):\($0.series)" })
-        Task.detached(priority: .userInitiated) {
-            DatabaseManager.shared.positionSpecialsChronologically()
-            DatabaseManager.shared.recomputeReadingOrder(affectedGroupKeys: keys)
-            let refreshed = LibraryHealthAnalyzer.analyze()
-            await MainActor.run {
-                isRepositioning = false
-                report = refreshed
-                vm.reload()
-                vm.refreshLibraryHealth()
-            }
-        }
-    }
 
-    private func breakCycles() {
-        isBreakingCycles = true
-        Task.detached(priority: .userInitiated) {
-            DatabaseManager.shared.breakSeriesLinkCycles()
-            DatabaseManager.shared.recomputeReadingOrder()
-            let refreshed = LibraryHealthAnalyzer.analyze()
-            await MainActor.run {
-                isBreakingCycles = false
-                report = refreshed
-                vm.reload()
-                vm.refreshLibraryHealth()
-            }
-        }
-    }
 }

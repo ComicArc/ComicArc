@@ -17,11 +17,6 @@ extension LibraryViewModel {
         }
     }
 
-    func setRating(_ comic: Comic, rating: Int) {
-        db.setRating(comic.id, rating: rating)
-        patchComicLocally(comic.id) { $0.rating = rating }
-    }
-
     func markRead(_ comic: Comic) {
         let page = max(0, comic.pageCount - 1)
         db.updateProgress(comicId: comic.id, page: page)
@@ -42,12 +37,15 @@ extension LibraryViewModel {
         }
     }
     func markRead(_ comics: [Comic]) {
-        db.updateProgress(comics.map { (comicId: $0.id, page: max(0, $0.pageCount - 1)) })
-        for comic in comics { db.markFinished(comicId: comic.id) }
+        db.setFinished(comics.map { (comicId: $0.id, lastPage: max(0, $0.pageCount - 1)) }, finished: true)
         reload()
     }
 
-    func setReview(_ comic: Comic, review: String?) { db.setComicReview(comic.id, review: review?.isEmpty == false ? review : nil) }
+    func markUnread(_ comics: [Comic]) {
+        db.setFinished(comics.map { (comicId: $0.id, lastPage: 0) }, finished: false)
+        reload()
+    }
+
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) { db.updateMeta(comicId: comicId, fields: fields) }
 
     func addTag(name: String, to comic: Comic, category: TagCategory = .custom) { db.addTag(name: name, to: comic.id, category: category) }

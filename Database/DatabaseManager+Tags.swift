@@ -2,25 +2,6 @@ import Foundation
 import SQLite3
 
 extension DatabaseManager {
-    /// Batch tag lookup for a set of comic ids -- one query instead of N, since the taste-based
-    /// recommendation feed calls this with every unread, different-series candidate at once
-    /// (potentially the whole library), and looping `tags(for:)` per comic would be a real N+1
-    /// pattern at that scale. Chunked like every other unbounded id array, since a large library's
-    /// candidate set can comfortably exceed SQLite's bound-parameter ceiling.
-    func tagIdsByComic(_ comicIds: [Int64]) -> [Int64: Set<Int64>] {
-        guard !comicIds.isEmpty else { return [:] }
-        return queue.sync {
-            var result: [Int64: Set<Int64>] = [:]
-            for chunk in idChunks(comicIds) {
-                let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
-                rows("SELECT comic_id, tag_id FROM comic_tags WHERE comic_id IN (\(placeholders))",
-                     args: chunk) { s in (colInt64(s, 0), colInt64(s, 1)) }
-                    .forEach { comicId, tagId in result[comicId, default: []].insert(tagId) }
-            }
-            return result
-        }
-    }
-
     func tags(for comicId: Int64) -> [Tag] {
         queue.sync {
             rows("SELECT t.id, t.name, t.category FROM tags t JOIN comic_tags ct ON t.id = ct.tag_id WHERE ct.comic_id = ? ORDER BY t.name",

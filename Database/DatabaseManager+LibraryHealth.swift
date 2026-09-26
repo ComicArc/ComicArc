@@ -13,16 +13,6 @@ extension DatabaseManager {
         }
     }
 
-    func seriesNeedingSpecialReposition() -> [(publisher: String, series: String, count: Int)] {
-        queue.sync {
-            rows("""
-                SELECT publisher, series, COUNT(*) FROM comics
-                WHERE deleted_at IS NULL AND reading_order_confidence = 0
-                GROUP BY publisher, series HAVING COUNT(*) > 0
-                """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
-        }
-    }
-
     func seriesWithNumberingGaps() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -62,6 +52,20 @@ extension DatabaseManager {
         queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND page_count = 0") }
     }
 
+    /// The subset of zero-page comics the scanner has genuinely given up on (`scan_retry_count`
+    /// hit `LibraryScanner`'s cap of 3 -- see `zeroPageCountPaths()`), as opposed to one that's
+    /// merely zero-page for now (freshly imported, a slow/waking external drive not yet rescanned
+    /// successfully). Distinguishing the two matters for UI: a per-comic "this file looks broken"
+    /// marker should only ever fire once retries are exhausted, not on every ordinary
+    /// just-added-and-not-yet-confirmed-readable comic.
+    func brokenComicIds() -> Set<Int64> {
+        queue.sync {
+            Set(rows("SELECT id FROM comics WHERE deleted_at IS NULL AND page_count = 0 AND scan_retry_count >= 3") {
+                colInt64($0, 0)
+            })
+        }
+    }
+
     func seriesWithNumberingMismatches() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -78,122 +82,75 @@ extension DatabaseManager {
         }
     }
 
+    /// Duplicates are deliberately strict: two comics only match when they share the exact same
+    /// file name, a byte-identical cover thumbnail, or a byte-identical file (which always implies
+    /// the same thumbnail, and still catches copies whose thumbnail hasn't been generated yet).
+    /// Matching title, series, issue number, or other metadata alone never makes two books
+    /// duplicates. Matches are transitive, so each group is a connected set of copies.
     func duplicateGroups() -> [[Comic]] {
-        queue.sync {
-            let flat = rows("""
-                \(comicSelect)
-                JOIN (
-                    SELECT publisher, series, issue_number,
-                           comic_type(issue_number, title, series, format) AS ctype
-                    FROM comics
-                    WHERE deleted_at IS NULL AND issue_number IS NOT NULL AND issue_number != ''
-                    GROUP BY publisher, series, issue_number, ctype
-                    HAVING COUNT(*) > 1
-                ) dup ON dup.publisher = c.publisher AND dup.series = c.series
-                     AND dup.issue_number = c.issue_number
-                     AND dup.ctype = comic_type(c.issue_number, c.title, c.series, c.format)
-                WHERE c.deleted_at IS NULL
-                ORDER BY c.publisher, c.series, CAST(c.issue_number AS INTEGER),
-                         comic_type(c.issue_number, c.title, c.series, c.format)
-            """, map: comicRow)
-
-            guard !flat.isEmpty else { return [] }
-            var groups: [[Comic]] = []
-            var currentKey: (String, String, String, ComicType)? = nil
-            for comic in flat {
-                let type = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title, series: comic.series, format: comic.format)
-                let key = (comic.publisher, comic.series, comic.issueNumber ?? "", type)
-                if currentKey == nil || currentKey! != key {
-                    groups.append([comic])
-                    currentKey = key
-                } else {
-                    groups[groups.count - 1].append(comic)
-                }
+        let components = queue.sync { () -> [[Int64]] in
+            let entries = rows("SELECT id, file_path, file_hash FROM comics WHERE deleted_at IS NULL") {
+                (id: colInt64($0, 0), path: colText($0, 1) ?? "", hash: colText($0, 2))
             }
-
-            var result = groups.flatMap(splitByVolumeOrYear)
-
-            let hashMatches: [Comic] = rows("""
-                \(comicSelect)
-                JOIN (
-                    SELECT file_hash FROM comics
-                    WHERE deleted_at IS NULL AND file_hash IS NOT NULL
-                    GROUP BY file_hash HAVING COUNT(*) > 1
-                ) dh ON dh.file_hash = c.file_hash
-                WHERE c.deleted_at IS NULL
-                ORDER BY c.file_hash
-            """, map: comicRow)
-            var byHash: [String: [Comic]] = [:]
-            for comic in hashMatches { byHash[comic.fileHash ?? "", default: []].append(comic) }
-            var knownGroupIdSets = Set(result.map { Set($0.map(\.id)) })
-            for members in byHash.values where members.count > 1 {
-                let idSet = Set(members.map(\.id))
-                guard !knownGroupIdSets.contains(idSet) else { continue }
-                result.append(members)
-                knownGroupIdSets.insert(idSet)
-            }
-
-            return result
+            return Self.duplicateComponents(entries, coversDir: coversDir)
         }
-    }
-
-    func duplicateMatchCount(for comicId: Int64) -> Int {
-        queue.sync { _duplicateMatchCountUnlocked(for: comicId) }
+        guard !components.isEmpty else { return [] }
+        let byId = Dictionary(uniqueKeysWithValues: comics(ids: components.flatMap { $0 }).map { ($0.id, $0) })
+        return components
+            .map { $0.compactMap { byId[$0] } }
+            .filter { $0.count > 1 }
+            .sorted { ($0[0].series, $0[0].title) < ($1[0].series, $1[0].title) }
     }
 
     func _duplicateMatchCountUnlocked(for comicId: Int64) -> Int {
-        guard let comic = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL", args: [comicId], map: comicRow).first else {
-            return 0
+        let entries = rows("SELECT id, file_path, file_hash FROM comics WHERE deleted_at IS NULL") {
+            (id: colInt64($0, 0), path: colText($0, 1) ?? "", hash: colText($0, 2))
         }
-        let comicType = ReadingOrderEngine.classify(issueNumber: comic.issueNumber, title: comic.title,
-                                                     series: comic.series, format: comic.format)
-        let candidates: [Comic] = rows("""
-            \(comicSelect)
-            WHERE c.deleted_at IS NULL AND c.publisher = ? AND c.series = ? AND c.issue_number = ?
-                  AND comic_type(c.issue_number, c.title, c.series, c.format) = ?
-            """, args: [comic.publisher, comic.series, comic.issueNumber ?? "", comicType.rawValue], map: comicRow)
-        let matchingBucket = splitByVolumeOrYear(candidates).first { $0.contains { $0.id == comicId } } ?? []
-        var matchedIds = Set(matchingBucket.map(\.id))
-
-        if let hash = comic.fileHash {
-            let hashMatches = rows("SELECT id FROM comics WHERE deleted_at IS NULL AND file_hash = ?",
-                                    args: [hash]) { colInt64($0, 0) }
-            matchedIds.formUnion(hashMatches)
-        }
-        matchedIds.remove(comicId)
-        return matchedIds.count
+        let group = Self.duplicateComponents(entries, coversDir: coversDir).first { $0.contains(comicId) } ?? []
+        return max(0, group.count - 1)
     }
 
-    func splitByVolumeOrYear(_ group: [Comic]) -> [[Comic]] {
-        guard group.count > 1 else { return [group] }
-        var buckets: [[Comic]] = []
-        outer: for comic in group {
-            for i in buckets.indices {
-                let compatible = buckets[i].allSatisfy { existing in
-                    if let v1 = comic.volume, let v2 = existing.volume, v1 != v2 { return false }
-                    if let y1 = comic.year, let y2 = existing.year, abs(y1 - y2) > 1 { return false }
-                    return true
-                }
-                if compatible {
-                    buckets[i].append(comic)
-                    continue outer
-                }
+    /// Union-find over the three exact-match keys. Cover files are only hashed when another
+    /// cover has the same byte size, so a normal library reads almost none of them.
+    static func duplicateComponents(_ entries: [(id: Int64, path: String, hash: String?)], coversDir: URL) -> [[Int64]] {
+        var parent: [Int64: Int64] = [:]
+        func find(_ x: Int64) -> Int64 {
+            var root = x
+            while let p = parent[root], p != root { root = p }
+            parent[x] = root
+            return root
+        }
+        func unionAll(_ ids: [Int64]) {
+            guard let first = ids.first else { return }
+            for id in ids.dropFirst() { parent[find(id)] = find(first) }
+        }
+        for e in entries { parent[e.id] = e.id }
+
+        let byName = Dictionary(grouping: entries) { ($0.path as NSString).lastPathComponent }
+        for (name, members) in byName where !name.isEmpty && members.count > 1 { unionAll(members.map(\.id)) }
+
+        let byHash = Dictionary(grouping: entries.filter { $0.hash != nil }) { $0.hash! }
+        for members in byHash.values where members.count > 1 { unionAll(members.map(\.id)) }
+
+        var bySize: [Int: [Int64]] = [:]
+        for e in entries {
+            let url = coversDir.appendingPathComponent("\(e.id).jpg")
+            if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size > 0 {
+                bySize[size, default: []].append(e.id)
             }
-            buckets.append([comic])
         }
-        return buckets.filter { $0.count > 1 }
-    }
+        for ids in bySize.values where ids.count > 1 {
+            var byContent: [Data: [Int64]] = [:]
+            for id in ids {
+                guard let data = try? Data(contentsOf: coversDir.appendingPathComponent("\(id).jpg")) else { continue }
+                byContent[data, default: []].append(id)
+            }
+            for members in byContent.values where members.count > 1 { unionAll(members) }
+        }
 
-    func autoPlacedSpecialIssues() -> [Comic] {
-        queue.sync {
-            rows("""
-                \(comicSelect)
-                WHERE c.deleted_at IS NULL
-                      AND c.reading_order_confidence IS NOT NULL
-                      AND c.reading_order_confidence BETWEEN 1 AND 99
-                ORDER BY c.publisher, c.series, c.reading_order_position, c.title
-            """, map: comicRow)
-        }
+        var groups: [Int64: [Int64]] = [:]
+        for e in entries { groups[find(e.id), default: []].append(e.id) }
+        return groups.values.filter { $0.count > 1 }.map { $0.sorted() }
     }
 
     func missingIssueNumbers(series: String, publisher: String) -> [String] {

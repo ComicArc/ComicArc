@@ -2,7 +2,7 @@ import Foundation
 
 extension LibraryViewModel {
     /// Called at launch and after any mutation that changes the tier-list *list* (create/delete/
-    /// reorder) -- edits to a single tier list's fields (rating, cover) don't need this.
+    /// reorder) -- edits to a single tier list's fields (title, cover) don't need this.
     func refreshTierLists() {
         tierListsGeneration += 1
         let gen = tierListsGeneration
@@ -29,9 +29,6 @@ extension LibraryViewModel {
         offerUndo("Tier List \"\(tierList.title)\" deleted") { [weak self] in
             guard let self else { return }
             let newId = self.db.createTierList(title: tierList.title, description: tierList.description)
-            if let rating = tierList.rating {
-                self.db.setTierListRating(newId, rating: rating, review: tierList.review)
-            }
             if let cover = tierList.coverImagePath {
                 self.db.setTierListCover(tierListId: newId, imagePath: cover)
             }
@@ -45,10 +42,6 @@ extension LibraryViewModel {
     }
     func updateTierList(id: Int64, title: String, description: String) {
         db.updateTierList(id: id, title: title, description: description)
-        NotificationCenter.default.post(name: .tierListUpdated, object: nil)
-    }
-    func setTierListRating(_ tierListId: Int64, rating: Int, review: String?) {
-        db.setTierListRating(tierListId, rating: rating, review: review)
         NotificationCenter.default.post(name: .tierListUpdated, object: nil)
     }
     func reorderTierLists(orderedIds: [Int64]) { db.reorderTierLists(orderedIds: orderedIds); refreshTierLists() }

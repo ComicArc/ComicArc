@@ -12,7 +12,6 @@ struct ComicCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.fileService) private var fileService
     @Environment(\.readerNamespace) private var readerNamespace
-    @Environment(\.comicTheme) private var theme
     @State private var thumbnail: PlatformImage?
     @State private var accentColor: Color?
     @State private var isHovered = false
@@ -20,7 +19,7 @@ struct ComicCard: View {
     // Backs the context menu's "Add to Reading Path…"/"Add to Tier List…" new-item prompts --
     // previously the only way to get a comic into either was opening that feature's own
     // management screen first; this gives all six "remember this comic" features (Favorites,
-    // Highlights, Reading List, Reading Paths, Tier Lists, Diary) the same "flag from anywhere"
+    // Highlights, Reading List, Reading Paths, Tier Lists) the same "flag from anywhere"
     // pattern Favorites/Reading List's heart/bookmark icons already have.
     @State private var showNewRunPrompt = false
     @State private var newRunTitle = ""
@@ -28,14 +27,17 @@ struct ComicCard: View {
     @State private var newTierListTitle = ""
 
     private var isBulkSelected: Bool { vm.selectedComicIds.contains(comic.id) }
+    /// Zero-page after the scanner gave up retrying -- distinct from an ordinary unread comic, so
+    /// it doesn't sit in the library looking identical to something the user just hasn't opened
+    /// yet (see `DatabaseManager.brokenComicIds()`).
+    private var isBroken: Bool { vm.brokenComicIds.contains(comic.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
                 cover
                     .frame(width: cardWidth, height: cardHeight)
-                    .comicCardStyle(accentColor: accentColor, isHovered: isHovered,
-                                     fallbackTint: Design.publisherColor(comic.publisher), theme: theme)
+                    .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
                 if comic.isStarted && !comic.isFinished {
                     progressStrip
@@ -58,7 +60,8 @@ struct ComicCard: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if comic.isFinished && !vm.bulkMode { finishedBadge }
+                if isBroken && !vm.bulkMode { brokenBadge }
+                else if comic.isFinished && !vm.bulkMode { finishedBadge }
             }
 
             Text(comic.title)
@@ -66,23 +69,11 @@ struct ComicCard: View {
                 .frame(width: cardWidth, alignment: .leading)
 
             PublisherBadge(publisher: comic.publisher)
-
-            if comic.rating > 0 && !vm.bulkMode {
-                HStack(spacing: 2) {
-                    ForEach(1...5, id: \.self) { i in
-                        Image(systemName: i <= comic.rating ? "star.fill" : "star")
-                            .font(.system(size: 8))
-                            .foregroundStyle(i <= comic.rating ? Design.brandGold : Design.secondaryLabel)
-                    }
-                }
-            }
         }
         // isHovered: binds this to the shared HoverLiftModifier (same scale/ease/reduce-motion
         // behavior every other card uses) while still exposing the boolean here, since the cover
-        // glow above (`comicCardStyle(accentColor:isHovered:)`) needs it too.
-        // `theme.interaction.hoverLiftScale` is how this same lift becomes theme-aware (e.g. a
-        // snappier pop inside `webbed`) without this view ever knowing which theme it is.
-        .hoverLift(scale: theme.interaction.hoverLiftScale, duration: theme.interaction.hoverAnimationDuration, isHovered: $isHovered)
+        // ring above (`comicCardStyle(accentColor:isHovered:)`) needs it too.
+        .hoverLift(isHovered: $isHovered)
         .overlay(
             RoundedRectangle(cornerRadius: Design.cardCorner + 2)
                 .stroke(
@@ -180,6 +171,16 @@ struct ComicCard: View {
         .padding(6)
     }
 
+    private var brokenBadge: some View {
+        ZStack {
+            Circle().fill(Color.orange).frame(width: 22, height: 22)
+            Image(systemName: "exclamationmark.triangle.fill").font(.caption2.bold()).foregroundStyle(.white)
+        }
+        .padding(6)
+        .help("This file looks corrupted or empty — try rescanning your library")
+        .accessibilityLabel("Corrupted or empty file")
+    }
+
     @ViewBuilder
     private var contextMenu: some View {
         if vm.bulkMode {
@@ -246,8 +247,8 @@ struct ComicCard: View {
 
     private var accessibilityDescription: String {
         var parts = [comic.title, comic.series, comic.publisher]
-        if comic.rating > 0 { parts.append("\(comic.rating) stars") }
-        if comic.isFinished { parts.append("Finished") }
+        if isBroken { parts.append("Corrupted or empty file") }
+        else if comic.isFinished { parts.append("Finished") }
         else if comic.isStarted { parts.append("Page \(comic.progress + 1) of \(comic.pageCount)") }
         else { parts.append("Unread") }
         if comic.isFavorite { parts.append("Favorited") }

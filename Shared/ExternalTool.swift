@@ -33,7 +33,13 @@ final class ExternalTool: @unchecked Sendable {
     }
 
     private let activeProcessLock = NSLock()
-    private var activeProcess: Process?
+    /// Keyed by identity, not a single `Process?` field -- `shell()` can genuinely run
+    /// concurrently (a background scan's CBR page-count listing and the reader opening a
+    /// different CBR comic at the same time, on different queues). A single shared field meant
+    /// the later-finishing call's cleanup could null out the still-running other call's process
+    /// reference, so `terminateActiveProcess()` (called on app quit) could lose track of it
+    /// entirely and leave an orphaned `unar`/`lsar` subprocess running past app exit.
+    private var activeProcesses: [ObjectIdentifier: Process] = [:]
 
     @discardableResult
     func shell(_ executable: String, args: [String]) -> String {
@@ -43,10 +49,11 @@ final class ExternalTool: @unchecked Sendable {
         let pipe = Pipe()
         proc.standardOutput = pipe; proc.standardError = Pipe()
 
+        let key = ObjectIdentifier(proc)
         activeProcessLock.lock()
-        activeProcess = proc
+        activeProcesses[key] = proc
         activeProcessLock.unlock()
-        defer { activeProcessLock.lock(); activeProcess = nil; activeProcessLock.unlock() }
+        defer { activeProcessLock.lock(); activeProcesses.removeValue(forKey: key); activeProcessLock.unlock() }
 
         try? proc.run(); proc.waitUntilExit()
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
@@ -54,9 +61,9 @@ final class ExternalTool: @unchecked Sendable {
 
     func terminateActiveProcess() {
         activeProcessLock.lock()
-        let proc = activeProcess
+        let procs = Array(activeProcesses.values)
         activeProcessLock.unlock()
-        if proc?.isRunning == true { proc?.terminate() }
+        for proc in procs where proc.isRunning { proc.terminate() }
     }
 }
 #endif

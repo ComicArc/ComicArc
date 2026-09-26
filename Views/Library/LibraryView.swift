@@ -38,7 +38,7 @@ struct LibraryBrowserView: View {
                     .onChange(of: geo.size.width) { _, w in gridWidth = w }
             }
         )
-        .libraryAmbientBackground(tint: vm.activePublisher.map { Design.publisherColor($0) } ?? Design.warmSpotlightDefault)
+        .ambientBackground()
         .focusable()
         .focused($focused)
         .onKeyPress(.return) {
@@ -111,9 +111,8 @@ struct LibraryFilterBar: View {
                     // back to the top of Library, not a duplicate copy of the shelves themselves.
                     if vm.selectedSection == .library {
                         Button { vm.select(.library) } label: {
-                            Image(systemName: "sparkles")
+                            Image(systemName: "house")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Design.brandGold)
                         }
                         .buttonStyle(.plain)
                         .help("Back to Library home (Continue Reading, Recommended, and more)")

@@ -36,19 +36,17 @@ extension DatabaseManager {
             struct Raw {
                 let id: Int64; let comicId: Int64; let field: String
                 let current: String?; let proposed: String?; let source: String
-                let detectedAt: String; let status: String
             }
             let conflicts: [Raw] = rows("""
                 SELECT mc.id, mc.comic_id, mc.field, mc.current_value, mc.proposed_value,
-                       mc.proposed_source, mc.detected_at, mc.status
+                       mc.proposed_source
                 FROM metadata_conflicts mc
                 JOIN comics c ON c.id = mc.comic_id
                 WHERE mc.status = 'pending' AND c.deleted_at IS NULL
                 ORDER BY mc.detected_at DESC
                 """) { s in
                 Raw(id: colInt64(s, 0), comicId: colInt64(s, 1), field: colText(s, 2) ?? "",
-                    current: colText(s, 3), proposed: colText(s, 4), source: colText(s, 5) ?? "",
-                    detectedAt: colText(s, 6) ?? "", status: colText(s, 7) ?? "pending")
+                    current: colText(s, 3), proposed: colText(s, 4), source: colText(s, 5) ?? "")
             }
             guard !conflicts.isEmpty else { return [] }
             let comicIds = Array(Set(conflicts.map(\.comicId)))
@@ -60,9 +58,8 @@ extension DatabaseManager {
             let comicsById = Dictionary(uniqueKeysWithValues: comics.map { ($0.id, $0) })
             return conflicts.compactMap { r in
                 guard let comic = comicsById[r.comicId] else { return nil }
-                return (MetadataConflict(id: r.id, comicId: r.comicId, field: r.field, currentValue: r.current,
-                                          proposedValue: r.proposed, proposedSource: r.source,
-                                          detectedAt: r.detectedAt, status: r.status), comic)
+                return (MetadataConflict(id: r.id, field: r.field, currentValue: r.current,
+                                          proposedValue: r.proposed, proposedSource: r.source), comic)
             }
         }
     }

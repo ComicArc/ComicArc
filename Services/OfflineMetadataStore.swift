@@ -18,11 +18,6 @@ struct GCDIssueMatch {
     let matchedSeriesYearBegan: Int?
 }
 
-struct GCDSeriesBond {
-    let originName: String; let originPublisher: String
-    let targetName: String; let targetPublisher: String
-}
-
 /// A candidate series for the manual "Fix Match" picker -- distinct from the private `Candidate`
 /// type `lookupIssue` scores internally, since this one is a plain search result meant for a
 /// human to browse and choose from, not something the automatic matcher ranks.
@@ -100,25 +95,6 @@ final class OfflineMetadataStore {
 
     static func normalizePublisher(_ raw: String) -> String {
         raw.lowercased().replacingOccurrences(of: #"[^a-z0-9]"#, with: "", options: .regularExpression)
-    }
-
-    static func seriesNamesMatch(local: String, gcdName: String) -> Bool {
-        let normLocal = normalizeSeriesName(local)
-        let normGCD = normalizeSeriesName(gcdName)
-        if !normLocal.isEmpty, normLocal == normGCD { return true }
-        if let abbrev = abbreviationToken(local), computeInitials(gcdName) == abbrev { return true }
-        return false
-    }
-
-    static func computeInitials(_ raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        s = s.replacingOccurrences(of: #"\s*\((?:19|20)\d{2}(?:-(?:19|20)?\d{2,4})?\)\s*$"#,
-                                    with: "", options: .regularExpression)
-        s = s.replacingOccurrences(of: #"\s*,?\s*[Vv]ol(?:ume)?\.?\s*\d+\s*$"#,
-                                    with: "", options: .regularExpression)
-        if s.lowercased().hasPrefix("the ") { s = String(s.dropFirst(4)) }
-        let words = s.split(whereSeparator: { $0 == " " || $0 == "-" })
-        return words.compactMap { $0.first?.isLetter == true ? String($0.first!).uppercased() : nil }.joined()
     }
 
     static func abbreviationToken(_ raw: String) -> String? {
@@ -480,31 +456,4 @@ final class OfflineMetadataStore {
         return results
     }
 
-    func allSeriesBonds() -> [GCDSeriesBond] {
-        guard isAvailable else { return [] }
-        let sql = """
-            SELECT so.name, po.name, st.name, pt.name
-            FROM series_bond sb
-            JOIN series so ON so.id = sb.origin_id
-            JOIN series st ON st.id = sb.target_id
-            LEFT JOIN publisher po ON po.id = so.publisher_id
-            LEFT JOIN publisher pt ON pt.id = st.publisher_id
-            JOIN series_bond_type bt ON bt.id = sb.bond_type_id
-            WHERE bt.name IN \(Self.continuationBondTypes)
-        """
-        var results: [GCDSeriesBond] = []
-        var stmt: OpaquePointer?
-        queue.sync {
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                guard let originName = sqlite3_column_text(stmt, 0), let targetName = sqlite3_column_text(stmt, 2) else { continue }
-                let originPub = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "Unknown"
-                let targetPub = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "Unknown"
-                results.append(GCDSeriesBond(originName: String(cString: originName), originPublisher: originPub,
-                                              targetName: String(cString: targetName), targetPublisher: targetPub))
-            }
-            sqlite3_finalize(stmt)
-        }
-        return results
-    }
 }

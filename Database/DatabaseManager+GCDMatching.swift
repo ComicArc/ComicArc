@@ -10,20 +10,12 @@ extension DatabaseManager {
          .replacingOccurrences(of: "_", with: "\\_")
     }
 
-    static func parseGCDDate(_ raw: String) -> (year: Int, month: Int?, day: Int?)? {
-        let parts = raw.split(separator: "-")
-        guard parts.count == 3, let year = Int(parts[0]), year > 0 else { return nil }
-        let month = Int(parts[1]).flatMap { $0 > 0 ? $0 : nil }
-        let day = month != nil ? Int(parts[2]).flatMap { $0 > 0 ? $0 : nil } : nil
-        return (year, month, day)
-    }
-
     func recomputeGCDMatches(affectedGroupKeys: Set<String>? = nil, store: OfflineMetadataStore = .shared) {
         guard store.isAvailable else { return }
         queue.sync {
             var effectiveKeys = affectedGroupKeys
             if let keys = effectiveKeys, !keys.isEmpty {
-                // Mirrors recomputeReadingOrder's bare-key expansion: a caller (LibraryScanner,
+                // Bare-key expansion: a caller (LibraryScanner,
                 // most commonly, whether from a freshly-derived series or one just re-derived
                 // after a folder rename) may not know a comic's current volume yet, so its key is
                 // a bare "publisher:series". If a PRIOR pass already backfilled comics.volume for
@@ -33,28 +25,36 @@ extension DatabaseManager {
                 effectiveKeys = expandBareGroupKeys(keys)
             }
 
-            var sql = """
+            let baseSQL = """
                 SELECT id, series, publisher, issue_number, year, title,
                        publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), '')),
                        format
                 FROM comics WHERE deleted_at IS NULL AND gcd_match_source != 'manual'
             """
-            var args: [Any?] = []
-            if let keys = effectiveKeys {
-                guard !keys.isEmpty else { return }
-                let placeholders = keys.map { _ in "?" }.joined(separator: ",")
-                sql += " AND (publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))) IN (\(placeholders))"
-                args = Array(keys).map { $0 as Any? }
-            }
             struct Row { let id: Int64; let series: String; let publisher: String; let issueNumber: String?; let year: Int?; let title: String; let format: String? }
-            let candidates: [Row] = rows(sql, args: args) { s in
+            func mapRow(_ s: OpaquePointer) -> Row {
                 Row(id: colInt64(s, 0), series: colText(s, 1) ?? "General", publisher: colText(s, 2) ?? "Unknown",
                     issueNumber: colText(s, 3), year: sqlite3_column_type(s, 4) != SQLITE_NULL ? colInt(s, 4) : nil,
                     title: colText(s, 5) ?? "", format: colText(s, 7))
             }
+            // `affectedGroupKeys` is library-size-driven (one key per distinct series touched in
+            // a scan) -- chunked the same way every other unbounded id/key array in this file is,
+            // so a large first-time import can't silently exceed SQLite's bound-parameter ceiling
+            // and skip GCD rematching for the whole scan with no error surfaced.
+            var candidates: [Row] = []
+            if let keys = effectiveKeys {
+                guard !keys.isEmpty else { return }
+                for chunk in idChunks(Array(keys)) {
+                    let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+                    let sql = baseSQL + " AND (publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))) IN (\(placeholders))"
+                    candidates += rows(sql, args: chunk.map { $0 as Any? }, map: mapRow)
+                }
+            } else {
+                candidates = rows(baseSQL, map: mapRow)
+            }
             var updateRows: [[Any?]] = []
             for row in candidates {
-                let comicType = ReadingOrderEngine.classify(issueNumber: row.issueNumber, title: row.title, series: row.series, format: row.format)
+                let comicType = ComicTypeClassifier.classify(issueNumber: row.issueNumber, title: row.title, format: row.format)
                 let match = store.lookupIssue(
                     series: row.series, publisher: row.publisher, issueNumber: row.issueNumber, year: row.year,
                     comicType: comicType
@@ -87,45 +87,6 @@ extension DatabaseManager {
                            volume = CASE WHEN has_comicinfo = 1 THEN volume ELSE ? END
                     WHERE id = ?
                     """, rows: updateRows)
-            }
-        }
-    }
-
-    func autoPopulateSeriesLinksFromGCD(store: OfflineMetadataStore = .shared) {
-        let bonds = store.allSeriesBonds()
-        guard !bonds.isEmpty else { return }
-        queue.sync {
-            let librarySeries: [SeriesContinuity.LibrarySeries] = rows(
-                "SELECT DISTINCT publisher, series FROM comics WHERE deleted_at IS NULL"
-            ) { s in SeriesContinuity.LibrarySeries(publisher: colText(s, 0) ?? "Unknown", series: colText(s, 1) ?? "General") }
-
-            let proposals = SeriesContinuity.proposeLinks(bonds: bonds, librarySeries: librarySeries)
-            guard !proposals.isEmpty else { return }
-
-            // Precompute the already-linked set and track the next sequence number locally
-            // instead of re-querying COUNT(*)/MAX(sequence_order) once per bond -- both were
-            // constant across the whole loop except for links this same loop just inserted,
-            // which the local Set/counter accounts for directly.
-            var alreadyLinked = Set(rows("SELECT child_publisher, child_series FROM series_links") { s in
-                "\(colText(s, 0) ?? ""):\(colText(s, 1) ?? "")"
-            })
-            var nextSeq = scalarInt("SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM series_links")
-
-            var insertRows: [[Any?]] = []
-            for proposal in proposals {
-                let key = "\(proposal.child.publisher):\(proposal.child.series)"
-                guard !alreadyLinked.contains(key) else { continue }
-                insertRows.append([proposal.parent.publisher, proposal.parent.series,
-                                    proposal.child.publisher, proposal.child.series, nextSeq])
-                alreadyLinked.insert(key)
-                nextSeq += 1
-            }
-            inTransaction {
-                runBatch("""
-                    INSERT OR IGNORE INTO series_links
-                        (parent_publisher, parent_series, child_publisher, child_series, sequence_order, source)
-                    VALUES (?, ?, ?, ?, ?, 'gcd')
-                    """, rows: insertRows)
             }
         }
     }

@@ -21,7 +21,6 @@ struct IssueDetailPage: View {
     @State private var accentColor:    Color? = nil
     @State private var showingEdit:    Bool     = false
     @State private var showMetadataInspector: Bool = false
-    @State private var reviewDraft:    String   = ""
     @State private var appearsInRuns:  [Run]    = []
     @State private var appearsInTierLists: [TierList] = []
     @State private var missingIssues:  [String] = []
@@ -217,20 +216,7 @@ struct IssueDetailPage: View {
             }
             .frame(width: coverSize.width, height: coverSize.height)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            // An always-on spotlight pool behind the cover -- this page's whole job is "look at
-            // the comic you own," so unlike the grid's hover-gated version, this one is lit from
-            // the moment the page appears.
-            .background(
-                RadialGradient(
-                    colors: [(accentColor ?? Design.warmSpotlightDefault).opacity(0.35),
-                             (accentColor ?? Design.warmSpotlightDefault).opacity(0)],
-                    center: .center, startRadius: 0, endRadius: max(coverSize.width, coverSize.height) * 0.85
-                )
-                .frame(width: coverSize.width * 1.8, height: coverSize.height * 1.8)
-                .blendMode(.screen)
-                .allowsHitTesting(false)
-            )
-            .shadow(color: (accentColor ?? .black).opacity(accentColor != nil ? 0.4 : 0.55), radius: 24, x: 0, y: 10)
+            .shadow(color: .black.opacity(0.55), radius: 24, x: 0, y: 10)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Design.borderColor, lineWidth: 1)
@@ -252,12 +238,11 @@ struct IssueDetailPage: View {
                     }
                 }
                 .frame(width: 256)
-            }
-
-            StarRatingLarge(rating: current.rating) { star in
-                let newR = star == current.rating ? 0 : star
-                current.rating = newR
-                vm.setRating(current, rating: newR)
+            } else if vm.brokenComicIds.contains(current.id) {
+                Label("This file looks corrupted or empty. Try rescanning your library from Settings.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+                    .frame(width: 256)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 28) {
@@ -328,19 +313,7 @@ struct IssueDetailPage: View {
         .padding(40)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(
-            // A faint wash of this comic's own cover color behind its detail page -- the same
-            // "now playing" ambient-tint idea, scoped to just this one column so it never
-            // competes with the neutral home-base look everywhere else in the app. Radial rather
-            // than flat so it reads as light spilling outward from where the cover sits, not a
-            // uniform color cast over the whole column.
-            ZStack {
-                Design.navBackground.opacity(0.4)
-                RadialGradient(
-                    colors: [(accentColor ?? Design.warmSpotlightDefault).opacity(0.22),
-                             (accentColor ?? Design.warmSpotlightDefault).opacity(0)],
-                    center: UnitPoint(x: 0.5, y: 0.3), startRadius: 0, endRadius: 360
-                )
-            }
+            Design.navBackground.opacity(0.4)
         )
     }
 
@@ -420,29 +393,6 @@ struct IssueDetailPage: View {
                         .frame(maxWidth: 110)
                         Button("Add") { addTag() }
                             .disabled(newTagText.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-            }
-
-            divider
-
-            sectionBlock("My Review") {
-                VStack(alignment: .leading, spacing: 10) {
-                    TextEditor(text: $reviewDraft)
-                        .frame(minHeight: 100, maxHeight: 180)
-                        .font(.subheadline)
-                        .scrollContentBackground(.hidden)
-                        .background(Design.surfaceBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Design.borderColor))
-                    HStack {
-                        Spacer()
-                        Button("Save Review") {
-                            let text = reviewDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                            vm.setReview(current, review: text.isEmpty ? nil : text)
-                            current.review = text.isEmpty ? nil : text
-                        }
-                        .disabled(reviewDraft.trimmingCharacters(in: .whitespacesAndNewlines) == (current.review ?? ""))
                     }
                 }
             }
@@ -603,7 +553,6 @@ struct IssueDetailPage: View {
         let comicId = current.id
         let series  = current.series
         let pub     = current.publisher
-        reviewDraft = current.review ?? ""
 
         ThumbnailCache.shared.thumbnail(for: current) { img in
             guard comicId == self.current.id else { return }
