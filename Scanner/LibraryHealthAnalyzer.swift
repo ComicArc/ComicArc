@@ -10,19 +10,18 @@ struct LibraryHealthReport {
     var multipleFirstIssues: [SeriesIssue] = []
     var numberingGaps: [SeriesIssue] = []
     var multipleVolumes: [SeriesIssue] = []
-    var missingComicInfoCount: Int = 0
     var corruptArchiveCount: Int = 0
     var numberingMismatches: [SeriesIssue] = []
 
     var isEmpty: Bool {
         duplicateGroupCount == 0 && multipleFirstIssues.isEmpty
-            && numberingGaps.isEmpty && multipleVolumes.isEmpty && missingComicInfoCount == 0
+            && numberingGaps.isEmpty && multipleVolumes.isEmpty
             && corruptArchiveCount == 0 && numberingMismatches.isEmpty
     }
 
     var totalCount: Int {
         duplicateGroupCount + multipleFirstIssues.count
-            + numberingGaps.count + multipleVolumes.count + missingComicInfoCount
+            + numberingGaps.count + multipleVolumes.count
             + corruptArchiveCount + numberingMismatches.count
     }
 }
@@ -40,7 +39,6 @@ enum LibraryHealthAnalyzer {
             multipleVolumes: db.seriesWithMultipleVolumes().map {
                 .init(publisher: $0.publisher, series: $0.series, count: $0.count)
             },
-            missingComicInfoCount: db.missingComicInfoCount(),
             corruptArchiveCount: db.corruptArchiveCount(),
             numberingMismatches: db.seriesWithNumberingMismatches().map {
                 .init(publisher: $0.publisher, series: $0.series, count: $0.count)

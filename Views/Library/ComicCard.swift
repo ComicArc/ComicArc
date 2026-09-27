@@ -16,15 +16,12 @@ struct ComicCard: View {
     @State private var accentColor: Color?
     @State private var isHovered = false
     @State private var showMetadataInspector = false
-    // Backs the context menu's "Add to Reading Path…"/"Add to Tier List…" new-item prompts --
-    // previously the only way to get a comic into either was opening that feature's own
-    // management screen first; this gives all six "remember this comic" features (Favorites,
-    // Highlights, Reading List, Reading Paths, Tier Lists) the same "flag from anywhere"
+    // Backs the context menu's "Add to Reading Path…" new-item prompt -- gives every
+    // "remember this comic" feature (Favorites, Highlights, Reading List, Reading Paths) the
+    // same "flag from anywhere"
     // pattern Favorites/Reading List's heart/bookmark icons already have.
     @State private var showNewRunPrompt = false
     @State private var newRunTitle = ""
-    @State private var showNewTierListPrompt = false
-    @State private var newTierListTitle = ""
 
     private var isBulkSelected: Bool { vm.selectedComicIds.contains(comic.id) }
     /// Zero-page after the scanner gave up retrying -- distinct from an ordinary unread comic, so
@@ -108,16 +105,6 @@ struct ComicCard: View {
                 guard !trimmed.isEmpty else { return }
                 let runId = vm.createRun(title: trimmed, description: "")
                 vm.addToRun(runId: runId, comicIds: [comic.id])
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("New Tier List", isPresented: $showNewTierListPrompt) {
-            TextField("Name", text: $newTierListTitle)
-            Button("Create") {
-                let trimmed = newTierListTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
-                let listId = vm.createTierList(title: trimmed, description: "")
-                vm.addToTierList(tierListId: listId, comicIds: [comic.id])
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -207,13 +194,6 @@ struct ComicCard: View {
                 }
                 if !vm.runs.isEmpty { Divider() }
                 Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
-            }
-            Menu("Add to Tier List") {
-                ForEach(vm.tierLists) { list in
-                    Button(list.title) { vm.addToTierList(tierListId: list.id, comicIds: [comic.id]) }
-                }
-                if !vm.tierLists.isEmpty { Divider() }
-                Button("New Tier List…") { newTierListTitle = ""; showNewTierListPrompt = true }
             }
 
             Divider()

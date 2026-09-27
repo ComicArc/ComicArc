@@ -54,11 +54,7 @@ struct DuplicatesView: View {
                         // @State, leaving it showing the previous group's now-stale content.
                         ForEach(groups, id: \.self) { group in
                             if let first = group.first {
-                                // The GCD-verified canonical name, not just whichever comic in the
-                                // group happens to be first -- a duplicate group is by definition
-                                // one identity, so it should never display under two different
-                                // names depending on which member's own match happened to succeed.
-                                DuplicateGroupCard(publisher: first.publisher, series: ComicFileNaming.displaySeriesName(for: group),
+                                DuplicateGroupCard(publisher: first.publisher, series: first.series,
                                                     issueNumber: first.issueNumber ?? "", comics: group)
                             }
                         }
@@ -68,7 +64,6 @@ struct DuplicatesView: View {
             }
         }
         .background(Design.appBackground)
-        .navigationTitle("Possible Duplicates")
         .confirmationDialog(
             "Resolve \(identicalGroups.count) safe duplicate group\(identicalGroups.count == 1 ? "" : "s")?",
             isPresented: $showResolveSafeConfirm,

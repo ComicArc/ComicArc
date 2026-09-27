@@ -2,12 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension Notification.Name {
-    static let showTutorial        = Notification.Name("showTutorial")
     static let showReaderShortcuts = Notification.Name("showReaderShortcuts")
     static let triggerImport       = Notification.Name("triggerImport")
     static let triggerRenameFiles  = Notification.Name("triggerRenameFiles")
     static let readerDidClose      = Notification.Name("readerDidClose")
     static let triggerPrint        = Notification.Name("triggerPrint")
+    static let triggerBulkDelete   = Notification.Name("triggerBulkDelete")
 }
 
 struct ContentView: View {
@@ -16,8 +16,6 @@ struct ContentView: View {
     @Environment(\.fileService)   private var fileService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @AppStorage("tutorialSeen") private var tutorialSeen = false
-    @State private var showTutorial = false
     @State private var showRenameFiles = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @Namespace private var readerNamespace
@@ -50,16 +48,6 @@ struct ContentView: View {
                 .zIndex(10)
             }
 
-            if showTutorial {
-                TutorialView {
-                    withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) {
-                        showTutorial = false
-                        tutorialSeen = true
-                    }
-                }
-                .transition(.opacity)
-                .zIndex(20)
-            }
 
             if let action = vm.pendingUndo {
                 VStack {
@@ -115,17 +103,7 @@ struct ContentView: View {
                 columnVisibility = newId != nil ? .detailOnly : .all
             }
         }
-        .onAppear {
-            windowService.configureMainWindow()
-            if !tutorialSeen {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    withAnimation { showTutorial = true }
-                }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showTutorial)) { _ in
-            withAnimation { showTutorial = true }
-        }
+        .onAppear { windowService.configureMainWindow() }
         .onReceive(NotificationCenter.default.publisher(for: .triggerImport)) { _ in
             importFiles()
         }
@@ -136,11 +114,6 @@ struct ContentView: View {
             if let series = vm.selectedSeries {
                 SeriesManagerView(series: series, publisher: vm.activePublisher)
                     .environmentObject(vm)
-            }
-        }
-        .sheet(isPresented: $vm.showImportWizard) {
-            if let report = vm.libraryHealthReport {
-                ImportWizardView(report: report).environmentObject(vm)
             }
         }
         .sheet(isPresented: $showRenameFiles) {
@@ -201,7 +174,7 @@ struct ContentView: View {
     @ViewBuilder
     private var detailContent: some View {
         switch vm.selectedSection {
-        case .library, .continueReading, .favorites, .readingList:
+        case .library, .continueReading, .favorites:
             if let comic = vm.selectedComic {
                 IssueDetailPage(comic: comic, onBack: { vm.selectedComic = nil })
                     .id(comic.id)
@@ -215,18 +188,12 @@ struct ContentView: View {
             }
         case .runs:
             runsContent
-        case .tierLists:
-            tierListsContent
         case .favoriteMoments:
             FavoriteMomentsView()
         case .stats:
             StatsView()
-        case .history:
-            ReadingHistoryView()
-        case .duplicates:
-            DuplicatesView()
-        case .metadataConflicts:
-            MetadataConflictsView()
+        case .libraryHealth:
+            LibraryHealthView()
         case .settings:
             SettingsView()
         }
@@ -253,31 +220,6 @@ struct ContentView: View {
             icon: "list.bullet.rectangle",
             title: "Select a Reading Path",
             message: "Group comics into reading paths to track multi-series arcs."
-        )
-        .ambientBackground()
-    }
-
-    private var tierListsContent: some View {
-        HStack(spacing: 0) {
-            TierListsListView(selectedTierList: $vm.selectedTierList)
-                .frame(width: 320)
-                .background(Design.navBackground)
-            Rectangle().fill(Design.borderColor).frame(width: 1)
-            if let tierList = vm.selectedTierList {
-                TierListDetailView(tierList: tierList, onDelete: { vm.selectedTierList = nil })
-                    .frame(maxWidth: .infinity)
-                    .ambientBackground()
-            } else {
-                tierListsPlaceholder
-            }
-        }
-    }
-
-    private var tierListsPlaceholder: some View {
-        EmptyStateView(
-            icon: "square.stack.3d.up",
-            title: "Select a Tier List",
-            message: "Rank your comics into S/A/B/C/D/F tiers by dragging them between rows."
         )
         .ambientBackground()
     }
@@ -380,7 +322,7 @@ struct ContentView: View {
 
     private var isLibrarySection: Bool {
         let s = vm.selectedSection
-        return s == .library || s == .continueReading || s == .favorites || s == .readingList
+        return s == .library || s == .continueReading || s == .favorites
     }
 
     private func importFiles() {
@@ -424,8 +366,6 @@ struct SidebarView: View {
     @State private var dropTargetPublisher: String?
     @State private var showAllTags = false
     @State private var showMoreDiscover = false
-    @State private var renamingSavedView: SavedLibraryView?
-    @State private var renameSavedViewDraft = ""
 
     // Shared with iPad's `iPadSidebar` via `SidebarCustomization.coreDiscoverItems` -- these three
     // are the Discover items a new user is most likely to reach for immediately; everything else
@@ -442,7 +382,7 @@ struct SidebarView: View {
                 navRow("Library",          icon: "books.vertical.fill", item: .library)
                 navRow("Continue Reading", icon: "book.open.fill",       item: .continueReading)
                 navRow("Favorites",        icon: "heart.fill",           item: .favorites)
-                navRow("Reading List",     icon: "bookmark.fill",        item: .readingList)
+                navRow("Reading Paths",    icon: "list.bullet.rectangle.portrait.fill", item: .runs)
             }
 
             if !vm.publishers.isEmpty {
@@ -496,14 +436,6 @@ struct SidebarView: View {
                 }
             }
 
-            if !vm.savedViews.isEmpty {
-                Section("Saved Views") {
-                    ForEach(vm.savedViews) { view in
-                        savedViewRow(view)
-                    }
-                }
-            }
-
             Section("Discover") {
                 let discoverItems = visibleDiscoverItems
                 ForEach(discoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
@@ -514,16 +446,9 @@ struct SidebarView: View {
                 if !moreItems.isEmpty {
                     DisclosureGroup(isExpanded: $showMoreDiscover) {
                         ForEach(moreItems) { discoverItem in
-                            if discoverItem == .duplicates {
-                                if !vm.duplicateGroups.isEmpty {
-                                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
-                                           trailingText: "\(vm.duplicateGroups.count)")
-                                }
-                            } else if discoverItem == .metadataConflicts {
-                                if !vm.pendingMetadataConflicts.isEmpty {
-                                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
-                                           trailingText: "\(vm.pendingMetadataConflicts.count)")
-                                }
+                            if discoverItem == .libraryHealth, vm.moreDiscoverAlertCount > 0 {
+                                navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                                       trailingText: "\(vm.moreDiscoverAlertCount)")
                             } else {
                                 navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
                             }
@@ -579,43 +504,6 @@ struct SidebarView: View {
         }
         .sheet(isPresented: $showAllTags) {
             AllTagsView().environmentObject(vm)
-        }
-    }
-
-    @ViewBuilder
-    private func savedViewRow(_ view: SavedLibraryView) -> some View {
-        Button {
-            vm.applySavedView(view)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: view.icon).frame(width: 16)
-                Text(view.name)
-                Spacer()
-            }
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Rename…") {
-                renamingSavedView = view
-                renameSavedViewDraft = view.name
-            }
-            Button("Delete", role: .destructive) { vm.deleteSavedView(id: view.id) }
-        }
-        .accessibilityLabel(view.name)
-        .accessibilityAddTraits(.isButton)
-        .alert("Rename Saved View", isPresented: Binding(
-            get: { renamingSavedView?.id == view.id },
-            set: { active in if !active { renamingSavedView = nil } }
-        )) {
-            TextField("Name", text: $renameSavedViewDraft)
-            Button("Save") {
-                let trimmed = renameSavedViewDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { vm.renameSavedView(id: view.id, to: trimmed) }
-                renamingSavedView = nil
-            }
-            Button("Cancel", role: .cancel) { renamingSavedView = nil }
         }
     }
 
@@ -721,7 +609,7 @@ struct SidebarView: View {
                 Spacer()
                 if let report = vm.libraryHealthReport, !report.isEmpty {
                     Button("Review \(report.totalCount) issue\(report.totalCount == 1 ? "" : "s")") {
-                        vm.showImportWizard = true
+                        vm.select(.libraryHealth)
                         vm.dismissScanReport()
                     }
                     .buttonStyle(.bordered).controlSize(.small)

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A single shareable "recap card" shape reused for Tier Lists, Reading Paths, and Year in
-/// Review, rather than three bespoke layouts -- a title, up to 6 covers, and a small stat row.
+/// A single shareable "recap card" shape reused for Reading Paths and Year in Review
+/// rather than separate bespoke layouts -- a title, up to 6 covers, and a small stat row.
 struct ShareCardView: View {
     let title: String
     let subtitle: String

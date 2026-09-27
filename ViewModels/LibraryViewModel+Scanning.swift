@@ -2,17 +2,6 @@ import Foundation
 import UserNotifications
 
 extension LibraryViewModel {
-    /// Re-derives GCD matches off the main thread; `onComplete` fires back on main once
-    /// `reload()` has also finished, so callers can flip a local "busy" flag back off.
-    func recomputeGCDMatches(onComplete: @escaping () -> Void = {}) {
-        Task.detached(priority: .userInitiated) { [db] in
-            db.recomputeGCDMatches()
-            await MainActor.run { [weak self] in
-                self?.reload()
-                onComplete()
-            }
-        }
-    }
 
     func resyncLibrary() {
         let paths = libraryPaths

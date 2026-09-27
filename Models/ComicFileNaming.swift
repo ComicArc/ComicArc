@@ -42,42 +42,6 @@ enum ComicFileNaming {
         })
     }
 
-    /// One canonical GCD series name per (publisher, series) group, chosen by majority vote among
-    /// whichever comics in that group have a non-nil `gcdSeriesName`. A single comic's own GCD
-    /// match can fail (an issue with unusual/incomplete metadata) even though the rest of its
-    /// series matched fine -- naively falling back to that one comic's raw `series` field in that
-    /// case can lock it into a folder-derived abbreviation (e.g. "ASM (1963)" instead of the real
-    /// "The Amazing Spider-Man") forever, since the resulting "ideal" filename then coincidentally
-    /// matches whatever inconsistent name the file already has and looks like it needs no rename.
-    /// Groups with zero matches at all are omitted -- callers should fall back to each comic's own
-    /// `gcdSeriesName ?? series` in that case.
-    static func canonicalSeriesNames(for entries: [(publisher: String, series: String, gcdSeriesName: String?)]) -> [String: String] {
-        var votes: [String: [String: Int]] = [:]
-        for entry in entries {
-            guard let gcdName = entry.gcdSeriesName, !gcdName.isEmpty else { continue }
-            let key = "\(entry.publisher):\(entry.series)"
-            votes[key, default: [:]][gcdName, default: 0] += 1
-        }
-        return votes.compactMapValues { candidates in candidates.max { $0.value < $1.value }?.key }
-    }
-
-    /// Layer 4 (Display Information): the single series name to show the user for a group of
-    /// comics that conceptually share one identity -- a duplicate group, a series section, a
-    /// search-result cluster -- so the same series never displays under two different names in
-    /// two different parts of the app (e.g. the folder-derived "ASM (1963)" in one place and the
-    /// GCD-verified "The Amazing Spider-Man" in another). Reuses `canonicalSeriesNames`'s
-    /// majority-vote logic (already relied on for renaming) rather than re-deriving a separate
-    /// notion of "what to call this." Falls back to the first comic's own `gcdSeriesName ?? series`
-    /// when nothing in the group has a GCD match at all.
-    static func displaySeriesName(for comics: [Comic]) -> String {
-        guard let first = comics.first else { return "" }
-        let key = "\(first.publisher):\(first.series)"
-        let canonical = canonicalSeriesNames(for: comics.map {
-            (publisher: $0.publisher, series: $0.series, gcdSeriesName: $0.gcdSeriesName)
-        })
-        return canonical[key] ?? first.gcdSeriesName ?? first.series
-    }
-
     /// Cheap count-only variant of the same walk `RenameFilesView.load()` does for its full
     /// candidate list -- lets a post-scan banner ask "does anything need renaming?" without
     /// building the whole per-file list just to throw it away.

@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum OnboardingStep {
-    case welcome, cbrSetup, chooseLibrary, scanning, comicsDatabase, complete
+    case welcome, chooseLibrary, scanning, complete
 }
 
 struct OnboardingView: View {
@@ -15,10 +15,6 @@ struct OnboardingView: View {
     @State private var scanTotal:   Int = 0
     @State private var scanError:   String? = nil
     @State private var scanFinishedEmpty = false
-    @State private var unarInstalled: Bool = false
-    @State private var installingUnar: Bool = false
-    @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
-    @State private var isMatchingAfterDownload = false
 
     var body: some View {
         ZStack {
@@ -36,7 +32,6 @@ struct OnboardingView: View {
         .frame(minWidth: 960, minHeight: 640)
         #endif
         .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
-        .task { unarInstalled = checkUnar() }
     }
 
     private var topBar: some View {
@@ -61,10 +56,8 @@ struct OnboardingView: View {
     private var stepContent: some View {
         switch step {
         case .welcome:       welcomeStep
-        case .cbrSetup:      cbrSetupStep
         case .chooseLibrary: chooseLibraryStep
         case .scanning:      scanningStep
-        case .comicsDatabase: comicsDatabaseStep
         case .complete:      completeStep
         }
     }
@@ -105,19 +98,23 @@ struct OnboardingView: View {
             }
 
             Button("Get Started") {
-                withAnimation(.easeInOut) {
-                    #if os(macOS)
-                    step = .cbrSetup
-                    #else
-                    step = .chooseLibrary
-                    #endif
-                }
+                withAnimation(.easeInOut) { step = .chooseLibrary }
             }
                 .goldButton()
                 .shadow(color: Design.brandGold.opacity(0.4), radius: 12, x: 0, y: 4)
         }
         .padding(48)
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+    }
+
+    private func quickStartRow(icon: String, title: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).foregroundStyle(Design.brandGold).frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.bold())
+                Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private func featureBullet(icon: String, label: String, sub: String) -> some View {
@@ -137,84 +134,6 @@ struct OnboardingView: View {
         .background(Design.cardBg)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Design.borderColor, lineWidth: 1))
-    }
-
-    private var cbrSetupStep: some View {
-        VStack(spacing: 36) {
-            VStack(spacing: 14) {
-                Image(systemName: unarInstalled ? "checkmark.seal.fill" : "archivebox.fill")
-                    .font(.system(size: 52))
-                    .foregroundStyle(unarInstalled ? Color.green : Design.brandGold)
-
-                Text("CBR Support")
-                    .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(Design.textPrimary)
-
-                Text("ComicArc supports CBZ, PDF, and CBR files.\nCBR format requires a small tool called **unar**.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 500)
-            }
-
-            VStack(spacing: 0) {
-                HStack(spacing: 14) {
-                    Image(systemName: unarInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(unarInstalled ? .green : .red)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(unarInstalled ? "unar is installed" : "unar not found")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Design.textPrimary)
-                        Text(unarInstalled
-                             ? "CBR files will open correctly."
-                             : "CBR files won't open without it. Install via Homebrew.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    if !unarInstalled {
-                        if installingUnar {
-                            HStack(spacing: 8) {
-                                ProgressView().scaleEffect(0.7).tint(Design.brandGold)
-                                Text("Installing…").font(.caption).foregroundStyle(.secondary)
-                            }
-                        } else {
-                            Button("Install via Homebrew") { installUnar() }
-                                .buttonStyle(.borderedProminent)
-                                .tint(Design.brandBlue)
-                        }
-                    }
-                }
-                .padding(20)
-                .background(Design.surfaceBg)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12)
-                    .stroke(unarInstalled ? Color.green.opacity(0.3) : Color.red.opacity(0.2)))
-            }
-            .frame(maxWidth: 560)
-
-            if !unarInstalled {
-                Text("Homebrew must be installed at `/opt/homebrew/bin/brew` or `/usr/local/bin/brew`.\nYou can also skip this and install unar later.")
-                    .font(.caption).foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 480)
-            }
-
-            HStack(spacing: 16) {
-                Button("Back") { withAnimation { step = .welcome } }
-                    .foregroundStyle(.secondary).buttonStyle(.plain)
-
-                Button(unarInstalled ? "Continue" : "Skip for Now") {
-                    withAnimation { step = .chooseLibrary }
-                }
-                .goldButton()
-            }
-        }
-        .padding(48)
-        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
 
     private var chooseLibraryStep: some View {
@@ -285,15 +204,7 @@ struct OnboardingView: View {
             .frame(maxWidth: 560)
 
             HStack(spacing: 16) {
-                Button("Back") {
-                    withAnimation {
-                        #if os(macOS)
-                        step = .cbrSetup
-                        #else
-                        step = .welcome
-                        #endif
-                    }
-                }
+                Button("Back") { withAnimation { step = .welcome } }
                     .foregroundStyle(.secondary).buttonStyle(.plain)
 
                 Button("Scan Library") {
@@ -340,7 +251,7 @@ struct OnboardingView: View {
                     HStack(spacing: 16) {
                         Button("Choose a Different Folder") { chooseDifferentFolder() }
                             .buttonStyle(.bordered)
-                        Button("Continue Anyway") { withAnimation { step = .comicsDatabase } }
+                        Button("Continue Anyway") { withAnimation { step = .complete } }
                             .goldButton()
                     }
                 }
@@ -381,67 +292,6 @@ struct OnboardingView: View {
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
 
-    private var comicsDatabaseStep: some View {
-        VStack(spacing: 36) {
-            VStack(spacing: 14) {
-                Image(systemName: "text.book.closed.fill")
-                    .font(.system(size: 52))
-                    .foregroundStyle(Design.goldGradient)
-
-                Text("Smarter Reading Order (Optional)")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(Design.textPrimary)
-
-                Text("Download a free, one-time comics database so annuals and specials get placed\ncorrectly on their own. This downloads once and works offline forever after —\nno ongoing internet needed, no account, no cost.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 560)
-            }
-
-            VStack(spacing: 12) {
-                switch gcdDownloadState {
-                case .idle:
-                    Button("Download Comics Database") {
-                        GCDDatabaseDownloader.download { gcdDownloadState = $0 }
-                    }
-                    .goldButton()
-                case .downloading(let progress):
-                    ProgressView(value: progress).frame(maxWidth: 320).tint(Design.brandGold)
-                    Text("Downloading…").font(.caption).foregroundStyle(.secondary)
-                case .success:
-                    if isMatchingAfterDownload {
-                        ProgressView().controlSize(.small)
-                        Text("Matching your library against it…").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Label("Comics database ready", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    }
-                case .failure(let message):
-                    Text(message).font(.caption).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480)
-                    Button("Try Again") { GCDDatabaseDownloader.download { gcdDownloadState = $0 } }
-                        .buttonStyle(.bordered)
-                }
-            }
-
-            HStack(spacing: 16) {
-                if case .downloading = gcdDownloadState {} else if !isMatchingAfterDownload {
-                    Button(gcdDownloadState == .success ? "Continue" : "Skip for Now") {
-                        withAnimation { step = .complete }
-                    }
-                    .goldButton()
-                }
-            }
-        }
-        .padding(48)
-        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
-        .onChange(of: gcdDownloadState) { _, newValue in
-            guard newValue == .success else { return }
-            isMatchingAfterDownload = true
-            LibraryViewModel.shared.recomputeGCDMatches { isMatchingAfterDownload = false }
-        }
-    }
-
     private var completeStep: some View {
         VStack(spacing: 36) {
             ZStack {
@@ -459,6 +309,22 @@ struct OnboardingView: View {
                     .font(.title3).foregroundStyle(.secondary)
             }
 
+            // The whole quick start -- replaces the separate multi-step tutorial overlay.
+            VStack(alignment: .leading, spacing: 12) {
+                quickStartRow(icon: "books.vertical.fill", title: "Your Library",
+                              text: "Folders become Publisher → Character → Series. Open any comic to start reading.")
+                #if os(macOS)
+                quickStartRow(icon: "book.fill", title: "The Reader",
+                              text: "Arrow keys turn pages. Move the pointer to the top or bottom edge for controls. Pinch or double-click to zoom, then scroll around. Press ? for every shortcut.")
+                #else
+                quickStartRow(icon: "book.fill", title: "The Reader",
+                              text: "Swipe or tap the edges to turn pages. Tap the middle for controls. Pinch to zoom.")
+                #endif
+                quickStartRow(icon: "list.bullet.rectangle.portrait.fill", title: "Reading Paths",
+                              text: "Build your own run from any comics you own — a crossover, a character's history, a personal playlist. Add a comic to one from its menu.")
+            }
+            .frame(maxWidth: 520)
+
             Button("Open ComicArc") { onComplete() }
                 .goldButton()
                 .shadow(color: Design.brandGold.opacity(0.4), radius: 12, x: 0, y: 4)
@@ -469,7 +335,7 @@ struct OnboardingView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 8) {
-            ForEach(0..<6, id: \.self) { i in
+            ForEach(0..<4, id: \.self) { i in
                 let isCurrent = stepIndex == i
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isCurrent ? Design.brandGold : Design.borderColor)
@@ -483,11 +349,9 @@ struct OnboardingView: View {
     private var stepIndex: Int {
         switch step {
         case .welcome:       return 0
-        case .cbrSetup:      return 1
-        case .chooseLibrary: return 2
-        case .scanning:      return 3
-        case .comicsDatabase: return 4
-        case .complete:      return 5
+        case .chooseLibrary: return 1
+        case .scanning:      return 2
+        case .complete:      return 3
         }
     }
 
@@ -519,7 +383,7 @@ struct OnboardingView: View {
                     scanFinishedEmpty = true
                     return
                 }
-                withAnimation { step = .comicsDatabase }
+                withAnimation { step = .complete }
             }
         }
     }
@@ -535,47 +399,5 @@ struct OnboardingView: View {
         scanDone = 0
         scanTotal = 0
         withAnimation { step = .chooseLibrary }
-    }
-
-    private func checkUnar() -> Bool {
-        if let bundled = Bundle.main.executableURL?
-            .deletingLastPathComponent()
-            .appendingPathComponent("unar").path,
-           FileManager.default.fileExists(atPath: bundled) { return true }
-        let paths = ["/opt/homebrew/bin/unar", "/usr/local/bin/unar", "/usr/bin/unar"]
-        return paths.contains { FileManager.default.fileExists(atPath: $0) }
-    }
-
-    private func installUnar() {
-#if os(macOS)
-        let brew = FileManager.default.fileExists(atPath: "/opt/homebrew/bin/brew")
-            ? "/opt/homebrew/bin/brew"
-            : "/usr/local/bin/brew"
-        guard FileManager.default.fileExists(atPath: brew) else {
-            scanError = "Homebrew not found. Install it from brew.sh, then run: brew install unar"
-            return
-        }
-        installingUnar = true
-        DispatchQueue.global(qos: .utility).async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: brew)
-            proc.arguments = ["install", "unar"]
-            do {
-                try proc.run()
-                // Only safe to wait on a process that actually launched -- calling
-                // waitUntilExit() after a failed run() has no defined behavior.
-                proc.waitUntilExit()
-                DispatchQueue.main.async {
-                    installingUnar = false
-                    unarInstalled  = checkUnar()
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    installingUnar = false
-                    scanError = "Couldn't launch Homebrew: \(error.localizedDescription)"
-                }
-            }
-        }
-#endif
     }
 }

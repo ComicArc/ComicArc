@@ -10,28 +10,42 @@ Work since the 1.0.0 launch, not yet tagged as a new release.
 
 ### Scope reduction
 ComicArc is refocused on being a library and a reader. Removed:
-- Ratings and reviews (comics, Reading Paths, Tier Lists) and the Diary built on them. Existing data is left untouched in the database but no longer shown or backed up.
+- Ratings and reviews (comics, Reading Paths, Tier Lists) and the Diary built on them.
 - Intelligent reading order (automatic annual/special placement, the order-basis picker, series continuation links, and the Reading Order Suggestions review screen). Series sort by issue number with specials after regular issues; manual Series Manager orders are kept.
 - The Recommended For You and On This Day home shelves.
 - Character themes, themed backgrounds and hover effects, decorative illustrations and animations, emojis, and the sidebar streak banner.
 - The test suite and debug-only developer tools.
+- Tier Lists, Saved Views, and the offline comics database (with Fix Match). The 112 MB database download is no longer used.
+- The separate tutorial overlay (its essentials are now on the setup wizard's final screen) and the obsolete "install unar" setup step.
+- Unused database tables and columns from removed features, dropped by a one-time migration.
+
+### Consolidated
+- **Stats**: Statistics, History, and Year in Review are one screen (History is a tab).
+- **Library Health**: the health report, Duplicates, Needs Review, Clean Up Filenames, CBR-to-CBZ conversion, and Resync live on one screen instead of a pop-up sheet, two sidebar sections, and Settings buttons.
 
 ### Changed
 - Duplicate detection only flags exact file-name matches, byte-identical cover thumbnails, or byte-identical files.
 - Clicking a character or category always opens its own page, even when it holds a single series.
 - The macOS reader fits the page to the window, scrolls naturally when zoomed, and only shows its controls when the pointer is near the top or bottom edge.
+- The Reading List is now a built-in Reading Path named "Reading List" (existing entries are moved over once, in the order they were added), so it can be reordered and annotated like any path.
+- Add many comics to a Reading Path at once: **Add to Path** in the bulk-select bar, **Add Series to Reading Path** on series cards, and **Add to Reading Path** on iPad comic tiles — each can create a new path on the spot, and the add can be undone.
 - The Mac app scans the library once per launch; the live folder watcher covers changes after that.
-- Navigate menu shortcuts: Statistics ⌘6, History ⌘7, Tier Lists ⌘8, Highlights ⌘9.
+- Reading Paths moved into the sidebar's main Library section. Navigate menu shortcuts: Reading Paths ⌘4, Stats ⌘5, Highlights ⌘6. Select All in selection mode is ⇧⌘A; Delete Selected (⌘⌫) now always asks first.
+- New cover thumbnails decode straight at thumbnail size (much faster first scans) and are saved smaller.
+- The health report no longer lists every comic without ComicInfo.xml.
+- Sparkle's version is pinned via a tracked Package.resolved.
 
 ### Fixed
 - Bulk Mark Read/Unread and Mark All as Read now actually set/clear finished status.
+- Reading Path and series/character progress counts use the finished flag, matching the rest of the app.
+- The iPad reader no longer flashes its controls when a comic opens or on every page turn; tap the middle of the page to show them.
 - The iPad and visionOS targets build again (missing BackupService membership, an actor-isolation error in iPad import, and UIScreen use on visionOS).
 
 ### Platform
 - Added a third native target, **ComicArcVision**, for visionOS — reuses the iPad interface.
 
 ### Sync & Sharing
-- Peer sync: local, cloud-free reading-progress sync between a Mac and an iPad on the same network over MultipeerConnectivity, matched by file hash. Ratings, reviews, tags, diary entries, and reading-order overrides are intentionally not synced.
+- Peer sync: local, cloud-free sync between a Mac and an iPad on the same network over MultipeerConnectivity, matched by file hash. Syncs reading progress, finished status, and Reading Paths (merged by title, never deleted). Tags and manual issue orders stay local.
 - Share cards: export a shareable image card for a Tier List, Reading Path, or Year in Review recap.
 
 ### Reader

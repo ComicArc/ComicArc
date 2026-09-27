@@ -77,7 +77,7 @@ extension DatabaseManager {
                        COUNT(*) as cnt,
                        COALESCE(sc.comic_id, MIN(c.id)) as cover_id,
                        SUM(CASE WHEN rp.current_page > 0 THEN 1 ELSE 0 END) as started,
-                       SUM(CASE WHEN c.page_count > 1 AND rp.current_page >= c.page_count - 1 THEN 1 ELSE 0 END) as finished,
+                       SUM(CASE WHEN rp.finished_at IS NOT NULL THEN 1 ELSE 0 END) as finished,
                        cc.image_path
                 FROM comics c
                 LEFT JOIN reading_progress rp ON c.id = rp.comic_id
@@ -126,7 +126,7 @@ extension DatabaseManager {
                 SELECT c.series, c.publisher, COUNT(*) as cnt,
                        COALESCE(sc.comic_id, MIN(c.id)) as cover_id,
                        SUM(CASE WHEN rp.current_page > 0 THEN 1 ELSE 0 END) as started,
-                       SUM(CASE WHEN c.page_count > 1 AND rp.current_page >= c.page_count - 1 THEN 1 ELSE 0 END) as finished,
+                       SUM(CASE WHEN rp.finished_at IS NOT NULL THEN 1 ELSE 0 END) as finished,
                        sc.image_path,
                        MAX(c.folder_group) as folder_group
                 FROM comics c
@@ -257,8 +257,7 @@ extension DatabaseManager {
     /// Every manual series/character/publisher reorder and every series' custom cover assignment
     /// (comic-based only -- a custom *uploaded image* cover isn't included here, since restoring
     /// one would mean embedding actual image bytes in the backup, not just a reference). All four
-    /// are deliberate user customizations with no automatic way to regenerate them, exactly like
-    /// the manual GCD match above -- previously silently absent from backup/restore.
+    /// are deliberate user customizations with no automatic way to regenerate them.
     func allSeriesOrderPositions() -> [(groupName: String, publisher: String, series: String, position: Int)] {
         queue.sync {
             rows("SELECT group_name, publisher, series, position FROM series_order") { s in

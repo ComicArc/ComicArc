@@ -12,9 +12,8 @@ extension LibraryViewModel {
     func toggleReadingList(_ comic: Comic) {
         let newValue = !comic.inReadingList
         db.setInReadingList(comic.id, newValue)
-        patchComicLocally(comic.id, removeIfNoLongerVisible: selectedSection == .readingList && !newValue) {
-            $0.inReadingList = newValue
-        }
+        patchComicLocally(comic.id) { $0.inReadingList = newValue }
+        refreshRuns()
     }
 
     func markRead(_ comic: Comic) {
@@ -56,12 +55,4 @@ extension LibraryViewModel {
 
     func setReadingGoal(year: Int, count: Int) { db.setReadingGoal(year: year, count: count) }
 
-    func setManualGCDMatch(comicId: Int64, gcdIssueId: Int, seriesName: String, issueNumber: String,
-                           coverDate: String?, seriesYearBegan: Int?) {
-        db.setManualGCDMatch(comicId: comicId, gcdIssueId: gcdIssueId, seriesName: seriesName,
-                              issueNumber: issueNumber, coverDate: coverDate, seriesYearBegan: seriesYearBegan)
-    }
-    func clearManualGCDMatch(comicId: Int64) {
-        db.clearManualGCDMatch(comicId: comicId)
-    }
 }

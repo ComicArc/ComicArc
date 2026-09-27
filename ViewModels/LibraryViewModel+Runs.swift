@@ -91,5 +91,44 @@ extension LibraryViewModel {
         db.updateRun(id: id, title: title, description: description, buyLink: buyLink)
         NotificationCenter.default.post(name: .runUpdated, object: nil)
     }
+    /// Adds comics to a Reading Path in the given order (skipping any already in it) and offers
+    /// an undo -- the multi-comic entry point behind bulk-select and "Add Series to Reading Path".
+    func addToRunWithUndo(runId: Int64, runTitle: String, comicIds: [Int64]) {
+        let already = db.comicIdsInRun(runId: runId)
+        let added = comicIds.filter { !already.contains($0) }
+        guard !added.isEmpty else { return }
+        db.addToRun(runId: runId, comicIds: added)
+        refreshRuns()
+        NotificationCenter.default.post(name: .runUpdated, object: nil)
+        offerUndo(added.count == 1 ? "Added 1 comic to \u{201C}\(runTitle)\u{201D}"
+                                   : "Added \(added.count) comics to \u{201C}\(runTitle)\u{201D}") { [weak self] in
+            guard let self else { return }
+            self.db.removeFromRun(runId: runId, comicIds: added)
+            self.refreshRuns()
+            NotificationCenter.default.post(name: .runUpdated, object: nil)
+        }
+    }
+
+    /// Bulk-select: adds the selected comics in the order they're shown in the grid.
+    func bulkAddToRun(runId: Int64, runTitle: String) {
+        let ids = comics.filter { selectedComicIds.contains($0.id) }.map(\.id)
+        selectedComicIds.removeAll()
+        addToRunWithUndo(runId: runId, runTitle: runTitle, comicIds: ids)
+    }
+
+    /// Adds every issue of a series, in series order (the same order the series view shows).
+    func addSeriesToRun(series: String, publisher: String?, runId: Int64, runTitle: String) {
+        Task.detached(priority: .userInitiated) { [db] in
+            let ids = db.allComics(publisher: publisher, series: series, sortOrder: .manual).map(\.id)
+            await MainActor.run { self.addToRunWithUndo(runId: runId, runTitle: runTitle, comicIds: ids) }
+        }
+    }
+
+    /// Opens Reading Paths with the built-in "Reading List" path selected (if it exists yet).
+    func showReadingList() {
+        select(.runs)
+        selectedRun = db.allRuns().first { $0.title == DatabaseManager.readingListTitle }
+    }
+
     func setRunItemNotes(_ itemId: Int64, notes: String) { db.setRunItemNotes(itemId, notes: notes) }
 }

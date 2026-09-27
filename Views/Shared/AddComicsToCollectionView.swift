@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// A comic picker sheet shared by Reading Paths and Tier Lists -- both previously had their own,
-/// near-line-for-line identical copy of this (`AddComicsToRunView`/`AddComicsToTierListView`),
-/// differing only in which collection-membership query and which "add" mutation they called.
-/// `alreadyInCollection` and `onAdd` are exactly that seam: the caller supplies what makes a Run
-/// or a Tier List different, this view supplies the actual picking UI.
+/// The comic picker sheet for adding comics to a Reading Path. The caller supplies which comics
+/// are already in it (`alreadyInCollection`) and what adding does (`onAdd`).
 struct AddComicsToCollectionView: View {
     let title: String
     let alreadyInCollection: () -> Set<Int64>

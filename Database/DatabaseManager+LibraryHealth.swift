@@ -44,10 +44,6 @@ extension DatabaseManager {
         }
     }
 
-    func missingComicInfoCount() -> Int {
-        queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND has_comicinfo = 0") }
-    }
-
     func corruptArchiveCount() -> Int {
         queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND page_count = 0") }
     }

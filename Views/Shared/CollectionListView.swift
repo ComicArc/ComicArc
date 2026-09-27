@@ -1,54 +1,50 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Everything that varies between a `Run` list screen and a `TierList` list screen -- wording,
-/// icons, and the handful of operations whose underlying `LibraryViewModel` method differs by
-/// name (`createRun` vs `createTierList`, etc.). `CollectionListView` owns everything that
-/// doesn't vary: layout, drag-reorder, the Move Up/Down/Top/Bottom context menu (previously
-/// duplicated verbatim in both `RunsListView` and `TierListsListView`), empty states, and the
-/// create sheet.
+/// Wording, icons, and actions for the Reading Paths list. `CollectionListView` owns layout,
+/// drag-reorder, the Move Up/Down/Top/Bottom context menu, empty states, and the create sheet.
 @MainActor
-struct CollectionListConfig<T: NamedCollection> {
-    let noun: String                    // "Reading Path" / "Tier List"
-    let nounPlural: String               // "Reading Paths" / "Tier Lists"
+struct CollectionListConfig {
+    let noun: String                    // "Reading Path"
+    let nounPlural: String               // "Reading Paths"
     let emptyIcon: String
     let emptyMessage: String
     let cardIcon: String                 // placeholder cover icon
-    let subtitle: (T) -> String          // "3/5 read" / "5 comics"
-    /// `nil` disables the list-level "Delete" context-menu item -- matches Run's existing
-    /// behavior (delete only from the detail screen) vs. TierList's (delete from either).
-    let deleteWithUndo: (@MainActor (T) -> Void)?
-    let fetch: @MainActor () async -> [T]
+    let subtitle: (Run) -> String          // "3/5 read"
+    /// `nil` disables the list-level "Delete" context-menu item (Reading Paths are deleted from
+    /// their detail screen).
+    let deleteWithUndo: (@MainActor (Run) -> Void)?
+    let fetch: @MainActor () async -> [Run]
     let reorder: @MainActor ([Int64]) -> Void
     let create: @MainActor (_ title: String, _ description: String) -> Void
-    let setCoverFromComic: @MainActor (T, Comic, @escaping () -> Void) -> Void
-    let setCoverFromURL: @MainActor (T, URL) -> Void
-    let clearCover: @MainActor (T) -> Void
+    let setCoverFromComic: @MainActor (Run, Comic, @escaping () -> Void) -> Void
+    let setCoverFromURL: @MainActor (Run, URL) -> Void
+    let clearCover: @MainActor (Run) -> Void
 }
 
-struct CollectionListView<T: NamedCollection>: View {
-    let config: CollectionListConfig<T>
-    @Binding var selected: T?
+struct CollectionListView: View {
+    let config: CollectionListConfig
+    @Binding var selected: Run?
     /// Fires after create/delete/cover-change so the caller can also refresh whatever cached
-    /// list (e.g. `vm.runs`/`vm.tierLists`) other screens read from.
+    /// list (`vm.runs`) other screens read from.
     var onListChanged: () -> Void = {}
-    /// Bump this (from the caller) to force a reload -- e.g. when a `.runUpdated`/`.tierListUpdated`
+    /// Bump this (from the caller) to force a reload -- e.g. when a `.runUpdated`
     /// notification fires because the detail screen changed something. Plain reassignment of
     /// `config`/`selected` doesn't itself trigger a re-fetch, since `items` is this view's own
     /// `@State`, not derived from `config` on every body evaluation.
     var reloadToken: UUID = UUID()
 
-    @State private var items: [T] = []
+    @State private var items: [Run] = []
     @State private var isLoading = true
     @State private var showingCreate = false
     @State private var newTitle = ""
     @State private var newDescription = ""
     @State private var draggedId: Int64?
     @State private var dropTargetId: Int64?
-    @State private var pendingDelete: T?
+    @State private var pendingDelete: Run?
     @EnvironmentObject private var vm: LibraryViewModel
 
-    private var filtered: [T] {
+    private var filtered: [Run] {
         guard !vm.searchText.isEmpty else { return items }
         let q = vm.searchText.lowercased()
         return items.filter { $0.title.lowercased().contains(q) }
@@ -186,12 +182,12 @@ struct CollectionListView<T: NamedCollection>: View {
         isLoading = false
     }
 
-    private func move(_ item: T, by delta: Int) {
+    private func move(_ item: Run, by delta: Int) {
         guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
         move(item, to: idx + delta)
     }
 
-    private func move(_ item: T, to newIndex: Int) {
+    private func move(_ item: Run, to newIndex: Int) {
         guard let fromIdx = items.firstIndex(where: { $0.id == item.id }) else { return }
         let clamped = max(0, min(newIndex, items.count - 1))
         guard clamped != fromIdx else { return }
@@ -203,9 +199,9 @@ struct CollectionListView<T: NamedCollection>: View {
     }
 }
 
-private struct CollectionCard<T: NamedCollection>: View {
-    let item: T
-    let config: CollectionListConfig<T>
+private struct CollectionCard: View {
+    let item: Run
+    let config: CollectionListConfig
     let isSelected: Bool
     var onCoverChanged: () -> Void = {}
     let onSelect: () -> Void

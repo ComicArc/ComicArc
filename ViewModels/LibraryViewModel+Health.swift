@@ -54,28 +54,12 @@ extension LibraryViewModel {
         renameSuggestionDismissed = true
     }
 
-    func runManualHealthCheck() {
-        Task.detached(priority: .utility) { [db] in
-            let report = LibraryHealthAnalyzer.analyze()
-            let broken = db.brokenComicIds()
-            await MainActor.run {
-                self.libraryHealthReport = report
-                self.brokenComicIds = broken
-                self.showImportWizard = true
-            }
-        }
-    }
-
-    /// `apply`: adopts the proposed ComicInfo.xml-derived value (and reruns GCD matching, since a
-    /// corrected series/publisher can change it). `dismiss`:
+    /// `apply`: adopts the proposed ComicInfo.xml-derived value. `dismiss`:
     /// keeps the comic's current value untouched -- the conflict just stops being pending until
     /// something re-detects it (e.g. a future rescan with a still-differing value).
     func resolveMetadataConflict(_ row: MetadataConflictRow, apply: Bool) {
         Task.detached(priority: .userInitiated) { [db] in
             db.resolveMetadataConflict(id: row.conflict.id, apply: apply)
-            if apply {
-                db.recomputeGCDMatches()
-            }
             await MainActor.run { self.reload(); self.refreshDuplicates() }
         }
     }

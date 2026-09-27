@@ -51,12 +51,12 @@ struct ShowFavoritesIntent: AppIntent {
 
 struct ShowReadingListIntent: AppIntent {
     static var title: LocalizedStringResource = "Show Reading List"
-    static var description = IntentDescription("Opens ComicArc to your reading list.")
+    static var description = IntentDescription("Opens ComicArc to your Reading List path.")
     static var openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        LibraryViewModel.shared.select(.readingList)
+        LibraryViewModel.shared.showReadingList()
         return .result()
     }
 }

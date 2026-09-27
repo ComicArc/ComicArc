@@ -8,7 +8,6 @@ struct MetadataInspectorView: View {
     @State private var proposedName: String?
     @State private var isRenaming = false
     @State private var renameError: String?
-    @State private var showGCDPicker = false
     #if os(macOS)
     // ComicInfo write-back depends on LibraryScanner.writeComicInfoBack, which shells out via
     // the same macOS-only archive-writing path as CBR-to-CBZ conversion -- no iPad equivalent.
@@ -23,7 +22,7 @@ struct MetadataInspectorView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Metadata Inspector").font(.title2.bold())
-                    Text("Everything ComicArc knows about this file, and where it came from — most people will only ever need Fix Match below.")
+                    Text("Everything ComicArc knows about this file, and where it came from.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -81,29 +80,13 @@ struct MetadataInspectorView: View {
                         #endif
                     }
 
-                    Section("Offline Comics Database Match") {
-                        if info.comic.gcdMatchConfidence != nil {
-                            row("Matched Series", info.comic.gcdSeriesName)
-                            row("Matched Issue", info.comic.gcdIssueNumber)
-                            row("Confidence", info.comic.gcdMatchConfidence.map { "\($0)%" })
-                            row("Reason", info.gcdMatchReason)
-                        } else {
-                            Text("No match found in the offline comics database.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Button(info.comic.gcdMatchConfidence != nil ? "Fix Match…" : "Find Match…") {
-                            showGCDPicker = true
-                        }
-                        .buttonStyle(.bordered).controlSize(.small)
-                    }
-
                     Section("Duplicate Matching") {
                         if info.duplicateMatchCount > 0 {
                             row("Other Matching Copies", "\(info.duplicateMatchCount)")
-                            Text("Sharing the same publisher, series, issue number, and comic type.")
+                            Text("Same file name, same cover thumbnail, or byte-identical file.")
                                 .font(.caption).foregroundStyle(.secondary)
                         } else {
-                            Text("No other comic shares this publisher, series, issue number, and comic type.")
+                            Text("No other comic has the same file name, cover thumbnail, or file contents.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -133,13 +116,6 @@ struct MetadataInspectorView: View {
         }
         .frame(width: 480, height: 600)
         .task { await load() }
-        .sheet(isPresented: $showGCDPicker) {
-            GCDMatchPickerView(comicId: comicId, currentSeries: info?.comic.series ?? "",
-                               currentGCDMatchSource: info?.gcdMatchSource ?? "auto") {
-                Task { await load(); vm.reload() }
-            }
-            .environmentObject(vm)
-        }
         .errorAlert("Couldn't Rename File", message: $renameError)
         #if os(macOS)
         .errorAlert("Couldn't Write ComicInfo.xml", message: $writeBackError)

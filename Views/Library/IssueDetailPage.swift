@@ -22,17 +22,12 @@ struct IssueDetailPage: View {
     @State private var showingEdit:    Bool     = false
     @State private var showMetadataInspector: Bool = false
     @State private var appearsInRuns:  [Run]    = []
-    @State private var appearsInTierLists: [TierList] = []
     @State private var missingIssues:  [String] = []
     @State private var showPagePicker: Bool     = false
     @State private var coverChangeError: String?
-    // Same "Add to Reading Path"/"Add to Tier List" cross-link `ComicCard`'s context menu has --
-    // previously this page could only ever *show* Reading Path/Tier List membership read-only
-    // (`runsSection`/`tierListsSection` below), never add to either without leaving the page.
+    // Same "Add to Reading Path" cross-link `ComicCard`'s context menu has.
     @State private var showNewRunPrompt = false
     @State private var newRunTitle = ""
-    @State private var showNewTierListPrompt = false
-    @State private var newTierListTitle = ""
     // The one truly high-traffic piece of fixed-size display text on this page -- scales with
     // Dynamic Type instead of staying pinned at 32pt regardless of the user's text-size setting.
     @ScaledMetric(relativeTo: .title) private var titleSize: CGFloat = 32
@@ -93,16 +88,6 @@ struct IssueDetailPage: View {
                 guard !trimmed.isEmpty else { return }
                 let runId = vm.createRun(title: trimmed, description: "")
                 vm.addToRun(runId: runId, comicIds: [current.id])
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("New Tier List", isPresented: $showNewTierListPrompt) {
-            TextField("Name", text: $newTierListTitle)
-            Button("Create") {
-                let trimmed = newTierListTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
-                let listId = vm.createTierList(title: trimmed, description: "")
-                vm.addToTierList(tierListId: listId, comicIds: [current.id])
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -290,14 +275,6 @@ struct IssueDetailPage: View {
                         if !runs.isEmpty { Divider() }
                         Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
                     }
-                    Menu("Add to Tier List") {
-                        let tierLists = DatabaseManager.shared.allTierLists()
-                        ForEach(tierLists) { list in
-                            Button(list.title) { vm.addToTierList(tierListId: list.id, comicIds: [current.id]) }
-                        }
-                        if !tierLists.isEmpty { Divider() }
-                        Button("New Tier List…") { newTierListTitle = ""; showNewTierListPrompt = true }
-                    }
                 } label: {
                     VStack(spacing: 5) {
                         Image(systemName: "square.stack.3d.up").font(.system(size: 22)).foregroundStyle(.secondary)
@@ -307,7 +284,7 @@ struct IssueDetailPage: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .accessibilityLabel("Add to Reading Path or Tier List")
+                .accessibilityLabel("Add to Reading Path")
             }
         }
         .padding(40)
@@ -403,7 +380,7 @@ struct IssueDetailPage: View {
 
     @ViewBuilder
     private var supplementarySection: some View {
-        if !missingIssues.isEmpty || !appearsInRuns.isEmpty || !appearsInTierLists.isEmpty || current.notes != nil {
+        if !missingIssues.isEmpty || !appearsInRuns.isEmpty || current.notes != nil {
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
             HStack(alignment: .top, spacing: 0) {
@@ -416,13 +393,6 @@ struct IssueDetailPage: View {
                 if !appearsInRuns.isEmpty {
                     Rectangle().fill(Design.borderColor).frame(width: 1)
                     runsSection
-                        .frame(maxWidth: .infinity)
-                        .padding(32)
-                }
-
-                if !appearsInTierLists.isEmpty {
-                    Rectangle().fill(Design.borderColor).frame(width: 1)
-                    tierListsSection
                         .frame(maxWidth: .infinity)
                         .padding(32)
                 }
@@ -467,27 +437,6 @@ struct IssueDetailPage: View {
                         Text(run.title).font(.subheadline)
                         if !run.description.isEmpty {
                             Text(run.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-
-    private var tierListsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Appears in Tier Lists")
-                .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
-            ForEach(appearsInTierLists) { tierList in
-                HStack(spacing: 8) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .foregroundStyle(Design.brandGold).font(.subheadline)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(tierList.title).font(.subheadline)
-                        if !tierList.description.isEmpty {
-                            Text(tierList.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                     Spacer()
@@ -565,14 +514,13 @@ struct IssueDetailPage: View {
         Task.detached(priority: .userInitiated) {
             let t   = DatabaseManager.shared.tags(for: comicId)
             let r   = DatabaseManager.shared.runsContaining(comicId: comicId)
-            let tl  = DatabaseManager.shared.tierListsContaining(comicId: comicId)
             let mi  = DatabaseManager.shared.missingIssueNumbers(series: series, publisher: pub)
             await MainActor.run {
                 // These four feed conditionally-rendered sections (tags row, supplementary
-                // gap/runs/tier-lists/notes strip) that otherwise pop into existence the instant
+                // gap/runs/notes strip) that otherwise pop into existence the instant
                 // this async load resolves, shoving the rest of the page down with no transition.
                 withAnimation(Design.motion(Design.easeStandard, reduce: self.reduceMotion)) {
-                    tags = t; appearsInRuns = r; appearsInTierLists = tl; missingIssues = mi
+                    tags = t; appearsInRuns = r; missingIssues = mi
                 }
             }
         }

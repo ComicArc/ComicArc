@@ -33,7 +33,7 @@ struct EmptyStateView<Action: View>: View {
 
 /// The "shop signage" treatment for the app's kerned all-caps section/screen headers -- previously
 /// ~14 near-identical `Text(_.uppercased()).font(.system(size:weight:.black)).kerning(_)` call
-/// sites (`LibraryView`'s shelf-row labels, `RunsView`, `TierListsView`,
+/// sites (`LibraryView`'s shelf-row labels, `RunsView`,
 /// `FavoriteMomentsView`, `ReadingHistoryView`, `StatsView`, `YearInReviewView`), each spelled out
 /// individually with the plain system font. `OnboardingView` already uses `.rounded` design for
 /// its equivalent headers -- this brings the rest of the app's signage in line with that existing

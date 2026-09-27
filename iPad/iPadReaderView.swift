@@ -124,7 +124,6 @@ struct iPadReaderView: View {
             isFocused = true
             session.autoplayInterval = autoplayIntervalPref
             session.onRequestIssueTransition = { vm.openReader($0, runId: runId) }
-            session.interactionOccurred()
             heroCoverImage = ThumbnailCache.shared.thumbnailFromCache(comicId: comic.id)
             ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
@@ -186,7 +185,6 @@ struct iPadReaderView: View {
         .simultaneousGesture(tapGesture)
         .gesture(pinchGesture)
         .gesture(dragGesture)
-        .onChange(of: session.currentPage) { _, _ in session.interactionOccurred() }
     }
 
     private var scrollReader: some View {

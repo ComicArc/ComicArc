@@ -105,7 +105,7 @@ struct LibraryFilterBar: View {
                     .buttonStyle(.plain)
                     .help("Go back (⌘[)")
 
-                    // The Continue Reading/Read Next/On This Day/Recommended shelves only ever
+                    // The Continue Reading/Read Next shelves only ever
                     // render at the top-level character grid -- previously the only way back to
                     // them from several levels deep was clicking "Go back" repeatedly. One tap
                     // back to the top of Library, not a duplicate copy of the shelves themselves.
@@ -163,7 +163,6 @@ struct LibraryFilterBar: View {
         switch vm.selectedSection {
         case .continueReading: return "Continue Reading"
         case .favorites:       return "Favorites"
-        case .readingList:     return "Reading List"
         default:
             if let ser = vm.selectedSeries { return ser }
             if let pub = vm.activePublisher { return pub }
@@ -195,6 +194,10 @@ struct LibraryFilterBar: View {
             }
             .disabled(vm.selectedComicIds.isEmpty).controlSize(.small)
 
+            AddToReadingPathMenu { runId, title in vm.bulkAddToRun(runId: runId, runTitle: title) }
+                .disabled(vm.selectedComicIds.isEmpty).controlSize(.small)
+                .fixedSize()
+
             Button { vm.bulkAddToReadingList() } label: {
                 Label("Add to List", systemImage: "bookmark.badge.plus")
             }
@@ -221,6 +224,10 @@ struct LibraryFilterBar: View {
                 Label("Delete", systemImage: "trash")
             }
             .disabled(vm.selectedComicIds.isEmpty).controlSize(.small)
+            // The menu's Delete Selected (⌘⌫) routes here too, so it always asks first.
+            .onReceive(NotificationCenter.default.publisher(for: .triggerBulkDelete)) { _ in
+                if !vm.selectedComicIds.isEmpty { confirmBulkDelete = true }
+            }
             .confirmationDialog(
                 "Delete \(vm.selectedComicIds.count) comic\(vm.selectedComicIds.count == 1 ? "" : "s")?",
                 isPresented: $confirmBulkDelete,

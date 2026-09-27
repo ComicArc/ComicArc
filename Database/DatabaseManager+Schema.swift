@@ -33,21 +33,8 @@ extension DatabaseManager {
         )
         """)
         exec("""
-        CREATE TABLE IF NOT EXISTS ratings (
-            comic_id INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
-            rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
-            review   TEXT
-        )
-        """)
-        exec("""
         CREATE TABLE IF NOT EXISTS favorites (
             comic_id INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE
-        )
-        """)
-        exec("""
-        CREATE TABLE IF NOT EXISTS reading_list (
-            comic_id INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
         exec("""
@@ -85,25 +72,6 @@ extension DatabaseManager {
         )
         """)
         exec("""
-        CREATE TABLE IF NOT EXISTS tier_lists (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            title       TEXT NOT NULL,
-            description TEXT,
-            position    INTEGER,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        exec("""
-        CREATE TABLE IF NOT EXISTS tier_list_items (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            tier_list_id INTEGER REFERENCES tier_lists(id) ON DELETE CASCADE,
-            comic_id     INTEGER REFERENCES comics(id)     ON DELETE CASCADE,
-            tier         TEXT NOT NULL DEFAULT 'B',
-            position     INTEGER NOT NULL,
-            UNIQUE(tier_list_id, comic_id)
-        )
-        """)
-        exec("""
         CREATE TABLE IF NOT EXISTS bookmarks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             comic_id   INTEGER REFERENCES comics(id) ON DELETE CASCADE,
@@ -120,16 +88,6 @@ extension DatabaseManager {
             page_start INTEGER NOT NULL DEFAULT 0,
             page_end   INTEGER NOT NULL DEFAULT 0,
             read_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        exec("""
-        CREATE TABLE IF NOT EXISTS diary_entries (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            comic_id   INTEGER REFERENCES comics(id) ON DELETE CASCADE,
-            rating     INTEGER CHECK(rating BETWEEN 1 AND 5),
-            review     TEXT,
-            is_reread  INTEGER NOT NULL DEFAULT 0,
-            logged_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
         exec("""
@@ -153,8 +111,6 @@ extension DatabaseManager {
         exec("CREATE INDEX IF NOT EXISTS idx_comic_tags_tag_id    ON comic_tags(tag_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_run_id     ON run_items(run_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_run_items_comic_id   ON run_items(comic_id)")
-        exec("CREATE INDEX IF NOT EXISTS idx_tier_list_items_tier_list_id ON tier_list_items(tier_list_id)")
-        exec("CREATE INDEX IF NOT EXISTS idx_tier_list_items_comic_id     ON tier_list_items(comic_id)")
         exec("""
         CREATE TABLE IF NOT EXISTS series_covers (
             series    TEXT NOT NULL,
@@ -175,8 +131,6 @@ extension DatabaseManager {
         )
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_history_read_at    ON reading_history(read_at DESC)")
-        exec("CREATE INDEX IF NOT EXISTS idx_diary_comic_id     ON diary_entries(comic_id)")
-        exec("CREATE INDEX IF NOT EXISTS idx_diary_logged_at    ON diary_entries(logged_at DESC)")
         exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_comic    ON bookmarks(comic_id)")
         exec("""
         CREATE TABLE IF NOT EXISTS character_covers (
@@ -211,8 +165,6 @@ extension DatabaseManager {
         """)
 
         exec("ALTER TABLE comics ADD COLUMN file_hash TEXT")
-        exec("ALTER TABLE runs   ADD COLUMN rating INTEGER")
-        exec("ALTER TABLE runs   ADD COLUMN review TEXT")
         exec("ALTER TABLE runs   ADD COLUMN buy_link TEXT")
         exec("ALTER TABLE comics ADD COLUMN notes TEXT")
         exec("ALTER TABLE comics ADD COLUMN character TEXT")
@@ -228,13 +180,7 @@ extension DatabaseManager {
         exec("ALTER TABLE runs   ADD COLUMN position INTEGER")
         exec("ALTER TABLE series_covers ADD COLUMN image_path TEXT")
         exec("ALTER TABLE runs   ADD COLUMN cover_image_path TEXT")
-        exec("ALTER TABLE tier_lists ADD COLUMN rating INTEGER")
-        exec("ALTER TABLE tier_lists ADD COLUMN review TEXT")
-        exec("ALTER TABLE tier_lists ADD COLUMN cover_image_path TEXT")
 
-        exec("ALTER TABLE comics ADD COLUMN reading_order_position INTEGER")
-        exec("ALTER TABLE comics ADD COLUMN reading_order_confidence INTEGER")
-        exec("ALTER TABLE comics ADD COLUMN reading_order_reason TEXT")
         exec("ALTER TABLE comics ADD COLUMN alternate_number TEXT")
         exec("ALTER TABLE comics ADD COLUMN story_arc_number TEXT")
         exec("ALTER TABLE comics ADD COLUMN cover_day INTEGER")
@@ -250,37 +196,6 @@ extension DatabaseManager {
 
         exec("ALTER TABLE comics ADD COLUMN comicinfo_issue_number TEXT")
 
-        exec("""
-        CREATE TABLE IF NOT EXISTS series_links (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            parent_publisher TEXT NOT NULL,
-            parent_series    TEXT NOT NULL,
-            child_publisher  TEXT NOT NULL,
-            child_series     TEXT NOT NULL,
-            sequence_order   INTEGER NOT NULL,
-            created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            source           TEXT NOT NULL DEFAULT 'manual',
-            UNIQUE(child_publisher, child_series)
-        )
-        """)
-        exec("ALTER TABLE series_links ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
-        makeSeriesLinksVolumeAwareIfNeeded()
-
-        exec("ALTER TABLE comics ADD COLUMN gcd_issue_id INTEGER")
-        exec("ALTER TABLE comics ADD COLUMN gcd_cover_date TEXT")
-        exec("ALTER TABLE comics ADD COLUMN gcd_match_confidence INTEGER")
-        exec("ALTER TABLE comics ADD COLUMN gcd_match_reason TEXT")
-        exec("ALTER TABLE comics ADD COLUMN gcd_series_name TEXT")
-        exec("ALTER TABLE comics ADD COLUMN gcd_issue_number TEXT")
-        // 'auto' (the default) means recomputeGCDMatches owns this row and may freely rewrite or
-        // clear it on every rescan; 'manual' means a user explicitly picked this match via the
-        // Fix Match picker, and recomputeGCDMatches must never overwrite it -- the same "don't
-        // clobber a deliberate choice" pattern meta_edited already gives comics' identity fields.
-        exec("ALTER TABLE comics ADD COLUMN gcd_match_source TEXT NOT NULL DEFAULT 'auto'")
-        // Partial index, same pattern as idx_bookmarks_favorite/idx_metadata_conflicts_status --
-        // 'manual' is a small fraction of a potentially 100k-row table, exactly the low-selectivity
-        // shape a partial index helps most, and manualGCDMatchDetails() (backup export) scans it.
-        exec("CREATE INDEX IF NOT EXISTS idx_comics_gcd_manual ON comics(gcd_match_source) WHERE gcd_match_source = 'manual'")
 
         exec("ALTER TABLE comics ADD COLUMN volume TEXT")
 
@@ -363,7 +278,6 @@ extension DatabaseManager {
 
         resortSpecialIssuesIfNeeded()
         widenMainlinePositionStrideIfNeeded()
-        allowUnratedReviewsIfNeeded()
 
         // Decouples "finished" from the raw resume position: `current_page` alone used to double
         // as completion state, so scrubbing the reader's page slider to the last page (without
@@ -372,8 +286,10 @@ extension DatabaseManager {
         // reading or an explicit Mark Read/Unread action, never from jump-style navigation.
         exec("ALTER TABLE reading_progress ADD COLUMN finished_at TIMESTAMP")
 
-        addCascadeToProgressAndRatingsIfNeeded()
+        addCascadeToProgressIfNeeded()
         applyManualOrdersToPositionIfNeeded()
+        dropRemovedFeatureDataIfNeeded()
+        moveReadingListIntoPathIfNeeded()
     }
 
     /// Series order now comes from `comics.position` alone (the intelligent reading-order engine
@@ -414,17 +330,9 @@ extension DatabaseManager {
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('manualOrdersToPositionV1')")
     }
 
-    /// `reading_progress`/`ratings` were the only two comic-joined tables missing `ON DELETE
-    /// CASCADE` (every other one -- favorites, reading_list, comic_tags, bookmarks,
-    /// reading_history, diary_entries, run_items, tier_list_items, metadata_conflicts -- already
-    /// has it). Inert as long as nothing ever hard-deletes a `comics` row, but `purge()` (Trash's
-    /// new permanent-delete action) does exactly that -- without this, purging a comic with saved
-    /// progress or a rating would leave its `reading_progress`/`ratings` rows orphaned, pointing
-    /// at a comic id that no longer exists. Rebuilds both tables (SQLite can't add a REFERENCES
-    /// clause to an existing table in place), preserving `reading_progress.finished_at` added
-    /// just above and `ratings`' 0-5 CHECK range from `allowUnratedReviewsIfNeeded` -- run only
-    /// after both of those, matching the order they're applied in above.
-    func addCascadeToProgressAndRatingsIfNeeded() {
+    /// Rebuilds `reading_progress` with `ON DELETE CASCADE` (SQLite can't add a REFERENCES clause
+    /// in place), so purging a comic from Trash can't leave its progress row orphaned.
+    func addCascadeToProgressIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'progressRatingsCascadeV1'") > 0
         guard !alreadyRun else { return }
@@ -444,22 +352,62 @@ extension DatabaseManager {
             """)
             exec("DROP TABLE reading_progress_old_cascadeV1")
 
-            exec("ALTER TABLE ratings RENAME TO ratings_old_cascadeV1")
-            exec("""
-            CREATE TABLE ratings (
-                comic_id INTEGER PRIMARY KEY REFERENCES comics(id) ON DELETE CASCADE,
-                rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
-                review   TEXT
-            )
-            """)
-            exec("""
-            INSERT INTO ratings (comic_id, rating, review)
-            SELECT comic_id, rating, review FROM ratings_old_cascadeV1
-            """)
-            exec("DROP TABLE ratings_old_cascadeV1")
             return true
         }
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('progressRatingsCascadeV1')")
+    }
+
+    /// Drops the tables and columns of features removed from ComicArc (ratings/reviews, the Diary,
+    /// series links, Tier Lists, the intelligent reading-order engine, and the offline comics
+    /// database). Each statement tolerates the object already being gone.
+    func dropRemovedFeatureDataIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        guard scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'dropRemovedFeaturesV1'") == 0 else { return }
+        for index in ["idx_comics_gcd_manual", "idx_tier_list_items_tier_list_id", "idx_tier_list_items_comic_id",
+                      "idx_diary_comic_id", "idx_diary_logged_at"] {
+            exec("DROP INDEX IF EXISTS \(index)")
+        }
+        // comic_shelves/shelves/list_items/lists/saved_filters: tables from much older versions
+        // that nothing has read since.
+        for table in ["ratings", "diary_entries", "series_links", "tier_list_items", "tier_lists",
+                      "comic_shelves", "shelves", "list_items", "lists", "saved_filters"] {
+            exec("DROP TABLE IF EXISTS \(table)")
+        }
+        for column in ["reading_order_position", "reading_order_confidence", "reading_order_reason",
+                       "gcd_issue_id", "gcd_cover_date", "gcd_match_confidence", "gcd_match_reason",
+                       "gcd_series_name", "gcd_issue_number", "gcd_match_source"] {
+            exec("ALTER TABLE comics DROP COLUMN \(column)")
+        }
+        exec("ALTER TABLE runs DROP COLUMN rating")
+        exec("ALTER TABLE runs DROP COLUMN review")
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('dropRemovedFeaturesV1')")
+        exec("VACUUM")
+    }
+
+    /// The Reading List used to be its own table; it's now an ordinary Reading Path titled
+    /// "Reading List". Moves any existing entries over (oldest first) and drops the old table.
+    func moveReadingListIntoPathIfNeeded() {
+        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        guard scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'readingListToPathV1'") == 0 else { return }
+        let hasOldTable = scalarInt("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'reading_list'") > 0
+        if hasOldTable && scalarInt("SELECT COUNT(*) FROM reading_list") > 0 {
+            _ = inTransaction {
+                if scalarInt("SELECT COALESCE(\(Self.readingListRunIdSQL), 0)") == 0,
+                   run("INSERT INTO runs (title, description) VALUES (?, '')", args: [Self.readingListTitle]) == -1 {
+                    return false
+                }
+                let start = scalarInt(
+                    "SELECT COALESCE(MAX(position), -1) FROM run_items WHERE run_id = \(Self.readingListRunIdSQL)")
+                return exec("""
+                    INSERT OR IGNORE INTO run_items (run_id, comic_id, position)
+                    SELECT \(Self.readingListRunIdSQL), rl.comic_id,
+                           \(start) + ROW_NUMBER() OVER (ORDER BY rl.added_at, rl.comic_id)
+                    FROM reading_list rl JOIN comics c ON c.id = rl.comic_id
+                    """)
+            }
+        }
+        exec("DROP TABLE IF EXISTS reading_list")
+        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('readingListToPathV1')")
     }
 
     func resortSpecialIssuesIfNeeded() {
@@ -474,33 +422,6 @@ extension DatabaseManager {
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('specialIssueSortV1')")
     }
 
-    /// `ratings.rating` had `CHECK(rating BETWEEN 1 AND 5)`, but `setComicReview` -- and every
-    /// other read path in this file (`COALESCE(r.rating, 0)`) -- has always treated 0 as the
-    /// real, valid "no rating yet" sentinel. Writing a review for a comic that had never been
-    /// rated inserted `rating=0`, which the CHECK constraint silently rejected: `run()`'s Bool
-    /// result was discarded at that call site, so the review just never saved, with no error
-    /// surfaced anywhere. Rebuilds the table with the constraint the rest of the app already
-    /// assumed was true (SQLite can't ALTER an existing CHECK constraint in place).
-    func allowUnratedReviewsIfNeeded() {
-        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
-        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'ratingsAllowZeroV1'") > 0
-        guard !alreadyRun else { return }
-        _ = inTransaction {
-            exec("ALTER TABLE ratings RENAME TO ratings_old_ratingsAllowZeroV1")
-            exec("""
-                CREATE TABLE ratings (
-                    comic_id INTEGER PRIMARY KEY REFERENCES comics(id),
-                    rating   INTEGER CHECK(rating BETWEEN 0 AND 5),
-                    review   TEXT
-                )
-                """)
-            exec("INSERT INTO ratings SELECT * FROM ratings_old_ratingsAllowZeroV1")
-            exec("DROP TABLE ratings_old_ratingsAllowZeroV1")
-            return true
-        }
-        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('ratingsAllowZeroV1')")
-    }
-
     func widenMainlinePositionStrideIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'positionStride100V1'") > 0
@@ -511,52 +432,6 @@ extension DatabaseManager {
             + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
         """)
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('positionStride100V1')")
-    }
-
-    // Adds parent_volume/child_volume so two series that share an identical Series name but
-    // differ by ComicInfo.xml's Volume tag (the standard GCD/ComicVine convention for numbered
-    // relaunches, e.g. Amazing Spider-Man Vol. 1 vs Vol. 2) can be linked as their own distinct
-    // continuation instead of only ever resolving to one combined (publisher, series) candidate.
-    // SQLite can't ALTER a UNIQUE constraint in place, so this rebuilds the table; the original
-    // UNIQUE(child_publisher, child_series) is dropped in favor of the app-level uniqueness check
-    // in addSeriesLink (NULL isn't equal to NULL for UNIQUE purposes, which would have let every
-    // volume-less child bypass the constraint entirely).
-    func makeSeriesLinksVolumeAwareIfNeeded() {
-        exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
-        let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'seriesLinksVolumeAwareV1'") > 0
-        guard !alreadyRun else { return }
-        // Same rename/create/insert/drop rebuild as `allowUnratedReviewsIfNeeded` just above,
-        // and it needs the same `inTransaction` wrapping: unwrapped, a crash/force-quit between
-        // any two of these statements can leave `series_links` missing entirely (dropped by the
-        // RENAME, `series_links_old` never cleaned up) or duplicated, silently degrading every
-        // series-link-dependent feature (reading order, GCD matching) on an existing install.
-        _ = inTransaction {
-            exec("ALTER TABLE series_links RENAME TO series_links_old")
-            exec("""
-            CREATE TABLE series_links (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_publisher TEXT NOT NULL,
-                parent_series    TEXT NOT NULL,
-                parent_volume    TEXT,
-                child_publisher  TEXT NOT NULL,
-                child_series     TEXT NOT NULL,
-                child_volume     TEXT,
-                sequence_order   INTEGER NOT NULL,
-                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                source           TEXT NOT NULL DEFAULT 'manual'
-            )
-            """)
-            exec("""
-            INSERT INTO series_links (id, parent_publisher, parent_series, parent_volume,
-                                       child_publisher, child_series, child_volume,
-                                       sequence_order, created_at, source)
-            SELECT id, parent_publisher, parent_series, NULL, child_publisher, child_series, NULL,
-                   sequence_order, created_at, source FROM series_links_old
-            """)
-            exec("DROP TABLE series_links_old")
-            return true
-        }
-        exec("INSERT OR IGNORE INTO migrations (name) VALUES ('seriesLinksVolumeAwareV1')")
     }
 
 }

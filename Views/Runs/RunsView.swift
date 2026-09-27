@@ -5,7 +5,7 @@ extension Notification.Name {
 
 import SwiftUI
 
-private func runListConfig(_ vm: LibraryViewModel) -> CollectionListConfig<Run> {
+private func runListConfig(_ vm: LibraryViewModel) -> CollectionListConfig {
     CollectionListConfig(
         noun: "Reading Path", nounPlural: "Reading Paths",
         emptyIcon: "list.bullet.rectangle",
@@ -423,6 +423,36 @@ struct RunsView: View {
         NavigationStack {
             RunsListView(selectedRun: $vm.selectedRun)
                 .navigationTitle("Reading Paths")
+        }
+    }
+}
+
+/// "Add to Reading Path" menu for places that act on several comics at once (the bulk-select
+/// bar): lists every path plus "New Reading Path…", and hands back the chosen path.
+struct AddToReadingPathMenu: View {
+    @EnvironmentObject var vm: LibraryViewModel
+    let onPick: (_ runId: Int64, _ runTitle: String) -> Void
+    @State private var showNewPrompt = false
+    @State private var newTitle = ""
+
+    var body: some View {
+        Menu {
+            ForEach(vm.runs) { run in
+                Button(run.title) { onPick(run.id, run.title) }
+            }
+            if !vm.runs.isEmpty { Divider() }
+            Button("New Reading Path…") { newTitle = ""; showNewPrompt = true }
+        } label: {
+            Label("Add to Path", systemImage: "text.badge.plus")
+        }
+        .alert("New Reading Path", isPresented: $showNewPrompt) {
+            TextField("Name", text: $newTitle)
+            Button("Create") {
+                let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return }
+                onPick(vm.createRun(title: title, description: ""), title)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 }

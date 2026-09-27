@@ -10,13 +10,11 @@ enum SettingsSearch {
     static let keywords: [String: [String]] = [
         "Appearance": ["theme", "accent", "color", "colour", "dark", "light", "sepia"],
         "Library": ["folder", "path", "scan", "cache", "comics imported"],
-        "Comics Database": ["gcd", "download", "offline", "publication date", "grand comics database"],
         "Reader": ["scroll", "slideshow", "autoplay", "speed"],
         "Import": ["cbr", "unar", "rar"],
         "Sidebar": ["discover", "reorder", "hide"],
-        "Fix Filenames": ["rename", "filename"],
         "ComicInfo Write-Back": ["comicinfo", "write back", "metadata", "xml", "portable"],
-        "Data": ["backup", "export", "trash", "resync", "clear", "cache", "health check"],
+        "Data": ["backup", "export", "trash", "resync", "clear", "cache"],
         "Sync": ["nearby", "multipeer", "ipad", "mac", "progress", "wifi", "network", "peer"],
         "Backup": ["export", "import", "restore"],
         "Help": ["tutorial", "onboarding"],
@@ -58,16 +56,11 @@ struct SettingsView: View {
                 set: { progressFormatRaw = $0.rawValue })
     }
 
-    private var gcdSizeLabel: String? {
-        guard let bytes = OfflineMetadataStore.shared.fileSizeOnDisk else { return nil }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-    }
-
     // Kept platform-conditional so a search matching only a Mac-only section (e.g. "cbr") doesn't
     // leave `noSectionsMatch` false while nothing actually renders on iPad/visionOS.
     private static let sectionTitles: [String] = {
-        var titles = ["Appearance", "Library", "Comics Database",
-                      "Reader", "Sidebar", "Fix Filenames", "Data", "Sync", "Help", "About"]
+        var titles = ["Appearance", "Library",
+                      "Reader", "Sidebar", "Data", "Sync", "Help", "About"]
         #if os(macOS)
         titles.append("Import")
         #endif
@@ -83,12 +76,9 @@ struct SettingsView: View {
     }
 
     @State private var unarAvailable         = false
-    @State private var gcdDownloadState: GCDDatabaseDownloader.State = .idle
     @State private var showTrash             = false
-    @State private var showRenameFiles       = false
     @State private var showPeerSync          = false
     #if os(macOS)
-    @State private var showConvertCBRToCBZ   = false
     @AppStorage("comicInfoWriteBackEnabled") private var comicInfoWriteBackEnabled = false
     #endif
     @State private var showClearConfirm      = false
@@ -113,13 +103,11 @@ struct SettingsView: View {
             Form {
                 if sectionMatches("Appearance") { appearanceSection }
                 if sectionMatches("Library") { librarySection }
-                if sectionMatches("Comics Database") { comicsDatabaseSection }
                 if sectionMatches("Reader") { readerSection }
                 #if os(macOS)
                 if sectionMatches("Import") { importSection }
                 #endif
                 if sectionMatches("Sidebar") { sidebarSection }
-                if sectionMatches("Fix Filenames") { fixFilenamesSection }
                 #if os(macOS)
                 if sectionMatches("ComicInfo Write-Back") { comicInfoWriteBackSection }
                 #endif
@@ -141,20 +129,12 @@ struct SettingsView: View {
                 DatabaseManager.shared.allComics().count
             }.value
         }
-        .onChange(of: gcdDownloadState) { _, newValue in
-            guard newValue == .success else { return }
-            vm.recomputeGCDMatches()
-        }
         .sheet(isPresented: $showTrash) { TrashView().environmentObject(vm) }
-        .sheet(isPresented: $showRenameFiles) { RenameFilesView().environmentObject(vm) }
         .sheet(isPresented: $showPeerSync) { PeerSyncView() }
-        #if os(macOS)
-        .sheet(isPresented: $showConvertCBRToCBZ) { ConvertCBRToCBZView() }
-        #endif
         .confirmationDialog("Clear Library?", isPresented: $showClearConfirm, titleVisibility: .visible) {
             Button("Clear Library", role: .destructive) { vm.clearLibrary() }
         } message: {
-            Text("This will permanently remove all comics, reading progress, reading paths, tier lists, tags, bookmarks, and cached thumbnails. Your actual comic files will not be deleted.")
+            Text("This will permanently remove all comics, reading progress, reading paths, tags, bookmarks, and cached thumbnails. Your actual comic files will not be deleted.")
         }
         .confirmationDialog("Run Setup Again?", isPresented: $showOnboardingConfirm, titleVisibility: .visible) {
             Button("Erase & Run Setup", role: .destructive) {
@@ -162,7 +142,7 @@ struct SettingsView: View {
                 completedBuild = ""
             }
         } message: {
-            Text("This will erase your entire library database, all reading progress, reading paths, tier lists, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
+            Text("This will erase your entire library database, all reading progress, reading paths, tags, bookmarks, and cached thumbnails, then restart the setup wizard. Your actual comic files will not be deleted.")
         }
         .errorAlert("Backup Error", message: $backupErrorMessage)
     }
@@ -270,43 +250,6 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder private var comicsDatabaseSection: some View {
-        Section("Comics Database") {
-            if OfflineMetadataStore.shared.isAvailable {
-                Label("Downloaded" + (gcdSizeLabel.map { " · \($0)" } ?? ""), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Text("Your comics are matched against it for canonical series names and issue details, entirely offline.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button(gcdDownloadState.isDownloading ? "Working…" : "Check for Database Update") {
-                        GCDDatabaseDownloader.download { gcdDownloadState = $0 }
-                    }.disabled(gcdDownloadState.isDownloading)
-                    Button("Delete", role: .destructive) {
-                        OfflineMetadataStore.shared.deleteDownloadedDatabase()
-                        gcdDownloadState = .idle
-                    }
-                }
-            } else {
-                Text("A free, one-time download that matches your comics to the Grand Comics Database for canonical series names and issue details. Works offline once downloaded.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                switch gcdDownloadState {
-                case .idle, .success:
-                    Button("Download Comics Database") {
-                        GCDDatabaseDownloader.download { gcdDownloadState = $0 }
-                    }
-                case .downloading(let progress):
-                    ProgressView(value: progress)
-                    Text("Downloading…").font(.caption).foregroundStyle(.secondary)
-                case .failure(let message):
-                    Text(message).font(.caption).foregroundStyle(.red)
-                    Button("Try Again") { GCDDatabaseDownloader.download { gcdDownloadState = $0 } }
-                }
-            }
-        }
-    }
-
     @ViewBuilder private var readerSection: some View {
         Section("Reader") {
             Toggle("Scroll Mode (continuous scroll)", isOn: $scrollMode)
@@ -336,10 +279,6 @@ struct SettingsView: View {
                         .foregroundStyle(unarAvailable ? .green : .red)
                     Text(unarAvailable ? "unar found" : "unar not found — install with: brew install unar")
                         .font(.caption).foregroundStyle(.secondary)
-                }
-                if unarAvailable {
-                    Button("Convert CBR to CBZ…") { showConvertCBRToCBZ = true }
-                        .help("Re-encode RAR-based comics as CBZ in place, so they no longer need unar to read")
                 }
             }
         }
@@ -382,19 +321,6 @@ struct SettingsView: View {
                     .accessibilityLabel("Show \(item.title) in sidebar")
                 }
             }
-        }
-    }
-
-    @ViewBuilder private var fixFilenamesSection: some View {
-        Section("Fix Filenames") {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("ComicArc reads folders as Publisher / Character / Series. This tool just cleans up messy filenames — underscores become spaces, repeated spaces collapse to one — it doesn't rename files based on their metadata.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.vertical, 2)
-            Button("Clean Up Filenames…") { showRenameFiles = true }
-                .help("Preview and apply a batch cleanup of filenames with underscores or extra whitespace")
         }
     }
 
@@ -441,9 +367,6 @@ struct SettingsView: View {
             Button("Import Backup…") { importBackup() }
             Button("View Trash…") { showTrash = true }
             Divider()
-            Button("Run Library Health Check…") { vm.runManualHealthCheck() }
-                .help("Scan for duplicates, missing issues, multiple volumes, missing metadata, corrupt archives, and broken reading-order links")
-            Divider()
             Button {
                 vm.resyncLibrary()
             } label: {
@@ -471,14 +394,6 @@ struct SettingsView: View {
 
     @ViewBuilder private var helpSection: some View {
         Section("Help") {
-            #if os(macOS)
-            // The interactive tour overlay only exists in ContentView.swift, Mac's root view --
-            // iPad has no listener for this notification, so the button would silently do nothing.
-            Button("Show Tutorial Again") {
-                NotificationCenter.default.post(name: .showTutorial, object: nil)
-            }
-            .help("Re-run the interactive feature tour")
-            #endif
 
             Button("Run Setup Again…") { confirmRerunOnboarding() }
                 .help("Re-run the initial library setup wizard")
@@ -494,10 +409,6 @@ struct SettingsView: View {
             }
             Text("A native macOS comic reader and library.")
                 .font(.caption).foregroundStyle(.secondary)
-            if OfflineMetadataStore.shared.isAvailable {
-                Text("Comics database data from the Grand Comics Database™ (GCD), licensed under CC BY-SA 4.0.")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
         }
     }
 
