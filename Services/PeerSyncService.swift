@@ -6,13 +6,11 @@ import AppKit
 import UIKit
 #endif
 
-/// Local, cloud-free reading-progress sync between a Mac and an iPad on the same network, over
-/// MultipeerConnectivity -- no account, no server, nothing leaves the local network. Deliberately
-/// scoped to reading progress only (current page + last-read timestamp), matched by file hash
-/// rather than database id, since ids are meaningless across two independently-scanned libraries
-/// but a file's hash identifies the same underlying comic wherever it was imported. Tags and
-/// manual issue orders are NOT synced -- they have far messier merge semantics than a single
-/// last-write-wins scalar page number.
+/// Local, cloud-free sync between a Mac and an iPad on the same network, over
+/// MultipeerConnectivity -- no account, no server, nothing leaves the local network. Syncs reading
+/// progress (last-write-wins page, sticky finished flag) and Reading Paths (additive merge by
+/// title), matched by file hash rather than database id, since ids are meaningless across two
+/// independently-scanned libraries. Tags and manual issue orders stay local.
 @MainActor
 final class PeerSyncService: NSObject, ObservableObject {
     static let shared = PeerSyncService()
@@ -99,16 +97,28 @@ final class PeerSyncService: NSObject, ObservableObject {
         let progress: Int
         let pageCount: Int
         let lastRead: String
+        var finished: Bool? = nil     // optional: older versions don't send it
+    }
+    private struct SyncPath: Codable {
+        let title: String
+        let description: String
+        let comicHashes: [String]
     }
     private struct SyncPayload: Codable {
         let progress: [SyncProgressItem]
+        var paths: [SyncPath]? = nil  // optional: older versions don't send it
     }
 
     private func sendMySnapshot(to peer: MCPeerID) {
         let snapshot = DatabaseManager.shared.progressSyncSnapshot()
-        let payload = SyncPayload(progress: snapshot.map {
-            SyncProgressItem(fileHash: $0.fileHash, progress: $0.progress, pageCount: $0.pageCount, lastRead: $0.lastRead)
-        })
+        let paths = DatabaseManager.shared.pathSyncSnapshot()
+        let payload = SyncPayload(
+            progress: snapshot.map {
+                SyncProgressItem(fileHash: $0.fileHash, progress: $0.progress, pageCount: $0.pageCount,
+                                 lastRead: $0.lastRead, finished: $0.finished)
+            },
+            paths: paths.map { SyncPath(title: $0.title, description: $0.description, comicHashes: $0.hashes) }
+        )
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? session.send(data, toPeers: [peer], with: .reliable)
     }
@@ -132,14 +142,24 @@ extension PeerSyncService: MCSessionDelegate {
 
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let payload = try? JSONDecoder().decode(SyncPayload.self, from: data) else { return }
-        let items = payload.progress.map { (fileHash: $0.fileHash, progress: $0.progress, lastRead: $0.lastRead) }
+        let items = payload.progress.map {
+            (fileHash: $0.fileHash, progress: $0.progress, lastRead: $0.lastRead, finished: $0.finished ?? false)
+        }
+        let paths = (payload.paths ?? []).map { (title: $0.title, description: $0.description, hashes: $0.comicHashes) }
         Task { @MainActor in
             let count = DatabaseManager.shared.applySyncedProgress(items)
+            let pathResult = DatabaseManager.shared.applySyncedPaths(paths)
             isSyncing = false
-            lastSyncSummary = count > 0
-                ? "Updated \(count) comic\(count == 1 ? "" : "s") from \(peerID.displayName)."
-                : "Already up to date with \(peerID.displayName)."
+            var parts: [String] = []
+            if count > 0 { parts.append("\(count) comic\(count == 1 ? "" : "s") updated") }
+            if pathResult.created > 0 { parts.append("\(pathResult.created) Reading Path\(pathResult.created == 1 ? "" : "s") added") }
+            if pathResult.added > 0 { parts.append("\(pathResult.added) path entr\(pathResult.added == 1 ? "y" : "ies") added") }
+            lastSyncSummary = parts.isEmpty
+                ? "Already up to date with \(peerID.displayName)."
+                : parts.joined(separator: ", ") + " from \(peerID.displayName)."
             LibraryViewModel.shared.reload()
+            LibraryViewModel.shared.refreshRuns()
+            NotificationCenter.default.post(name: .runUpdated, object: nil)
         }
     }
 

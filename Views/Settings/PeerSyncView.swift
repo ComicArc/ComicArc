@@ -1,8 +1,8 @@
 import SwiftUI
 import MultipeerConnectivity
 
-/// UI for local, cloud-free reading-progress sync -- see PeerSyncService's own doc comment for
-/// why this is scoped to reading progress only, not full library sync. Shared as-is between
+/// UI for local, cloud-free sync of reading progress and Reading Paths -- see PeerSyncService's
+/// own doc comment for what's synced and how. Shared as-is between
 /// macOS and iPadOS; MultipeerConnectivity's API is identical on both platforms.
 struct PeerSyncView: View {
     @Environment(\.dismiss) private var dismiss
@@ -15,7 +15,7 @@ struct PeerSyncView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Finds other devices on your network running ComicArc and exchanges reading progress with them -- no account, no cloud, nothing leaves your network. Only which page you're on in each comic is synced; ratings, reviews, tags, and diary entries stay local to each device.")
+                    Text("Finds other devices on your network running ComicArc and syncs your reading progress and Reading Paths with them — no account, no cloud, nothing leaves your network. Paths are merged, never deleted: a path or comic added on either device shows up on both. Tags stay local to each device.")
                         .font(.caption).foregroundStyle(.secondary)
 
                     if sync.isActive {

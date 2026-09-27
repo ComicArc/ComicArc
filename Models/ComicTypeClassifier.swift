@@ -34,7 +34,7 @@ enum ComicType: String, Equatable {
 }
 
 /// Classifies a comic as a regular issue, annual, special, one-shot, etc. from its title,
-/// issue number, and ComicInfo.xml Format -- used for GCD matching and special-issue sorting.
+/// issue number, and ComicInfo.xml Format -- used for special-issue sorting and library health checks.
 enum ComicTypeClassifier {
     /// Bounded to the comic's own issue-number/title text, deliberately excluding `series` -- a
     /// series (or story-arc) *name* that happens to contain a type keyword as an ordinary word

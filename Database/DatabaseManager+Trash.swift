@@ -9,12 +9,11 @@ extension DatabaseManager {
             // rolls back the whole reset if any single DELETE fails, rather than committing
             // whatever happened to complete first.
             let tables = [
-                "reading_history", "reading_progress", "reading_goals", "bookmarks", "ratings",
-                "favorites", "reading_list", "comic_tags", "series_covers", "run_items", "runs", "tags",
+                "reading_history", "reading_progress", "reading_goals", "bookmarks",
+                "favorites", "comic_tags", "series_covers", "run_items", "runs", "tags",
                 // "Clear All" is a full factory reset, not just a comics wipe -- these have no
                 // foreign key to comics (keyed by series/publisher name, or independent
                 // user-created collections) so they'd otherwise silently survive a reset untouched.
-                "tier_list_items", "tier_lists", "diary_entries", "series_links",
                 "reading_order_overrides", "metadata_conflicts", "series_reader_prefs",
                 "character_covers", "series_order", "character_order", "publisher_order", "comics",
             ]
@@ -60,8 +59,7 @@ extension DatabaseManager {
     }
 
     /// Permanently deletes soft-deleted comic rows -- Trash previously had no purge path at all,
-    /// so a soft-deleted comic's row (and every joined bookmark/rating/progress/tag/run-item/
-    /// tier-list-item/diary-entry) lived forever, growing the DB unboundedly with no way to
+    /// so a soft-deleted comic's row (and every joined bookmark/progress/tag/run-item) lived forever, growing the DB unboundedly with no way to
     /// actually reclaim it. Never touches the underlying file -- if `delete(fileService:)` already
     /// moved it to the real system Trash, that's the user's Finder Trash to empty separately; if
     /// it was soft-deleted without a file move (a "missing"/"folder_removed" row), there's no file

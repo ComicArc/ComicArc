@@ -161,32 +161,6 @@ final class DatabaseManager: @unchecked Sendable {
     func colInt(_ stmt: OpaquePointer, _ col: Int32) -> Int { Int(sqlite3_column_int(stmt, col)) }
     func colInt64(_ stmt: OpaquePointer, _ col: Int32) -> Int64 { sqlite3_column_int64(stmt, col) }
 
-    /// A caller (LibraryScanner, most commonly) can compute an affected group key before a
-    /// backfill (Volume from a GCD match, series_group edit, etc.) has run -- if the row had no
-    /// value yet, that key is a bare "publisher:series" with no volume/series_group component.
-    /// Once the backfill lands, the row's real composite groupKey gains a suffix the caller's
-    /// bare key never had, silently dropping it from a scoped WHERE ... IN filter. Expand every
-    /// bare key to every real composite groupKey currently sharing that publisher/series so
-    /// a scoped `recomputeGCDMatches` never misses a row purely
-    /// because the caller's key predates a backfill.
-    func expandBareGroupKeys(_ keys: Set<String>) -> Set<String> {
-        let bareKeys = keys.filter { $0.split(separator: ":", omittingEmptySubsequences: false).count <= 2 }
-        guard !bareKeys.isEmpty else { return keys }
-        // Library-size-driven (one key per distinct series touched in a scan), so it needs the
-        // same chunking every other unbounded id/key array in this file goes through -- past
-        // SQLite's bound-parameter ceiling, `sqlite3_prepare_v2` fails and `rows()` silently
-        // returns `[]`, meaning a large first-time import would resolve zero bare keys with no
-        // error, and `recomputeGCDMatches` would then miss every affected group with no error surfaced.
-        var resolvedKeys: [String] = []
-        for chunk in idChunks(Array(bareKeys)) {
-            let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
-            resolvedKeys += rows("""
-                SELECT DISTINCT publisher || ':' || (COALESCE(NULLIF(series_group,''), series) || COALESCE(':' || NULLIF(volume,''), ''))
-                FROM comics WHERE deleted_at IS NULL AND (publisher || ':' || series) IN (\(placeholders))
-                """, args: chunk.map { $0 as Any? }) { s in colText(s, 0) ?? "" }
-        }
-        return keys.union(resolvedKeys)
-    }
     func colBool(_ stmt: OpaquePointer, _ col: Int32) -> Bool { sqlite3_column_int(stmt, col) != 0 }
 
     func bindArgs(_ stmt: OpaquePointer, args: [Any?]) {
@@ -289,8 +263,8 @@ final class DatabaseManager: @unchecked Sendable {
     func comicRow(_ s: OpaquePointer) -> Comic { comicRow(s, offset: 0) }
 
     /// Reads a `Comic` from a row whose columns are `comicColumns`, offset when other columns
-    /// (e.g. a `run_items`/`tier_list_items` join row's own id/position) precede them -- see
-    /// `DatabaseManager+Collections.swift`'s `runItems`/`tierListItems`, which select
+    /// (e.g. a `run_items` join row's own id/position) precede them -- see
+    /// `DatabaseManager+Collections.swift`'s `runItems`, which select
     /// `comicColumns` alongside their own extra columns rather than duplicating this mapping.
     func comicRow(_ s: OpaquePointer, offset: Int32) -> Comic {
         Comic(
@@ -299,43 +273,41 @@ final class DatabaseManager: @unchecked Sendable {
             series: colText(s, offset + 5) ?? "General", issueNumber: colText(s, offset + 6),
             pageCount: colInt(s, offset + 7), writer: colText(s, offset + 8), penciller: colText(s, offset + 9),
             year: sqlite3_column_type(s, offset + 10) != SQLITE_NULL ? colInt(s, offset + 10) : nil,
-            volume: colText(s, offset + 25), format: colText(s, offset + 26),
+            volume: colText(s, offset + 20), format: colText(s, offset + 21),
             storyArc: colText(s, offset + 11), languageIso: colText(s, offset + 12), notes: colText(s, offset + 13),
             addedAt: colText(s, offset + 14) ?? "",
-            position: colInt(s, offset + 16), fileHash: colText(s, offset + 17),
-            progress: colInt(s, offset + 18),
-            isFavorite: colBool(s, offset + 20), inReadingList: colBool(s, offset + 21),
-            gcdMatchConfidence: sqlite3_column_type(s, offset + 22) != SQLITE_NULL ? colInt(s, offset + 22) : nil,
-            gcdSeriesName: colText(s, offset + 23), gcdIssueNumber: colText(s, offset + 24),
-            deletedReason: colText(s, offset + 27),
-            finishedAt: colText(s, offset + 28)
+            position: colInt(s, offset + 15), fileHash: colText(s, offset + 16),
+            progress: colInt(s, offset + 17),
+            isFavorite: colBool(s, offset + 18), inReadingList: colBool(s, offset + 19),
+            deletedReason: colText(s, offset + 22),
+            finishedAt: colText(s, offset + 23)
         )
     }
 
     /// The column list `comicRow(_:offset:)` reads -- factored out from `comicSelect` so joins
-    /// that need their own extra columns alongside a comic's (`runItems`/`tierListItems`) can
+    /// that need their own extra columns alongside a comic's (`runItems`) can
     /// select `comicColumns` themselves instead of duplicating this list and `comicRow`'s mapping.
     let comicColumns = """
         c.id, c.title, c.file_path, c.publisher, c.character, c.series,
         c.issue_number, c.page_count, c.writer, c.penciller, c.year,
-        c.story_arc, c.language_iso, c.notes, c.added_at, c.deleted_at,
+        c.story_arc, c.language_iso, c.notes, c.added_at,
         COALESCE(c.position, c.id), c.file_hash,
-        COALESCE(rp.current_page, 0) as progress, rp.last_read,
+        COALESCE(rp.current_page, 0) as progress,
         (f.comic_id IS NOT NULL) as is_favorite,
         (rl.comic_id IS NOT NULL) as in_reading_list,
-        c.gcd_match_confidence, c.gcd_series_name, c.gcd_issue_number, c.volume, c.format,
+        c.volume, c.format,
         c.deleted_reason, rp.finished_at
     """
 
     /// The per-comic annotation joins (progress/favorite/reading-list) every comic query
-    /// needs -- shared so `runItems`/`tierListItems` (which need their own leading columns
+    /// needs -- shared so `runItems` (which need their own leading columns
     /// alongside a comic's, so they can't just use `comicSelect` outright) don't each hand-roll
     /// their own copy of the same three lines.
     var comicJoins: String {
         """
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
         LEFT JOIN favorites f         ON c.id = f.comic_id
-        LEFT JOIN reading_list rl     ON c.id = rl.comic_id
+        LEFT JOIN run_items rl        ON rl.comic_id = c.id AND rl.run_id = \(Self.readingListRunIdSQL)
         """
     }
 
@@ -347,19 +319,12 @@ final class DatabaseManager: @unchecked Sendable {
         """
     }
 
-    enum SortOrder: String, CaseIterable, Identifiable, Codable {
+    enum SortOrder: String, CaseIterable, Identifiable {
         case publisher = "Publisher", title = "Title", dateAdded = "Recently Added",
              progress = "Most Read", manual = "Custom",
              year = "Year", storyArc = "Story Arc", pageCount = "Page Count",
              dateRead = "Recently Read", writer = "Writer"
         var id: String { rawValue }
-
-        /// Unknown stored values (e.g. a sort that no longer exists) fall back to Custom instead
-        /// of failing to decode -- one bad value would otherwise drop every saved view.
-        init(from decoder: Decoder) throws {
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            self = SortOrder(rawValue: raw) ?? .manual
-        }
 
         var clause: String {
             switch self {

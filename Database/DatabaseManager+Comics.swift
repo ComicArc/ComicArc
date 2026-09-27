@@ -4,9 +4,17 @@ import SQLite3
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 extension DatabaseManager {
+    /// Escapes literal `%`/`_`/`\` in free-text search input so a LIKE '%...%' pattern treats
+    /// them as literal characters instead of wildcards (paired with `ESCAPE '\'` at each call site).
+    static func likeEscaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "%", with: "\\%")
+         .replacingOccurrences(of: "_", with: "\\_")
+    }
+
     func allComics(publisher: String? = nil, character: String? = nil, series: String? = nil,
                    search: String? = nil, sortOrder: SortOrder = .publisher,
-                   favoritesOnly: Bool = false, readingListOnly: Bool = false,
+                   favoritesOnly: Bool = false,
                    nullCharacterOnly: Bool = false, tag: String? = nil,
                    unreadOnly: Bool = false) -> [Comic] {
         queue.sync {
@@ -28,7 +36,6 @@ extension DatabaseManager {
                 args += [p, p, p, p, p, p, p, p]
             }
             if favoritesOnly   { conds.append("f.comic_id IS NOT NULL") }
-            if readingListOnly { conds.append("rl.comic_id IS NOT NULL") }
             if unreadOnly      { conds.append("COALESCE(rp.current_page, 0) = 0") }
             if let tag {
                 conds.append("c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name = ?)")
@@ -77,9 +84,7 @@ extension DatabaseManager {
         let alternateNumber: String?
         let storyArcNumber: String?
         let seriesGroup: String?
-        let gcdMatchReason: String?
         let hasComicInfo: Bool?
-        let gcdMatchSource: String
         let duplicateMatchCount: Int
     }
 
@@ -91,19 +96,18 @@ extension DatabaseManager {
             struct Extra {
                 let coverMonth: Int?; let coverDay: Int?; let comicInfoIssueNumber: String?
                 let alternateNumber: String?; let storyArcNumber: String?; let seriesGroup: String?
-                let gcdMatchReason: String?; let hasComicInfo: Int?; let gcdMatchSource: String
+                let hasComicInfo: Int?
             }
             guard let extra = rows("""
                 SELECT cover_month, cover_day, comicinfo_issue_number, alternate_number,
-                       story_arc_number, series_group, gcd_match_reason, has_comicinfo, gcd_match_source
+                       story_arc_number, series_group, has_comicinfo
                 FROM comics WHERE id = ?
                 """, args: [comicId], map: { s in
                 Extra(coverMonth: sqlite3_column_type(s, 0) != SQLITE_NULL ? colInt(s, 0) : nil,
                       coverDay: sqlite3_column_type(s, 1) != SQLITE_NULL ? colInt(s, 1) : nil,
                       comicInfoIssueNumber: colText(s, 2), alternateNumber: colText(s, 3),
-                      storyArcNumber: colText(s, 4), seriesGroup: colText(s, 5), gcdMatchReason: colText(s, 6),
-                      hasComicInfo: sqlite3_column_type(s, 7) != SQLITE_NULL ? colInt(s, 7) : nil,
-                      gcdMatchSource: colText(s, 8) ?? "auto")
+                      storyArcNumber: colText(s, 4), seriesGroup: colText(s, 5),
+                      hasComicInfo: sqlite3_column_type(s, 6) != SQLITE_NULL ? colInt(s, 6) : nil)
             }).first else { return nil }
 
             return MetadataInspectorInfo(
@@ -111,9 +115,7 @@ extension DatabaseManager {
                 coverMonth: extra.coverMonth, coverDay: extra.coverDay,
                 comicInfoIssueNumber: extra.comicInfoIssueNumber, alternateNumber: extra.alternateNumber,
                 storyArcNumber: extra.storyArcNumber, seriesGroup: extra.seriesGroup,
-                gcdMatchReason: extra.gcdMatchReason,
                 hasComicInfo: extra.hasComicInfo.map { $0 != 0 },
-                gcdMatchSource: extra.gcdMatchSource,
                 duplicateMatchCount: _duplicateMatchCountUnlocked(for: comicId)
             )
         }
@@ -431,25 +433,31 @@ extension DatabaseManager {
         }
     }
 
-    func setInReadingList(_ comicId: Int64, _ value: Bool) {
-        queue.sync {
-            if value { run("INSERT OR IGNORE INTO reading_list (comic_id) VALUES (?)", args: [comicId]) }
-            else      { run("DELETE FROM reading_list WHERE comic_id = ?", args: [comicId]) }
-        }
-    }
+    /// The Reading List is an ordinary Reading Path with this title -- the quick "Add to Reading
+    /// List" actions just add to (creating it if needed) or remove from that path.
+    static let readingListTitle = "Reading List"
+
+    /// The SQL expression for the Reading List path's id (NULL when it doesn't exist yet).
+    static let readingListRunIdSQL = "(SELECT id FROM runs WHERE title = 'Reading List' ORDER BY id LIMIT 1)"
+
+    func setInReadingList(_ comicId: Int64, _ value: Bool) { setInReadingList([comicId], value) }
 
     func setInReadingList(_ ids: [Int64], _ value: Bool) {
         guard !ids.isEmpty else { return }
         queue.sync {
-            for chunk in idChunks(ids) {
-                let args = chunk.map { $0 as Any? }
+            var runId = scalarInt("SELECT COALESCE(\(Self.readingListRunIdSQL), 0)")
+            if value && runId == 0 {
+                runId = Int(run("INSERT INTO runs (title, description) VALUES (?, '')", args: [Self.readingListTitle]))
+            }
+            guard runId > 0 else { return }
+            _ = inTransaction {
                 if value {
-                    let values = chunk.map { _ in "(?)" }.joined(separator: ",")
-                    _ = run("INSERT OR IGNORE INTO reading_list (comic_id) VALUES \(values)", args: args)
-                } else {
-                    let ph = chunk.map { _ in "?" }.joined(separator: ",")
-                    _ = run("DELETE FROM reading_list WHERE comic_id IN (\(ph))", args: args)
+                    let start = scalarInt("SELECT COALESCE(MAX(position), -1) + 1 FROM run_items WHERE run_id = ?", args: [runId])
+                    return runBatch("INSERT OR IGNORE INTO run_items (run_id, comic_id, position) VALUES (?,?,?)",
+                                    rows: ids.enumerated().map { [Int64(runId), $0.element, Int64(start + $0.offset)] })
                 }
+                return runBatch("DELETE FROM run_items WHERE run_id = ? AND comic_id = ?",
+                                rows: ids.map { [Int64(runId), $0] })
             }
         }
     }
@@ -663,14 +671,16 @@ extension DatabaseManager {
     /// history/order), but a comic's file hash identifies the same underlying file wherever it
     /// was imported. Used by local Mac<->iPad progress sync; no tags here,
     /// since those have much messier merge semantics than a single scalar page number.
-    func progressSyncSnapshot() -> [(fileHash: String, progress: Int, pageCount: Int, lastRead: String)] {
+    func progressSyncSnapshot() -> [(fileHash: String, progress: Int, pageCount: Int, lastRead: String, finished: Bool)] {
         queue.sync {
             rows("""
-                SELECT c.file_hash, rp.current_page, c.page_count, rp.last_read
+                SELECT c.file_hash, rp.current_page, c.page_count, rp.last_read, rp.finished_at IS NOT NULL
                 FROM reading_progress rp JOIN comics c ON c.id = rp.comic_id
-                WHERE c.deleted_at IS NULL AND c.file_hash IS NOT NULL AND rp.current_page > 0
+                WHERE c.deleted_at IS NULL AND c.file_hash IS NOT NULL
+                  AND (rp.current_page > 0 OR rp.finished_at IS NOT NULL)
                 """) { s in
-                (fileHash: colText(s, 0) ?? "", progress: colInt(s, 1), pageCount: colInt(s, 2), lastRead: colText(s, 3) ?? "")
+                (fileHash: colText(s, 0) ?? "", progress: colInt(s, 1), pageCount: colInt(s, 2),
+                 lastRead: colText(s, 3) ?? "", finished: colBool(s, 4))
             }
         }
     }
@@ -680,12 +690,21 @@ extension DatabaseManager {
     /// its library) is silently skipped rather than treated as an error -- the two devices'
     /// libraries are not guaranteed to be identical. Returns how many comics were actually updated,
     /// for a user-facing summary.
-    func applySyncedProgress(_ items: [(fileHash: String, progress: Int, lastRead: String)]) -> Int {
+    /// Finished is sticky: a comic finished on either device ends up finished on both.
+    func applySyncedProgress(_ items: [(fileHash: String, progress: Int, lastRead: String, finished: Bool)]) -> Int {
         queue.sync {
             var updated = 0
             for item in items {
                 guard let id = rows("SELECT id FROM comics WHERE file_hash = ? AND deleted_at IS NULL",
                                     args: [item.fileHash], map: { colInt64($0, 0) }).first else { continue }
+                if item.finished,
+                   scalarInt("SELECT COUNT(*) FROM reading_progress WHERE comic_id = ? AND finished_at IS NOT NULL", args: [id]) == 0 {
+                    _ = run("""
+                        INSERT INTO reading_progress (comic_id, current_page, finished_at) VALUES (?, ?, datetime('now'))
+                        ON CONFLICT(comic_id) DO UPDATE SET finished_at = COALESCE(finished_at, excluded.finished_at)
+                        """, args: [id, item.progress])
+                    updated += 1
+                }
                 let localLastRead = scalarText(
                     "SELECT last_read FROM reading_progress WHERE comic_id = ?", args: [id]) ?? ""
                 guard item.lastRead > localLastRead else { continue }

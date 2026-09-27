@@ -255,6 +255,8 @@ struct SeriesGroupCard: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.fileService) private var fileService
     @State private var showCoverPicker = false
+    @State private var showNewPathPrompt = false
+    @State private var newPathTitle = ""
 
     var body: some View {
         GroupCard(title: group.series, subtitle: nil,
@@ -277,6 +279,15 @@ struct SeriesGroupCard: View {
                     await MainActor.run { vm.markRead(comics) }
                 }
             }
+            Menu("Add Series to Reading Path") {
+                ForEach(vm.runs) { run in
+                    Button(run.title) {
+                        vm.addSeriesToRun(series: group.series, publisher: group.publisher, runId: run.id, runTitle: run.title)
+                    }
+                }
+                if !vm.runs.isEmpty { Divider() }
+                Button("New Reading Path…") { newPathTitle = group.series; showNewPathPrompt = true }
+            }
             Divider()
 
             Button("Choose Existing Cover…") { showCoverPicker = true }
@@ -284,6 +295,16 @@ struct SeriesGroupCard: View {
             if group.coverImagePath != nil {
                 Button("Remove Custom Cover") { vm.clearSeriesCover(group.series, publisher: group.publisher) }
             }
+        }
+        .alert("New Reading Path", isPresented: $showNewPathPrompt) {
+            TextField("Name", text: $newPathTitle)
+            Button("Create") {
+                let title = newPathTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return }
+                let runId = vm.createRun(title: title, description: "")
+                vm.addSeriesToRun(series: group.series, publisher: group.publisher, runId: runId, runTitle: title)
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $showCoverPicker) {
             CoverPickerSheet(title: "Choose Cover for \(group.series)") { comic in

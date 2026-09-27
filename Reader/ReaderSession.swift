@@ -58,7 +58,9 @@ final class ReaderSession {
     var showSeriesComplete = false
     private var didShowFinishToast = false
 
-    var shouldShowChrome = true
+    /// Reader controls start hidden and are only revealed deliberately (a tap on iPad, hovering
+    /// an edge on Mac) -- never by opening a comic or turning a page.
+    var shouldShowChrome = false
     var toolbarLocked = false
 
     private var viewportSize: CGSize = .zero

@@ -18,9 +18,9 @@ Most comic readers want you to hand your library over to them — import it into
 - **Your folder is the database.** ComicArc reads Publisher / Character / Series / Issue straight from the folder structure you already built. It never renames, moves, or rewrites a file unless you explicitly ask it to.
 - **Genuinely native.** 100% SwiftUI on top of AppKit/UIKit — real keyboard shortcuts, full VoiceOver support, native drag-and-drop, and the platform's own navigation idioms, not a web view wearing a costume.
 - **Fast because it's simple.** SQLite through the raw C API, no ORM, no network round-trip between you and your own library.
-- **Offline by default, forever.** No account, no telemetry, nothing phoning home. The one optional download — an offline comics database for better metadata matching — is a single file you grab once; after that it works forever with no connection.
-- **Three real native targets.** macOS, iPadOS, and visionOS share one core (database, scanner, reading-order engine) but are each built for their own platform, not one UI awkwardly stretched over three.
-- **More than a reader.** A Diary that logs every read and reread, Tier Lists, Favorite Moments, Reading Paths that span multiple series, and a Year in Review recap — the parts of tracking what you've read that most comic readers skip entirely.
+- **Offline, always.** No account, no telemetry, nothing phoning home, nothing to download.
+- **Three real native targets.** macOS, iPadOS, and visionOS share one core (database, scanner, reader engine) but are each built for their own platform, not one UI awkwardly stretched over three.
+- **Library and reader first.** Plus Reading Paths: build your own run from the comics you own — mix and match across series like a personal playlist.
 
 ---
 
@@ -58,12 +58,15 @@ The iPad app (`ComicArcPad`, iPadOS 17+) isn't on the App Store yet — it lives
 - **Multiple library folders.** Point ComicArc at more than one folder — a NAS share and a local drive, say — and it treats them as one combined library. Add or remove folders any time from Settings.
 - **Publisher / Character / Series / Issue**, read from your folder structure and browsable from the sidebar.
 - Cover thumbnails with inline progress bars; **Continue Reading** surfaces whatever you're mid-issue on.
-- Bulk select: mark read/unread, add to a Reading Path, delete, or reassign series/publisher across many issues at once.
-- **Issue detail**: edit metadata, tag it, or fix its comics-database match by hand.
+- Bulk select: mark read/unread, add to a Reading Path (or the Reading List), delete, or reassign series/publisher across many issues at once.
+- **Issue detail**: edit metadata, tag it, or add it to a Reading Path.
 - **Series Manager**: reorder issues in a series (your order survives rescans), rename it, or set a custom cover. Otherwise issues sort by issue number, with annuals and specials after the regular issues.
-- **Possible Duplicates** flags comics with the exact same file name or the exact same cover thumbnail (byte-identical copies included). Matching title, series, or issue number alone never counts.
-- **Metadata Conflicts**: if a rescan finds a ComicInfo.xml value that disagrees with what you already have on file, it's flagged for your review, never silently overwritten.
-- **Rename Files**: cleans up messy filenames in bulk — underscores become spaces, repeated spaces collapse to one — with a one-tap per-file fix available from the issue detail view too. It only tidies up what's already there; it doesn't rename files based on their metadata.
+- **Library Health** — one screen for maintenance:
+  - a health report (issue-number gaps, duplicate #1s, mixed volumes, unreadable files),
+  - **Duplicates**: comics with the exact same file name or the exact same cover thumbnail (byte-identical copies included); matching title, series, or issue number alone never counts,
+  - **Needs Review**: ComicInfo.xml values that disagree with how a comic is filed, never silently overwritten,
+  - tools to clean up filenames, convert CBR to CBZ (macOS), and resync the library.
+- **Clean Up Filenames**: tidies messy filenames in bulk — underscores become spaces, repeated spaces collapse to one — with a one-tap per-file fix available from the issue detail view too. It only tidies up what's already there; it doesn't rename files based on their metadata.
 
 ### Reader
 
@@ -73,22 +76,21 @@ macOS opens the reader right inside the main window — no separate floating win
 
 **iPadOS** — swipe or continuous scroll, pinch/zoom, tap zones for page turns, autoplay, auto-hiding chrome that respects the notch and Home indicator.
 
-### Offline comics database
-
-A free one-time download (a few hundred KB per genre) built from a public [Grand Comics Database](https://www.comics.org/) snapshot (CC BY-SA 4.0, attribution in Settings). It matches your files to canonical series names even when your folders use fan abbreviations, and needs no ongoing connection once downloaded. If it ever gets a match wrong — or finds nothing — the **Fix Match** picker lets you search and set the correct one by hand, and your pick is protected from ever being silently overwritten by a later rescan.
-
 ### Reading Paths
 
 An ordered, curated collection of comics that can span any number of series — a crossover event, a character's entire history, a "best of" you're building yourself. Drag-and-drop to reorder, per-issue notes, a custom cover, and a Resume button that always knows the next unfinished issue.
 
-### Tier Lists & Favorite Moments
+- **Add from anywhere**: a single issue (context menu or issue detail), a bulk selection (**Add to Path** in the selection bar, keeping the grid's order), or a whole series (**Add Series to Reading Path** on a series card). Each menu can also start a new path on the spot.
+- **Reading List** is simply a built-in path named "Reading List" — the Reading List toggle on any comic adds it there, and you can reorder or annotate it like any other path.
+- Reading Paths sit in the sidebar's main Library section, and sync between your Mac and iPad (see below).
 
-- **Tier Lists** — rank comics into S/A/B/C/D/F tiers by dragging between rows, with the same custom-cover treatment as Reading Paths.
-- **Favorite Moments** — star a bookmarked page in the reader, and it's saved to a standalone gallery of real page thumbnails; tap one to jump straight back into the reader at that page.
+### Highlights
 
-### Stats, History & Year in Review
+- **Highlights** — star a bookmarked page in the reader, and it's saved to a standalone gallery of real page thumbnails; tap one to jump straight back into the reader at that page.
 
-Totals for issues and pages read, time in-app, a publisher breakdown, a reading history timeline, and an annual **Year in Review** recap — top series and publisher, longest reading streak, busiest month.
+### Stats
+
+One screen: totals for issues and pages read, a publisher breakdown, a reading goal, a **History** tab with your reading timeline, and an annual **Year in Review** recap — top series and publisher, longest reading streak, busiest month.
 
 ### Appearance
 
@@ -96,8 +98,8 @@ Six built-in themes (Dark, Pure Black for OLED, Graphite, Midnight Blue, Forest,
 
 ### Sync & Sharing
 
-- **Peer sync (macOS ↔ iPad)** — over the local network via MultipeerConnectivity, no account or server involved. Deliberately scoped to reading progress (current page + last-read time), matched by file hash so it works even though each platform keeps its own independently-scanned library. Tags and manual issue orders aren't synced — those have messier merge semantics than a single last-write-wins page number.
-- **Share cards** — export a shareable image card for a Tier List, Reading Path, or your Year in Review recap, to post or send outside the app.
+- **Peer sync (macOS ↔ iPad)** — over the local network via MultipeerConnectivity, no account or server involved. Syncs reading progress (current page, last-read time, and finished status) and Reading Paths, matched by file hash so it works even though each platform keeps its own independently-scanned library. Paths are merged by title and never deleted: a path, or a comic added to one, on either device shows up on both. Tags and manual issue orders aren't synced.
+- **Share cards** — export a shareable image card for a Reading Path or your Year in Review recap, to post or send outside the app.
 
 ---
 
@@ -111,12 +113,11 @@ All three targets share the same core — database, scanner, every screen above 
 | Multiple library folders | Yes | Yes |
 | CBZ / PDF / JPG / PNG | Yes | Yes |
 | CBR | Yes (bundled `unar`) | No — no shell access in the sandbox |
-| Offline database, Fix Match | Yes | Yes |
-| Rename Files | Yes | Yes |
-| Reading Paths, Tier Lists, Favorite Moments | Yes | Yes |
-| Stats, History, Year in Review | Yes | Yes |
+| Library Health, Clean Up Filenames | Yes | Yes |
+| Reading Paths, Highlights | Yes | Yes |
+| Stats (with History and Year in Review) | Yes | Yes |
 | Share cards | Yes | Yes |
-| Peer sync (reading progress) | Yes | Yes (iPad only) |
+| Peer sync (progress + Reading Paths) | Yes | Yes (iPad only) |
 | Backup export/import | Yes | Yes |
 | Double-page spread, RTL, color filters, in-reader bookmarks | Yes | Not yet — touch/gaze reader is swipe/zoom/autoplay for now |
 | Keyboard shortcuts | Full | Magic Keyboard (iPad): scan, navigate, back, rename |
@@ -184,15 +185,15 @@ Press `?` inside the reader any time for the full list.
 | `R` | Toggle RTL direction |
 | `Esc` | Stop autoplay, or close reader |
 
-The main window also supports `⌘1`–`⌘9` to jump to any sidebar section, `⌘[` to go back, `⌘E` to toggle bulk-select, `⇧⌘R` to rescan, and `⇧⌘F` to open Rename Files.
+The main window also supports `⌘1`–`⌘6` (Library, Continue Reading, Favorites, Reading Paths, Stats, Highlights) to jump to any sidebar section, `⌘[` to go back, `⌘E` to toggle bulk-select, `⇧⌘R` to rescan, and `⇧⌘F` to open Clean Up Filenames.
 
 ### iPad (Magic Keyboard)
 
 | Shortcut | Action |
 |---|---|
 | `⇧⌘R` | Scan library |
-| `⇧⌘F` | Rename Files |
-| `⌘1`–`⌘9` | Jump to sidebar section |
+| `⇧⌘F` | Clean Up Filenames |
+| `⌘1`–`⌘6` | Jump to sidebar section |
 | `⌘[` | Go back |
 
 ---
@@ -205,11 +206,10 @@ Everything lives on your device. Nothing leaves it.
 |---|---|
 | Library database | `~/Library/Application Support/ComicArc/comics.db` (macOS) |
 | Cover thumbnails | `~/Library/Application Support/ComicArc/covers/` (macOS) |
-| Offline comics database (optional) | `~/Library/Application Support/ComicArc/gcd_lookup.sqlite` (macOS) |
 
-Your comic files themselves are **never moved, renamed, or modified** unless you use the Rename Files tool.
+Your comic files themselves are **never moved, renamed, or modified** unless you use the Clean Up Filenames tool.
 
-macOS and iPad each keep their own independent local library. Peer sync (see [Sync & Sharing](#sync--sharing)) keeps reading progress in step between them over the local network; everything else — tags, bookmarks, Reading Paths, Tier Lists, manual issue orders — stays local to each device unless you move it yourself. Either platform can export a full JSON backup of all of it and restore it on the same device, or use it to move state to another device by hand.
+macOS and iPad each keep their own independent local library. Peer sync (see [Sync & Sharing](#sync--sharing)) keeps reading progress and Reading Paths in step between them over the local network; everything else — tags, bookmarks, manual issue orders — stays local to each device unless you move it yourself. Either platform can export a full JSON backup of all of it and restore it on the same device, or use it to move state to another device by hand.
 
 ---
 
@@ -239,8 +239,6 @@ open ComicArc.xcodeproj
 
 Pick the **ComicArc** scheme for macOS, **ComicArcPad** for iPad, or **ComicArcVision** for visionOS, and run. No external dependencies to install — ZIPFoundation ships as a vendored local Swift package, and CBR support bundles its own `unar`.
 
-The offline comics database itself isn't in this repository — it's a generated SQLite file published as a GitHub release asset. `Tools/gcd_extract.py` documents how it's built from a public GCD data dump, if you want to regenerate or update it.
-
 ---
 
 ## Acknowledgements
@@ -248,10 +246,9 @@ The offline comics database itself isn't in this repository — it's a generated
 - [ZIPFoundation](https://github.com/weichsel/ZIPFoundation) — CBZ archive extraction
 - [unar / The Unarchiver](https://theunarchiver.com/command-line) — CBR extraction, bundled
 - [Sparkle](https://sparkle-project.org/) — macOS auto-updates
-- [Grand Comics Database](https://www.comics.org/) (GCD) — source data for the offline comics database, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
 ---
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The license covers the application code only — not any content you import, and not the GCD-derived comics database data (CC BY-SA 4.0, see above).
+MIT. See [LICENSE](LICENSE). The license covers the application code only — not any content you import.

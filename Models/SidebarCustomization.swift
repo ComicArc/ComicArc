@@ -1,43 +1,31 @@
 import Foundation
 
 enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
-    case runs, tierLists, favoriteMoments, stats, history, duplicates, metadataConflicts
+    case favoriteMoments, stats, libraryHealth
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .runs:               return "Reading Paths"
-        case .tierLists:           return "Tier Lists"
         case .favoriteMoments:     return "Highlights"
-        case .stats:               return "Statistics"
-        case .history:             return "History"
-        case .duplicates:          return "Possible Duplicates"
-        case .metadataConflicts:   return "Needs Review"
+        case .stats:               return "Stats"
+        case .libraryHealth:       return "Library Health"
         }
     }
 
     var icon: String {
         switch self {
-        case .runs:               return "list.bullet.rectangle.portrait.fill"
-        case .tierLists:           return "square.stack.3d.up.fill"
         case .favoriteMoments:     return "star.circle.fill"
         case .stats:               return "chart.bar.xaxis"
-        case .history:             return "clock.fill"
-        case .duplicates:          return "doc.on.doc"
-        case .metadataConflicts:   return "exclamationmark.triangle"
+        case .libraryHealth:       return "stethoscope"
         }
     }
 
     var destination: AppDestination {
         switch self {
-        case .runs:               return .runs
-        case .tierLists:           return .tierLists
         case .favoriteMoments:     return .favoriteMoments
         case .stats:               return .stats
-        case .history:             return .history
-        case .duplicates:          return .duplicates
-        case .metadataConflicts:   return .metadataConflicts
+        case .libraryHealth:       return .libraryHealth
         }
     }
 }
@@ -63,7 +51,7 @@ enum SidebarCustomization {
     /// Daily-use Discover items that stay always visible in the sidebar; everything else collapses
     /// into "More" so day one doesn't show 9 equally-weighted rows at once. Shared by Mac's
     /// `SidebarView` and iPad's `iPadSidebar`.
-    static let coreDiscoverItems: Set<DiscoverItem> = [.runs, .stats, .history]
+    static let coreDiscoverItems: Set<DiscoverItem> = [.stats]
 
     static func visibleItems(orderRaw: String, hiddenRaw: String) -> [DiscoverItem] {
         let hidden = decodeHidden(hiddenRaw)

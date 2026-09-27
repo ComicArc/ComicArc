@@ -174,13 +174,10 @@ struct ComicArcApp: App {
                 Button("Library")          { vm.select(.library) }          .keyboardShortcut("1", modifiers: .command)
                 Button("Continue Reading") { vm.select(.continueReading) }  .keyboardShortcut("2", modifiers: .command)
                 Button("Favorites")        { vm.select(.favorites) }        .keyboardShortcut("3", modifiers: .command)
-                Button("Reading List")     { vm.select(.readingList) }      .keyboardShortcut("4", modifiers: .command)
+                Button("Reading Paths")    { vm.select(.runs) }             .keyboardShortcut("4", modifiers: .command)
                 Divider()
-                Button("Reading Paths") { vm.select(.runs) }    .keyboardShortcut("5", modifiers: .command)
-                Button("Statistics")    { vm.select(.stats) }           .keyboardShortcut("6", modifiers: .command)
-                Button("History")       { vm.select(.history) }         .keyboardShortcut("7", modifiers: .command)
-                Button("Tier Lists")    { vm.select(.tierLists) }       .keyboardShortcut("8", modifiers: .command)
-                Button("Highlights")    { vm.select(.favoriteMoments) } .keyboardShortcut("9", modifiers: .command)
+                Button("Stats")            { vm.select(.stats) }            .keyboardShortcut("5", modifiers: .command)
+                Button("Highlights")       { vm.select(.favoriteMoments) }  .keyboardShortcut("6", modifiers: .command)
                 Divider()
                 Button("Go Back") { vm.navigateBack() }.keyboardShortcut("[", modifiers: .command)
             }
@@ -192,17 +189,17 @@ struct ComicArcApp: App {
                 Divider()
                 Button(vm.bulkMode ? "Exit Selection Mode" : "Select Multiple") { vm.toggleBulkMode() }
                     .keyboardShortcut("e", modifiers: .command)
+                // ⇧⌘A, not ⌘A -- plain ⌘A belongs to the Edit menu's text Select All.
                 Button("Select All") { vm.selectAll() }
-                    .keyboardShortcut("a", modifiers: .command)
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(!vm.bulkMode)
                 Divider()
-                Button("Delete Selected") { vm.bulkDelete(fileService: fileService) }
+                Button("Delete Selected…") { NotificationCenter.default.post(name: .triggerBulkDelete, object: nil) }
                     .keyboardShortcut(.delete, modifiers: .command)
                     .disabled(!vm.bulkMode || vm.selectedComicIds.isEmpty)
             }
 
             CommandGroup(replacing: .help) {
-                Button("Show Tutorial") { NotificationCenter.default.post(name: .showTutorial, object: nil) }
                 Button("Keyboard Shortcuts…") { NotificationCenter.default.post(name: .showReaderShortcuts, object: nil) }
             }
         }

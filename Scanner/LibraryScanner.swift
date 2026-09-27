@@ -10,8 +10,8 @@ final class LibraryScanner: @unchecked Sendable {
     static let shared = LibraryScanner()
     private init() {}
 
-    private let db = DatabaseManager.shared
-    private let queue = DispatchQueue(label: "com.comicarc.scanner", qos: .utility)
+    let db = DatabaseManager.shared
+    let queue = DispatchQueue(label: "com.comicarc.scanner", qos: .utility)
 
     static var supportedExtensions: Set<String> {
         #if os(macOS)
@@ -136,8 +136,6 @@ final class LibraryScanner: @unchecked Sendable {
             pending.removeAll()
         }
 
-        var touchedEffectiveKeys: Set<String> = []
-
         func insertNewComic(url: URL, fp: String, hash: String?) {
             // A soft-deleted comic at this exact path is about to be revived (see _insertRow's
             // ON CONFLICT). Its cached cover may have been generated from a bad read while the
@@ -166,10 +164,6 @@ final class LibraryScanner: @unchecked Sendable {
             ))
             added += 1; knownPaths.insert(fp)
             if let hash { knownHashes.insert(hash) }
-            let effectiveSeries = meta.seriesGroup?.isEmpty == false ? meta.seriesGroup! : meta.series
-            let effectiveKey = meta.volume?.isEmpty == false
-                ? "\(meta.publisher):\(effectiveSeries):\(meta.volume!)" : "\(meta.publisher):\(effectiveSeries)"
-            touchedEffectiveKeys.insert(effectiveKey)
             if pending.count >= chunkSize { flushPending() }
         }
 
@@ -204,8 +198,7 @@ final class LibraryScanner: @unchecked Sendable {
             // publisher/character/series/title/issue-number it was tagged with at its OLD path
             // don't automatically follow -- a renamed folder (every file inside inherits a new
             // path) would otherwise leave every comic in it permanently tagged with whatever
-            // series name the old folder happened to have, disconnected from GCD matching,
-            // reading order, and series links for the real (new) series going forward. Reuses
+            // series name the old folder happened to have. Reuses
             // the same folder-metadata derivation `reparseAllMeta` uses for a full manual
             // resync, respecting meta_edited the same way, just scoped to only the files that
             // actually moved this scan instead of the whole library.
@@ -215,10 +208,6 @@ final class LibraryScanner: @unchecked Sendable {
                 let (pub, char, group, ser) = folderComponents(url: url, libraryPath: root)
                 let filename = url.deletingPathExtension().lastPathComponent
                 updates.append((id, pub, char, ser, filename, extractIssueNumber(from: filename), extractYear(from: filename), group))
-                if let ser {
-                    let key = "\(pub ?? "Unknown"):\(ser)"
-                    touchedEffectiveKeys.insert(key)
-                }
             }
             db.batchUpdateFolderMeta(updates)
         }
@@ -266,7 +255,6 @@ final class LibraryScanner: @unchecked Sendable {
         setState { $0.changed = somethingChanged }
         if !state.cancelled && somethingChanged {
             db.seedMissingPositions()
-            db.recomputeGCDMatches(affectedGroupKeys: anyRemoved ? nil : touchedEffectiveKeys)
         }
 
         setState { $0.running = false }
@@ -353,7 +341,7 @@ final class LibraryScanner: @unchecked Sendable {
         }
     }
 
-    private func fileHash(_ path: String) -> String? {
+    func fileHash(_ path: String) -> String? {
         guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
         defer { fh.closeFile() }
         let prefix = fh.readData(ofLength: 65536)
@@ -391,7 +379,7 @@ final class LibraryScanner: @unchecked Sendable {
     }
 
     static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
-    private let imageExts = LibraryScanner.imageExtensions
+    let imageExts = LibraryScanner.imageExtensions
 
     #if os(macOS)
     private func cbrPageCount(_ path: String) -> Int {
@@ -431,147 +419,6 @@ final class LibraryScanner: @unchecked Sendable {
         return images
     }
 
-    enum CBRConversionError: Error {
-        case unarNotFound, notACBR, extractionFailed, noImagesFound, destinationExists, zipWriteFailed
-    }
-
-    /// Converts one CBR/RAR archive to a CBZ at the same location, extracting every image (and
-    /// any ComicInfo.xml) via the same bundled `unar` CBR reading already depends on elsewhere in
-    /// this file, then re-zipping with ZIPFoundation -- reduces the app's own runtime dependency
-    /// on unar/lsar being present for that specific file going forward. Runs on `queue` like every
-    /// other scan-adjacent archive operation, never on the caller's thread.
-    func convertCBRToCBZ(path: String) -> Result<URL, CBRConversionError> {
-        let sourceURL = URL(fileURLWithPath: path)
-        guard sourceURL.pathExtension.lowercased() == "cbr" else { return .failure(.notACBR) }
-        guard let unar = ExternalTool.shared.which("unar") else { return .failure(.unarNotFound) }
-
-        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        _ = ExternalTool.shared.shell(unar, args: ["-o", tmpDir.path, "-force-overwrite", path])
-
-        guard let enumerator = FileManager.default.enumerator(
-            at: tmpDir, includingPropertiesForKeys: [.isRegularFileKey]
-        ) else { return .failure(.extractionFailed) }
-
-        var entryFiles: [URL] = []
-        for case let fileURL as URL in enumerator {
-            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-            let name = fileURL.lastPathComponent
-            if imageExts.contains(fileURL.pathExtension.lowercased()) || name.lowercased() == "comicinfo.xml" {
-                entryFiles.append(fileURL)
-            }
-        }
-        guard !entryFiles.isEmpty else { return .failure(.noImagesFound) }
-        entryFiles.sort { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-
-        let destURL = sourceURL.deletingPathExtension().appendingPathExtension("cbz")
-        guard !FileManager.default.fileExists(atPath: destURL.path) else { return .failure(.destinationExists) }
-
-        guard let archive = try? Archive(url: destURL, accessMode: .create, pathEncoding: nil) else { return .failure(.zipWriteFailed) }
-        do {
-            for file in entryFiles {
-                try archive.addEntry(with: file.lastPathComponent, relativeTo: file.deletingLastPathComponent(),
-                                     compressionMethod: .deflate)
-            }
-        } catch {
-            try? FileManager.default.removeItem(at: destURL)
-            return .failure(.zipWriteFailed)
-        }
-        return .success(destURL)
-    }
-
-    /// Full pipeline for one comic: convert its CBR to CBZ, point the library record at the new
-    /// file (with a fresh hash -- see `updateFilePathAndHash`'s doc comment), then remove the
-    /// original .cbr so the library doesn't end up with both.
-    private func convertAndUpdateLibraryEntry(comicId: Int64, path: String) -> Result<URL, CBRConversionError> {
-        let result = convertCBRToCBZ(path: path)
-        guard case .success(let newURL) = result else { return result }
-        guard let newHash = fileHash(newURL.path) else {
-            try? FileManager.default.removeItem(at: newURL)
-            return .failure(.zipWriteFailed)
-        }
-        db.updateFilePathAndHash(id: comicId, newPath: newURL.path, newHash: newHash)
-        try? FileManager.default.removeItem(at: URL(fileURLWithPath: path))
-        return .success(newURL)
-    }
-
-    /// Batch entry point for the "Convert CBR to CBZ" Settings tool -- runs on `queue`, same as
-    /// every other archive-touching operation in this file, so it can never race a concurrent scan.
-    func convertAllCBRToCBZ(_ comics: [(id: Int64, path: String)],
-                            onProgress: @escaping (Int, Int) -> Void,
-                            completion: @escaping (Int, [(path: String, error: CBRConversionError)]) -> Void) {
-        queue.async { [self] in
-            var successCount = 0
-            var failures: [(path: String, error: CBRConversionError)] = []
-            for (i, item) in comics.enumerated() {
-                switch convertAndUpdateLibraryEntry(comicId: item.id, path: item.path) {
-                case .success: successCount += 1
-                case .failure(let err): failures.append((item.path, err))
-                }
-                let done = i + 1
-                DispatchQueue.main.async { onProgress(done, comics.count) }
-            }
-            DispatchQueue.main.async { completion(successCount, failures) }
-        }
-    }
-
-    enum ComicInfoWriteError: Error {
-        case notACBZ, archiveOpenFailed, zipWriteFailed
-    }
-
-    /// The exact field-name set this app's own reader (`comicInfoXML` above) looks for -- writing
-    /// back under the same names guarantees a comic ComicArc itself writes then re-scans reads
-    /// back identically, which is the write-back feature's core safety requirement. CBZ only (no
-    /// RAR write support); a narrow, explicitly-listed field set deliberately smaller than every
-    /// field this app tracks -- only the identity fields that map cleanly onto the standard
-    /// schema, not app-only concepts like tags or manual issue orders.
-    func writeComicInfoBack(comic: Comic) -> Result<Void, ComicInfoWriteError> {
-        guard comic.filePath.lowercased().hasSuffix(".cbz") else { return .failure(.notACBZ) }
-        guard let archive = try? Archive(url: URL(fileURLWithPath: comic.filePath), accessMode: .update, pathEncoding: nil) else {
-            return .failure(.archiveOpenFailed)
-        }
-
-        let existingEntry = archive.first { $0.path.lowercased().hasSuffix("comicinfo.xml") }
-        let entryPath = existingEntry?.path ?? "ComicInfo.xml"
-
-        var existingRoot: XMLElement?
-        if let existingEntry {
-            var data = Data()
-            _ = try? archive.extract(existingEntry, consumer: { data.append($0) })
-            existingRoot = try? XMLDocument(data: data).rootElement()
-        }
-        // Preserves every field this app doesn't manage (Summary, Notes, Web, LanguageISO, etc.)
-        // untouched if a ComicInfo.xml already exists; starts fresh only if there was none.
-        let root = existingRoot ?? XMLElement(name: "ComicInfo")
-
-        func setField(_ name: String, _ value: String?) {
-            root.elements(forName: name).forEach { $0.detach() }
-            guard let value, !value.isEmpty else { return }
-            root.addChild(XMLElement(name: name, stringValue: value))
-        }
-        setField("Series", comic.series)
-        setField("Title", comic.title)
-        setField("IssueNumber", comic.issueNumber)
-        setField("Publisher", comic.publisher)
-        setField("Writer", comic.writer)
-        setField("Penciller", comic.penciller)
-        setField("Volume", comic.volume)
-        if let year = comic.year { setField("Year", String(year)) }
-
-        let xmlData = XMLDocument(rootElement: root).xmlData(options: .nodePrettyPrint)
-        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".xml")
-        do {
-            try xmlData.write(to: tmpURL)
-            defer { try? FileManager.default.removeItem(at: tmpURL) }
-            if let existingEntry { try archive.remove(existingEntry) }
-            try archive.addEntry(with: entryPath, fileURL: tmpURL, compressionMethod: .deflate)
-        } catch {
-            return .failure(.zipWriteFailed)
-        }
-        return .success(())
-    }
     #endif
 
     private struct ComicMeta {
@@ -796,9 +643,7 @@ final class LibraryScanner: @unchecked Sendable {
     /// Fallback for the overwhelming majority of real libraries that have no ComicInfo.xml at all
     /// (confirmed: <1% of comics in a real 1900+ issue library had it) -- without this, `year` is
     /// simply never populated for those files even though the year is often sitting right in the
-    /// filename already, which starves GCD matching of its single strongest disambiguating signal
-    /// (used to break ties between same-named volumes/restarts, e.g. two different real runs both
-    /// dumped in one loosely-organized folder with low, overlapping issue numbers).
+    /// filename already.
     func extractYear(from filename: String) -> Int? {
         guard let regex = Self.yearPattern,
               let match = regex.firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)),

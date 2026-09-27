@@ -27,15 +27,17 @@ extension LibraryViewModel {
     }
 
     func bulkAddToReadingList() {
-        db.setInReadingList(visibleSelectedIds(), true)
+        db.setInReadingList(comics.filter { selectedComicIds.contains($0.id) }.map(\.id), true)
         selectedComicIds.removeAll()
         reload()
+        refreshRuns()
     }
 
     func bulkRemoveFromReadingList() {
         db.setInReadingList(visibleSelectedIds(), false)
         selectedComicIds.removeAll()
         reload()
+        refreshRuns()
     }
 
     /// Unlike delete/run-delete/tier-list-delete, this previously had no undo -- a bulk reassign

@@ -28,8 +28,6 @@ struct SortPicker: View {
 
 struct FilterPicker: View {
     @EnvironmentObject var vm: LibraryViewModel
-    @State private var showSaveViewPrompt = false
-    @State private var saveViewNameDraft = ""
 
     private var isActive: Bool { vm.unreadOnly }
 
@@ -44,33 +42,12 @@ struct FilterPicker: View {
                     Text("Unread Only")
                 }
             }
-
-
-            Divider()
-
-            Button {
-                saveViewNameDraft = ""
-                showSaveViewPrompt = true
-            } label: {
-                Label("Save Current View…", systemImage: "pin")
-            }
         } label: {
             Label("Filter", systemImage: isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 12))
         }
         .help(isActive ? "Filters active" : "Filter by read status")
         .accessibilityLabel(isActive ? "Filters active" : "Filter comics")
-        .alert("Save Current View", isPresented: $showSaveViewPrompt) {
-            TextField("Name", text: $saveViewNameDraft)
-            Button("Save") {
-                let trimmed = saveViewNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
-                vm.saveCurrentAsView(name: trimmed)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Remembers the current sort, filter, and search so you can jump straight back to it from the sidebar.")
-        }
     }
 }
 

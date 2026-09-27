@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Shared by Run and TierList edit sheets -- identical except Run has an extra buy/info link
-/// field, exposed here as an optional binding (`nil` hides it entirely, matching TierList).
-struct EditCollectionView<T: NamedCollection>: View {
+/// The Reading Path edit sheet. `buyLink` is optional (`nil` hides that field).
+struct EditCollectionView: View {
     let noun: String
-    @Binding var item: T
+    @Binding var item: Run
     var buyLink: Binding<String>? = nil
     let onSave: (_ title: String, _ description: String, _ buyLink: String?) -> Void
 
@@ -13,7 +12,7 @@ struct EditCollectionView<T: NamedCollection>: View {
     @State private var description: String
     @State private var buyLinkText: String
 
-    init(noun: String, item: Binding<T>, buyLink: Binding<String>? = nil,
+    init(noun: String, item: Binding<Run>, buyLink: Binding<String>? = nil,
          onSave: @escaping (String, String, String?) -> Void) {
         self.noun = noun
         self._item = item

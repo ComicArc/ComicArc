@@ -38,7 +38,6 @@ struct MetadataConflictsView: View {
             }
         }
         .background(Design.appBackground)
-        .navigationTitle("Needs Review")
         .task { vm.refreshDuplicates() }
     }
 

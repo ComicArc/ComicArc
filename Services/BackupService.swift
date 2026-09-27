@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum BackupService {
-    /// Exports a specific, already-curated set of comics (a series, a reading path, a tier list)
+    /// Exports a specific, already-curated set of comics (a series or a reading path)
     /// as a plain CSV -- distinct from `export()`'s full-library JSON backup, which round-trips
     /// through the app but isn't meant for opening in a spreadsheet to print a checklist, share
     /// a want-list, or hand off to another tool.
@@ -47,8 +47,6 @@ enum BackupService {
                 let backup: [String: Any] = await Task.detached(priority: .utility) {
                     let db = DatabaseManager.shared
                     let comics = db.allComics()
-                    let manualMatchesById = Dictionary(uniqueKeysWithValues:
-                        db.manualGCDMatchDetails().map { ($0.comicId, $0) })
 
                     let comicsJSON: [[String: Any]] = comics.map { c in
                         var d: [String: Any] = ["id": c.id, "title": c.title, "file_path": c.filePath,
@@ -62,16 +60,6 @@ enum BackupService {
                         let marks = db.bookmarks(comicId: c.id)
                         if !marks.isEmpty {
                             d["bookmarks"] = marks.map { ["page": $0.page, "label": $0.label, "is_favorite": $0.isFavorite] }
-                        }
-                        // A manual GCD match is a deliberate user choice (via the "Fix Match"
-                        // picker) -- worth preserving across a restore, unlike an automatic match,
-                        // which is disposable derived data the next scan regenerates on its own.
-                        if let manual = manualMatchesById[c.id] {
-                            var match: [String: Any] = ["gcd_issue_id": manual.gcdIssueId]
-                            if let s = manual.seriesName { match["gcd_series_name"] = s }
-                            if let n = manual.issueNumber { match["gcd_issue_number"] = n }
-                            if let cd = manual.coverDate { match["gcd_cover_date"] = cd }
-                            d["gcd_manual_match"] = match
                         }
                         return d
                     }
@@ -87,22 +75,13 @@ enum BackupService {
                         return d
                     }
 
-                    let tierListsJSON: [[String: Any]] = db.allTierLists().map { tierList in
-                        var d: [String: Any] = ["title": tierList.title, "description": tierList.description]
-                        d["items"] = db.tierListItems(tierListId: tierList.id).compactMap { item -> [String: Any]? in
-                            guard let path = pathById[item.comic.id] else { return nil }
-                            return ["file_path": path, "tier": item.tier, "position": item.position]
-                        }
-                        return d
-                    }
-
                     let overridesJSON: [[String: Any]] = db.allReadingOrderOverrides().map { o in
                         ["file_path": o.filePath, "position": o.position, "reason": o.reason]
                     }
 
                     // Manual sidebar/grid reordering and a series' custom "use this issue's cover"
                     // pick -- deliberate user customizations with no automatic way to regenerate
-                    // them, same reasoning as the manual GCD match above. Previously silently
+                    // them. Previously silently
                     // dropped by both export and import.
                     let seriesOrderJSON: [[String: Any]] = db.allSeriesOrderPositions().map {
                         ["group_name": $0.groupName, "publisher": $0.publisher, "series": $0.series, "position": $0.position]
@@ -119,7 +98,6 @@ enum BackupService {
                     }
 
                     return ["comics": comicsJSON, "runs": runsJSON,
-                            "tier_lists": tierListsJSON,
                             "reading_order_overrides": overridesJSON,
                             "series_order": seriesOrderJSON, "character_order": characterOrderJSON,
                             "publisher_order": publisherOrderJSON, "series_covers": seriesCoversJSON]
@@ -186,14 +164,6 @@ enum BackupService {
                                 if let fav = m["is_favorite"] as? Bool, fav { db.setBookmarkFavorite(comicId: comicId, page: page, isFavorite: true) }
                             }
                         }
-                        if let match = item["gcd_manual_match"] as? [String: Any], let gcdIssueId = match["gcd_issue_id"] as? Int {
-                            db.restoreManualGCDMatch(
-                                comicId: comicId, gcdIssueId: gcdIssueId,
-                                seriesName: match["gcd_series_name"] as? String,
-                                issueNumber: match["gcd_issue_number"] as? String,
-                                coverDate: match["gcd_cover_date"] as? String
-                            )
-                        }
                     }
 
                     if let runsArr = root?["runs"] as? [[String: Any]] {
@@ -219,23 +189,6 @@ enum BackupService {
                                         db.setRunItemNotes(runItem.id, notes: notes)
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    if let tierListsArr = root?["tier_lists"] as? [[String: Any]] {
-                        for tl in tierListsArr {
-                            guard let title = tl["title"] as? String,
-                                  let items = tl["items"] as? [[String: Any]], !items.isEmpty else { continue }
-                            let tierListId = db.tierListId(withTitle: title)
-                                ?? db.createTierList(title: title, description: tl["description"] as? String ?? "")
-                            let byTier = Dictionary(grouping: items) { $0["tier"] as? String ?? "B" }
-                            for (tier, tierItems) in byTier {
-                                let orderedComicIds: [Int64] = tierItems
-                                    .sorted { ($0["position"] as? Int ?? 0) < ($1["position"] as? Int ?? 0) }
-                                    .compactMap { i in (i["file_path"] as? String).flatMap { currentIdByPath[$0] } }
-                                guard !orderedComicIds.isEmpty else { continue }
-                                db.addToTierList(tierListId: tierListId, comicIds: orderedComicIds, tier: tier)
                             }
                         }
                     }

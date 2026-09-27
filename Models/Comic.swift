@@ -25,9 +25,6 @@ struct Comic: Identifiable, Equatable, Hashable {
     var isFavorite: Bool = false
     var inReadingList: Bool = false
 
-    var gcdMatchConfidence: Int? = nil
-    var gcdSeriesName: String? = nil
-    var gcdIssueNumber: String? = nil
     /// Why this comic is soft-deleted -- "user" (explicitly deleted) or "missing" (its file
     /// vanished from disk during a scan). Nil for pre-existing soft-deletes, treated as "user".
     /// Only meaningful when `deletedAt` is set; irrelevant otherwise.
@@ -71,33 +68,6 @@ struct RunItem: Identifiable {
     var notes: String
 
     var isFinished: Bool { comic.isFinished }
-}
-
-/// The fixed set of tier buckets a Tier List sorts comics into, in display order (best first).
-/// Fixed rather than user-customizable to keep the feature to the classic tier-list shape --
-/// still a real ranking tool without needing a whole tier-management UI.
-enum ComicTier: String, CaseIterable, Identifiable {
-    case s = "S", a = "A", b = "B", c = "C", d = "D", f = "F"
-    var id: String { rawValue }
-}
-
-struct TierList: Identifiable, Equatable, Hashable {
-    let id: Int64
-    var title: String
-    var description: String
-    var comicCount: Int = 0
-    var coverImagePath: String? = nil
-
-    // Explicit id-only equality -- see Run for why.
-    static func == (lhs: TierList, rhs: TierList) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
-}
-
-struct TierListItem: Identifiable {
-    let id: Int64
-    var comic: Comic
-    var tier: String
-    var position: Int
 }
 
 enum TagCategory: String, CaseIterable {

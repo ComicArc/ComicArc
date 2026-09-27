@@ -24,12 +24,6 @@ struct ReadingHistoryView: View {
     var body: some View {
         let filtered = filteredHistory(history)
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                SignageLabel(text: "Reading History", size: 20, kerning: 1.5, tint: Design.brandGold)
-                Spacer()
-            }
-            .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 16)
-
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if history.isEmpty {
@@ -58,7 +52,6 @@ struct ReadingHistoryView: View {
                 }
             }
         }
-        .ambientBackground()
         .task { await load() }
     }
 

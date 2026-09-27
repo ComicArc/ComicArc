@@ -10,15 +10,34 @@ struct StatsView: View {
     @State private var goalDraft   = ""
     @State private var showGoalInputError = false
     @State private var showYearInReview = false
+    @State private var tab: Tab = .overview
+
+    /// Statistics and reading history are one screen; History is a tab, not a separate section.
+    private enum Tab: String, CaseIterable { case overview = "Overview", history = "History" }
 
     private let gridColumns = [GridItem(.adaptive(minimum: 320, maximum: 480), spacing: 20, alignment: .top)]
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            heading
+                .padding(.top, 24).padding(.bottom, 16)
+            if tab == .history {
+                ReadingHistoryView()
+            } else {
+                overview
+            }
+        }
+        .background(Design.appBackground)
+        .task { await loadStats() }
+        .sheet(isPresented: $showYearInReview) { YearInReviewView() }
+    }
+
+    @ViewBuilder
+    private var overview: some View {
         Group {
             if let stats {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 28) {
-                        heading
                         heroRow(stats)
                         readingGoalCard
 
@@ -33,27 +52,29 @@ struct StatsView: View {
                         if !stats.recentlyRead.isEmpty { recentlyReadSection(stats) }
                         Spacer(minLength: 40)
                     }
-                    .padding(.top, 24)
                 }
             } else {
                 ProgressView("Loading Stats…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Design.appBackground)
-        .task { await loadStats() }
-        .sheet(isPresented: $showYearInReview) { YearInReviewView() }
     }
 
     private var heading: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 SignageLabel(text: "Your Stats", size: 30, kerning: 2, tint: Design.brandGold)
-                Text("Everything you've read, rated, and collected.")
+                Text("Everything you've read and collected.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             Button("Year in Review") { showYearInReview = true }
                 .buttonStyle(.bordered)
         }

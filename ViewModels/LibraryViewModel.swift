@@ -9,16 +9,12 @@ enum AppDestination: Hashable, Codable {
     case library
     case continueReading
     case favorites
-    case readingList
     case publisher(String)
     case tag(String)
     case runs
-    case tierLists
     case favoriteMoments
     case stats
-    case history
-    case duplicates
-    case metadataConflicts
+    case libraryHealth
     case settings
 
     var title: String {
@@ -26,16 +22,12 @@ enum AppDestination: Hashable, Codable {
         case .library:              return "All Comics"
         case .continueReading:      return "Continue Reading"
         case .favorites:            return "Favorites"
-        case .readingList:          return "Reading List"
         case .publisher(let p):     return p
         case .tag(let t):           return "#\(t)"
         case .runs:                 return "Reading Paths"
-        case .tierLists:            return "Tier Lists"
         case .favoriteMoments:      return "Highlights"
-        case .stats:                return "Statistics"
-        case .history:              return "History"
-        case .duplicates:           return "Possible Duplicates"
-        case .metadataConflicts:    return "Needs Review"
+        case .stats:                return "Stats"
+        case .libraryHealth:        return "Library Health"
         case .settings:             return "Settings"
         }
     }
@@ -45,16 +37,12 @@ enum AppDestination: Hashable, Codable {
         case .library:              return "books.vertical.fill"
         case .continueReading:      return "book.open.fill"
         case .favorites:            return "heart.fill"
-        case .readingList:          return "bookmark.fill"
         case .publisher:            return "building.columns"
         case .tag:                  return "tag"
         case .runs:                 return "list.bullet.rectangle.portrait.fill"
-        case .tierLists:            return "square.stack.3d.up.fill"
         case .favoriteMoments:      return "star.circle.fill"
         case .stats:                return "chart.bar.xaxis"
-        case .history:              return "clock.fill"
-        case .duplicates:           return "doc.on.doc"
-        case .metadataConflicts:    return "exclamationmark.triangle"
+        case .libraryHealth:        return "stethoscope"
         case .settings:             return "gear"
         }
     }
@@ -73,7 +61,6 @@ final class LibraryViewModel: ObservableObject {
     // finished favorite series just vanished from the home screen with no nudge toward its
     // next unread issue.
     @Published var readNextSuggestions: [Comic] = []
-    @Published var savedViews: [SavedLibraryView] = SavedLibraryViews.read()
     @Published var destination: AppDestination = .library
     @Published var selectedSeries:    String? = nil
     @Published var searchText:        String = ""
@@ -89,7 +76,6 @@ final class LibraryViewModel: ObservableObject {
     @Published var scanState:           LibraryScanner.ScanState = .init()
     @Published var isScanning:          Bool = false
     @Published var showScanReport:      Bool = false
-    @Published var showImportWizard:    Bool = false
     @Published var libraryHealthReport: LibraryHealthReport? = nil
     @Published var renameCandidateCount: Int = 0
     /// Comics the scanner has given up retrying (zero-page after 3 rescans) -- lets the library
@@ -132,14 +118,12 @@ final class LibraryViewModel: ObservableObject {
     @Published var isLibraryAvailable:  Bool = true
     @Published var selectedComic:     Comic? = nil
     @Published var selectedRun:       Run? = nil
-    @Published var selectedTierList:  TierList? = nil
     /// The full list, kept live here rather than fetched ad hoc by whichever view needs it --
-    /// `ComicCard`'s "Add to Reading Path"/"Add to Tier List" submenus used to call
-    /// `DatabaseManager.shared.allRuns()`/`.allTierLists()` synchronously inside their own
+    /// `ComicCard`'s "Add to Reading Path" submenu used to call
+    /// `DatabaseManager.shared.allRuns()` synchronously inside their own
     /// `.contextMenu` closure (blocking the main thread every time a card's menu opened); reading
     /// from here instead means that data is already warm.
-    @Published var runs:      [Run] = []
-    @Published var tierLists: [TierList] = []
+    @Published var runs: [Run] = []
     /// The reader-presentation subsystem, genuinely independent of library data/navigation --
     /// see `ReaderCoordinator`'s doc comment. `readerComic`/`readerInitialPage`/`readerRunId`
     /// below are thin passthroughs so every existing call site keeps working unchanged.
@@ -180,15 +164,11 @@ final class LibraryViewModel: ObservableObject {
     var selectedSection: SidebarSection {
         switch destination {
         case .runs:            return .runs
-        case .tierLists:       return .tierLists
         case .favoriteMoments: return .favoriteMoments
         case .stats:           return .stats
-        case .history:         return .history
-        case .duplicates:      return .duplicates
-        case .metadataConflicts: return .metadataConflicts
+        case .libraryHealth:   return .libraryHealth
         case .continueReading: return .continueReading
         case .favorites:       return .favorites
-        case .readingList:     return .readingList
         case .settings:        return .settings
         default:               return .library
         }
@@ -204,7 +184,7 @@ final class LibraryViewModel: ObservableObject {
         return nil
     }
 
-    enum SidebarSection: Hashable { case library, continueReading, favorites, readingList, runs, tierLists, favoriteMoments, stats, history, duplicates, metadataConflicts, settings }
+    enum SidebarSection: Hashable { case library, continueReading, favorites, runs, favoriteMoments, stats, libraryHealth, settings }
 
     enum BrowseLevel { case characters, seriesGroups, issues }
     var browseLevel: BrowseLevel {
@@ -301,7 +281,6 @@ final class LibraryViewModel: ObservableObject {
         rehashLibraryIfNeeded()
         refreshDuplicates()
         refreshRuns()
-        refreshTierLists()
 
         // Scanning at launch (and every time the app is brought back to the foreground) is
         // driven uniformly by `scenePhase == .active` in both app entry points (ComicArcMacApp,
@@ -348,7 +327,6 @@ final class LibraryViewModel: ObservableObject {
     var healthGeneration = 0
     var renameCandidatesGeneration = 0
     var runsGeneration = 0
-    var tierListsGeneration = 0
 
     func reload() {
         reloadWorkItem?.cancel()
@@ -383,7 +361,7 @@ final class LibraryViewModel: ObservableObject {
             let tags = db.allTags()
 
             guard section == .library || section == .continueReading
-                || section == .favorites || section == .readingList else {
+                || section == .favorites else {
                 await MainActor.run {
                     guard gen == self.reloadGeneration else { return }
                     self.publishers = pubs; self.allTags = tags; self.isLoading = false
@@ -397,9 +375,6 @@ final class LibraryViewModel: ObservableObject {
                 loaded = db.inProgress()
             case .favorites:
                 loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, favoritesOnly: true,
-                                      unreadOnly: unread)
-            case .readingList:
-                loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, readingListOnly: true,
                                       unreadOnly: unread)
             default:
                 let character    = group?.character

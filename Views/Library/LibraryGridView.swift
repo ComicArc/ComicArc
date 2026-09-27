@@ -91,7 +91,6 @@ struct LibraryGridView: View {
         switch vm.selectedSection {
         case .continueReading: return "book.open"
         case .favorites:       return "heart"
-        case .readingList:     return "bookmark"
         default:
             if vm.activeTag != nil        { return "tag" }
             if vm.activePublisher != nil  { return "building.2" }
@@ -104,7 +103,6 @@ struct LibraryGridView: View {
         switch vm.selectedSection {
         case .continueReading: return "Nothing In Progress"
         case .favorites:       return "No Favorites"
-        case .readingList:     return "Reading List Is Empty"
         default:
             if let tag = vm.activeTag        { return "No \"\(tag)\" Comics" }
             if let pub = vm.activePublisher  { return "No \(pub) Comics" }
@@ -120,8 +118,6 @@ struct LibraryGridView: View {
             return "Start reading any comic and it will appear here."
         case .favorites:
             return "Open any comic's detail page and tap the heart to add it here."
-        case .readingList:
-            return "Right-click any comic and choose Add to Reading List to queue it up."
         default:
             if let tag = vm.activeTag        { return "No comics are tagged \"\(tag)\"." }
             if let pub = vm.activePublisher  { return "No \(pub) comics found in your library." }
@@ -134,7 +130,7 @@ struct LibraryGridView: View {
     @ViewBuilder
     private var emptyAction: some View {
         switch vm.selectedSection {
-        case .continueReading, .favorites, .readingList:
+        case .continueReading, .favorites:
             Button("Browse Library") { vm.select(.library) }
                 .buttonStyle(.borderedProminent)
         default:
