@@ -176,6 +176,7 @@ Press `?` inside the reader any time for the full list.
 | Key | Action |
 |---|---|
 | `←` `→` / `↑` `↓` | Previous / next page |
+| `Space` / `⇧Space`, `Page Down` / `Page Up` | Next / previous page |
 | `Home` / `End` | First / last page |
 | `+` `-` / `0` | Zoom in / out / reset |
 | `F` | Toggle fullscreen |
@@ -183,7 +184,7 @@ Press `?` inside the reader any time for the full list.
 | `B` | Bookmark current page |
 | `D` | Toggle double-page spread |
 | `R` | Toggle RTL direction |
-| `Esc` | Stop autoplay, or close reader |
+| `Esc` | Stop autoplay, close the filmstrip, or close the reader |
 
 The main window also supports `⌘1`–`⌘6` (Library, Continue Reading, Favorites, Reading Paths, Stats, Highlights) to jump to any sidebar section, `⌘[` to go back, `⌘E` to toggle bulk-select, `⇧⌘R` to rescan, and `⇧⌘F` to open Clean Up Filenames.
 

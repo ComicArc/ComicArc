@@ -28,7 +28,7 @@ extension LibraryViewModel {
         db.deleteRun(run.id)
         refreshRuns()
         NotificationCenter.default.post(name: .runDeleted, object: nil)
-        offerUndo("Reading order \"\(run.title)\" deleted") { [weak self] in
+        offerUndo("Reading Path \"\(run.title)\" deleted") { [weak self] in
             guard let self else { return }
             let newId = self.db.createRun(title: run.title, description: run.description)
             if let buyLink = run.buyLink, !buyLink.isEmpty {
@@ -49,8 +49,6 @@ extension LibraryViewModel {
             NotificationCenter.default.post(name: .runDeleted, object: nil)
         }
     }
-
-    func addToRun(runId: Int64, comicIds: [Int64]) { db.addToRun(runId: runId, comicIds: comicIds) }
 
     func removeFromRunWithUndo(runId: Int64, items: [RunItem], onRestored: @escaping () -> Void = {}) {
         let ids = items.map(\.comic.id)
@@ -96,7 +94,11 @@ extension LibraryViewModel {
     func addToRunWithUndo(runId: Int64, runTitle: String, comicIds: [Int64]) {
         let already = db.comicIdsInRun(runId: runId)
         let added = comicIds.filter { !already.contains($0) }
-        guard !added.isEmpty else { return }
+        guard !added.isEmpty else {
+            showNotice(comicIds.count == 1 ? "Already in \u{201C}\(runTitle)\u{201D}"
+                                           : "All of these are already in \u{201C}\(runTitle)\u{201D}")
+            return
+        }
         db.addToRun(runId: runId, comicIds: added)
         refreshRuns()
         NotificationCenter.default.post(name: .runUpdated, object: nil)

@@ -12,7 +12,7 @@ private func runListConfig(_ vm: LibraryViewModel) -> CollectionListConfig {
         emptyMessage: "Group comics into an ordered reading path to track multi-series arcs.",
         cardIcon: "list.bullet.rectangle.portrait",
         subtitle: { $0.comicCount > 0 ? "\($0.readCount)/\($0.comicCount) read" : "Empty" },
-        deleteWithUndo: nil, // Runs are only deletable from their detail screen, not the list.
+        deleteWithUndo: { vm.deleteRunWithUndo($0) },
         fetch: { await Task.detached(priority: .userInitiated) { DatabaseManager.shared.allRuns() }.value },
         reorder: { vm.reorderRuns(orderedIds: $0) },
         create: { title, desc in vm.createRun(title: title, description: desc) },
@@ -109,8 +109,8 @@ struct RunDetailView: View {
                 }
             } else {
                 List {
-                    ForEach(items) { item in
-                        RunItemRow(item: item, runId: run.id, onChange: loadItems)
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        RunItemRow(item: item, number: index + 1, runId: run.id, onChange: loadItems)
                     }
                     .onMove { from, to in reorder(from: from, to: to) }
                     .onDelete { indices in
@@ -141,7 +141,7 @@ struct RunDetailView: View {
                 title: run.title,
                 alreadyInCollection: { DatabaseManager.shared.comicIdsInRun(runId: run.id) },
                 onAdd: { ids in
-                    LibraryViewModel.shared.addToRun(runId: run.id, comicIds: ids)
+                    LibraryViewModel.shared.addToRunWithUndo(runId: run.id, runTitle: currentRun.title, comicIds: ids)
                     loadItems()
                 }
             )
@@ -264,6 +264,8 @@ struct RunDetailView: View {
 
 struct RunItemRow: View {
     let item:     RunItem
+    /// 1-based place in the path as shown -- stored positions can have gaps after removals.
+    let number:   Int
     let runId:    Int64
     let onChange: () -> Void
 
@@ -273,7 +275,7 @@ struct RunItemRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("#\(item.position + 1)")
+            Text("#\(number)")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .frame(width: 28, alignment: .trailing)
@@ -340,6 +342,8 @@ struct RunItemRow: View {
             Image(systemName: "line.3.horizontal").foregroundStyle(.quaternary)
         }
         .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { LibraryViewModel.shared.openReader(item.comic, runId: runId) }
         .contextMenu {
             Button("Open") { LibraryViewModel.shared.openReader(item.comic, runId: runId) }
             Divider()
@@ -361,7 +365,7 @@ struct RunItemRow: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("#\(item.position + 1) \(item.comic.title)")
+        .accessibilityLabel("#\(number) \(item.comic.title)")
         .accessibilityValue(item.comic.isFinished ? "Read" : item.comic.isStarted ? "In progress" : "Unread")
         .accessibilityHint("Double-tap to open")
         .accessibilityAddTraits(.isButton)

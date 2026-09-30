@@ -19,7 +19,8 @@ struct CharacterGroupGridView: View {
                     NowReadingHero(comic: current)
                     Divider().overlay(Design.borderColor).padding(.vertical, 6)
                 }
-                if !vm.inProgressComics.isEmpty {
+                // The first in-progress comic is already the Now Reading hero above.
+                if vm.inProgressComics.count > 1 {
                     ContinueReadingShelf()
                     Divider().overlay(Design.borderColor).padding(.vertical, 6)
                 }

@@ -25,6 +25,7 @@ extension LibraryViewModel {
             $0.progress = page
             $0.finishedAt = now
         }
+        refreshHomeShelves()
     }
 
     func markUnread(_ comic: Comic) {
@@ -34,15 +35,18 @@ extension LibraryViewModel {
             $0.progress = 0
             $0.finishedAt = nil
         }
+        refreshHomeShelves()
     }
     func markRead(_ comics: [Comic]) {
         db.setFinished(comics.map { (comicId: $0.id, lastPage: max(0, $0.pageCount - 1)) }, finished: true)
         reload()
+        refreshHomeShelves()
     }
 
     func markUnread(_ comics: [Comic]) {
         db.setFinished(comics.map { (comicId: $0.id, lastPage: 0) }, finished: false)
         reload()
+        refreshHomeShelves()
     }
 
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) { db.updateMeta(comicId: comicId, fields: fields) }

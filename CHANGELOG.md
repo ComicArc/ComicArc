@@ -35,10 +35,27 @@ ComicArc is refocused on being a library and a reader. Removed:
 - The health report no longer lists every comic without ComicInfo.xml.
 - Sparkle's version is pinned via a tracked Package.resolved.
 
+### Polish
+- Reader: Space / ⇧Space and Page Down / Page Up turn pages; Escape closes the page filmstrip before the reader.
+- Toolbar: removed the duplicate Settings button and the Resync button (still in Library Health, Settings, and the menu bar); Scan uses a refresh icon so it no longer looks like search.
+- Discover shows Stats, Highlights, and Library Health directly instead of hiding two behind "More".
+- Issue page: "Add to Path" opens the path menu directly, and "Appears in Reading Paths" entries open that path.
+- Read Next suggests the next issue of series you've recently finished an issue of, instead of only series with a favorited issue.
+- Reading Paths can be deleted from the list's right-click menu.
+- Removed the obsolete "CBR Support (requires unar)" setting — CBR support is bundled and always on.
+- Updated outdated wording in Settings (Sync, backup contents) and several tooltips.
+
 ### Fixed
 - Bulk Mark Read/Unread and Mark All as Read now actually set/clear finished status.
 - Reading Path and series/character progress counts use the finished flag, matching the rest of the app.
 - The iPad reader no longer flashes its controls when a comic opens or on every page turn; tap the middle of the page to show them.
+- The Now Reading comic no longer also appears as the first Continue Reading card right below it.
+- Read Next cards no longer show "p. 1" and an empty progress bar for issues you haven't started, and their menu says "Read".
+- Marking a comic read/unread updates the home shelves right away.
+- The sidebar's Continue Reading count is the real total (it stopped at 8).
+- Reading Path rows number continuously after a comic is removed, and open with a double-click.
+- Adding a single comic to a Reading Path confirms it (with Undo, or "Already in …"), and updates the path's count and the issue page right away.
+- Deleting a Reading Path's undo message says "Reading Path", not "Reading order".
 - The iPad and visionOS targets build again (missing BackupService membership, an actor-isolation error in iPad import, and UIScreen use on visionOS).
 
 ### Platform

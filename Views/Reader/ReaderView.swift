@@ -140,8 +140,20 @@ struct ReaderView: View {
         .onKeyPress(.rightArrow) { if session.rtl { session.retreat() } else { session.advance() }; return .handled }
         .onKeyPress(.upArrow)    { session.retreat(); return .handled }
         .onKeyPress(.downArrow)  { session.advance(); return .handled }
+        .onKeyPress(.pageDown)   { session.advance(); return .handled }
+        .onKeyPress(.pageUp)     { session.retreat(); return .handled }
+        .onKeyPress(keys: [.space], phases: .down) { press in
+            if press.modifiers.contains(.shift) { session.retreat() } else { session.advance() }
+            return .handled
+        }
         .onKeyPress(.escape) {
+            // Close whatever's open on top of the page first, then the reader itself.
             if session.autoplay { session.autoplay = false; return .handled }
+            if showPageJump { showPageJump = false; return .handled }
+            if showFilmstrip {
+                withAnimation(Design.motion(Design.easeFast, reduce: reduceMotion)) { showFilmstrip = false }
+                return .handled
+            }
             handleClose(); return .handled
         }
         .onKeyPress(KeyEquivalent("a")) { session.toggleAutoplay(); return .handled }
@@ -616,6 +628,8 @@ struct ReaderView: View {
             let shortcuts: [(String, String)] = [
                 ("→ / ←",        "Next / Previous page (respects RTL)"),
                 ("↑ / ↓",        "Previous / Next page"),
+                ("Space",        "Next page (⇧Space: previous)"),
+                ("Page Up / Down", "Previous / Next page"),
                 ("Home",         "First page"),
                 ("End",          "Last page"),
                 ("A",            "Toggle Autoplay"),
@@ -629,7 +643,7 @@ struct ReaderView: View {
                 ("Swipe",        "Two-finger swipe to turn pages"),
                 ("F",            "Toggle fullscreen"),
                 ("G",            "Toggle page filmstrip"),
-                ("Escape / W",   "Close reader"),
+                ("Escape / W",   "Close reader (Escape closes the filmstrip first)"),
                 ("?",            "Show / hide this panel"),
             ]
             Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 14) {

@@ -130,10 +130,12 @@ struct ContentView: View {
             Text(action.message)
                 .font(.callout).foregroundStyle(.white)
                 .lineLimit(1)
-            Button("Undo") { vm.performUndo() }
-                .font(.callout.bold())
-                .foregroundStyle(Design.brandGold)
-                .buttonStyle(.plain)
+            if action.undo != nil {
+                Button("Undo") { vm.performUndo() }
+                    .font(.callout.bold())
+                    .foregroundStyle(Design.brandGold)
+                    .buttonStyle(.plain)
+            }
             Button {
                 vm.dismissUndo()
             } label: {
@@ -230,10 +232,6 @@ struct ContentView: View {
             scanToolbarItem
         }
 
-        ToolbarItem(id: "resync", placement: .primaryAction) {
-            resyncToolbarItem
-        }
-
         ToolbarItem(id: "import", placement: .primaryAction) {
             Button { importFiles() } label: {
                 Label("Import", systemImage: "square.and.arrow.down")
@@ -274,20 +272,16 @@ struct ContentView: View {
             .disabled(!show)
             .allowsHitTesting(show)
         }
-
-        #if os(macOS)
-        ToolbarItem(id: "settings", placement: .primaryAction) {
-            Button { vm.select(.settings) } label: {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .help("Settings (⌘,)")
-        }
-        #endif
     }
 
     @ViewBuilder
     private var scanToolbarItem: some View {
-        if vm.isScanning {
+        if vm.isResyncing {
+            HStack(spacing: 5) {
+                ProgressView().scaleEffect(0.65).tint(Design.brandGold)
+                Text("Resyncing…").font(.caption2).foregroundStyle(.secondary)
+            }
+        } else if vm.isScanning {
             HStack(spacing: 5) {
                 ProgressView().scaleEffect(0.65).tint(Design.brandGold)
                 Text("\(vm.scanState.done)/\(vm.scanState.total)")
@@ -297,26 +291,10 @@ struct ContentView: View {
             }
         } else {
             Button { vm.scan() } label: {
-                Label("Scan", systemImage: "magnifyingglass")
+                Label("Scan", systemImage: "arrow.clockwise")
             }
             .help("Scan library folders for new comics (⇧⌘R)")
-            .disabled(vm.libraryPaths.isEmpty || vm.isResyncing)
-        }
-    }
-
-    @ViewBuilder
-    private var resyncToolbarItem: some View {
-        if vm.isResyncing {
-            HStack(spacing: 5) {
-                ProgressView().scaleEffect(0.65).tint(Design.brandGold)
-                Text("Resyncing…").font(.caption2).foregroundStyle(.secondary)
-            }
-        } else {
-            Button { vm.resyncLibrary() } label: {
-                Label("Resync", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .help("Rescan and re-derive metadata for every comic — fixes wrong reading order or metadata (⌥⇧⌘R)")
-            .disabled(vm.libraryPaths.isEmpty || vm.isScanning)
+            .disabled(vm.libraryPaths.isEmpty)
         }
     }
 
@@ -365,12 +343,6 @@ struct SidebarView: View {
     @State private var draggedPublisher: String?
     @State private var dropTargetPublisher: String?
     @State private var showAllTags = false
-    @State private var showMoreDiscover = false
-
-    // Shared with iPad's `iPadSidebar` via `SidebarCustomization.coreDiscoverItems` -- these three
-    // are the Discover items a new user is most likely to reach for immediately; everything else
-    // collapses into "More" so first launch isn't a flat wall of equally-weighted rows.
-    private var coreDiscoverItems: Set<DiscoverItem> { SidebarCustomization.coreDiscoverItems }
 
     private var visibleDiscoverItems: [DiscoverItem] {
         SidebarCustomization.visibleItems(orderRaw: discoverOrderRaw, hiddenRaw: discoverHiddenRaw)
@@ -437,45 +409,10 @@ struct SidebarView: View {
             }
 
             Section("Discover") {
-                let discoverItems = visibleDiscoverItems
-                ForEach(discoverItems.filter { coreDiscoverItems.contains($0) }) { discoverItem in
-                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
-                }
-
-                let moreItems = discoverItems.filter { !coreDiscoverItems.contains($0) }
-                if !moreItems.isEmpty {
-                    DisclosureGroup(isExpanded: $showMoreDiscover) {
-                        ForEach(moreItems) { discoverItem in
-                            if discoverItem == .libraryHealth, vm.moreDiscoverAlertCount > 0 {
-                                navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
-                                       trailingText: "\(vm.moreDiscoverAlertCount)")
-                            } else {
-                                navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination)
-                            }
-                        }
-                    } label: {
-                        // A plain DisclosureGroup label only responds to taps on its small chevron
-                        // in a macOS List, not the row text next to it -- wrapping the label in its
-                        // own Button (with an explicit content shape) makes the whole row clickable,
-                        // not just a few pixels of arrow.
-                        Button {
-                            withAnimation { showMoreDiscover.toggle() }
-                        } label: {
-                            HStack {
-                                Text("More")
-                                Spacer()
-                                if vm.moreDiscoverAlertCount > 0 {
-                                    Text("\(vm.moreDiscoverAlertCount)")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Design.brandGold, in: Capsule())
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
+                ForEach(visibleDiscoverItems) { discoverItem in
+                    navRow(discoverItem.title, icon: discoverItem.icon, item: discoverItem.destination,
+                           trailingText: discoverItem == .libraryHealth && vm.libraryHealthAlertCount > 0
+                               ? "\(vm.libraryHealthAlertCount)" : nil)
                 }
             }
 
@@ -529,8 +466,8 @@ struct SidebarView: View {
                 }
                 Text(label)
                 Spacer()
-                if case .continueReading = item, vm.inProgressComics.count > 0 {
-                    Text("\(vm.inProgressComics.count)")
+                if case .continueReading = item, vm.inProgressCount > 0 {
+                    Text("\(vm.inProgressCount)")
                         .font(.caption2.bold())
                         .padding(.horizontal, 5).padding(.vertical, 2)
                         .background(Capsule().fill(Color.secondary.opacity(0.25)))

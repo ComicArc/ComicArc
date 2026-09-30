@@ -154,7 +154,7 @@ struct ComicArcApp: App {
                 Button("Resync Library") { vm.resyncLibrary() }
                     .keyboardShortcut("r", modifiers: [.command, .shift, .option])
                     .disabled(vm.libraryPaths.isEmpty || vm.isBusy)
-                    .help("Rescans and re-derives metadata for every comic — use if reading order or metadata looks wrong")
+                    .help("Rescans and re-derives metadata for every comic — use if series, issue order, or metadata look wrong")
                 Button("Import Files…") {
                     NotificationCenter.default.post(name: .triggerImport, object: nil)
                 }

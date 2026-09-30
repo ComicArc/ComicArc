@@ -109,9 +109,9 @@ final class ReaderSession {
 
         let prefs = DatabaseManager.shared.seriesReaderPrefs(series: comic.series, publisher: comic.publisher)
         self.scrollMode = prefs?.scrollMode ?? UserDefaults.standard.bool(forKey: "scrollMode")
-        self.rtl = prefs?.rtl ?? UserDefaults.standard.bool(forKey: "readingDirectionRTL")
+        self.rtl = prefs?.rtl ?? false
         self.doublePage = prefs?.doubleSpread ?? false
-        self.fitMode = FitMode(rawValue: prefs?.fitMode ?? UserDefaults.standard.string(forKey: "readerFitMode") ?? FitMode.fitPage.rawValue) ?? .fitPage
+        self.fitMode = prefs.flatMap { FitMode(rawValue: $0.fitMode) } ?? .fitPage
         self.colorFilter = ColorFilter(rawValue: UserDefaults.standard.string(forKey: "readerColorFilter") ?? ColorFilter.none.rawValue) ?? .none
     }
 

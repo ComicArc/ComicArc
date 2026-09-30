@@ -190,10 +190,12 @@ struct iPadRootView: View {
             Text(action.message)
                 .font(.callout).foregroundStyle(.white)
                 .lineLimit(1)
-            Button("Undo") { vm.performUndo() }
-                .font(.callout.bold())
-                .foregroundStyle(Design.brandGold)
-                .buttonStyle(.plain)
+            if action.undo != nil {
+                Button("Undo") { vm.performUndo() }
+                    .font(.callout.bold())
+                    .foregroundStyle(Design.brandGold)
+                    .buttonStyle(.plain)
+            }
             Button {
                 vm.dismissUndo()
             } label: {
@@ -215,12 +217,6 @@ private struct iPadSidebar: View {
     @AppStorage(SidebarCustomization.hiddenKey) private var discoverHiddenRaw = ""
     @State private var draggedPublisher: String?
     @State private var showAllTags = false
-    @State private var showMoreDiscover = false
-
-    // Shared with Mac's `SidebarView` via `SidebarCustomization.coreDiscoverItems` -- three
-    // daily-use Discover items stay always visible, everything else collapses into "More" so
-    // day-one doesn't show 9 equally-weighted rows at once.
-    private var coreDiscoverItems: Set<DiscoverItem> { SidebarCustomization.coreDiscoverItems }
 
     private var visibleDiscoverItems: [DiscoverItem] {
         SidebarCustomization.visibleItems(orderRaw: discoverOrderRaw, hiddenRaw: discoverHiddenRaw)
@@ -276,43 +272,13 @@ private struct iPadSidebar: View {
                 }
             }
             Section("Discover") {
-                let visibleItems = visibleDiscoverItems
-                ForEach(visibleItems.filter { coreDiscoverItems.contains($0) }) { item in
-                    Label(item.title, systemImage: item.icon).tag(item.destination)
-                }
-
-                let moreItems = visibleItems.filter { !coreDiscoverItems.contains($0) }
-                if !moreItems.isEmpty {
-                    DisclosureGroup(isExpanded: $showMoreDiscover) {
-                        ForEach(moreItems) { item in
-                            if item == .libraryHealth {
-                                Label(item.title, systemImage: item.icon)
-                                    .tag(item.destination)
-                                    .badge(vm.moreDiscoverAlertCount)
-                            } else {
-                                Label(item.title, systemImage: item.icon).tag(item.destination)
-                            }
-                        }
-                    } label: {
-                        // Same fix as the Mac sidebar: make the whole label row the tap target for
-                        // expanding/collapsing, not just the disclosure chevron.
-                        Button {
-                            withAnimation { showMoreDiscover.toggle() }
-                        } label: {
-                            HStack {
-                                Text("More")
-                                Spacer()
-                                if vm.moreDiscoverAlertCount > 0 {
-                                    Text("\(vm.moreDiscoverAlertCount)")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Design.brandGold, in: Capsule())
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                ForEach(visibleDiscoverItems) { item in
+                    if item == .libraryHealth {
+                        Label(item.title, systemImage: item.icon)
+                            .tag(item.destination)
+                            .badge(vm.libraryHealthAlertCount)
+                    } else {
+                        Label(item.title, systemImage: item.icon).tag(item.destination)
                     }
                 }
             }

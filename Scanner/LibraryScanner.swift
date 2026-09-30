@@ -15,9 +15,7 @@ final class LibraryScanner: @unchecked Sendable {
 
     static var supportedExtensions: Set<String> {
         #if os(macOS)
-        let cbrEnabled = UserDefaults.standard.object(forKey: "cbrEnabled") == nil
-            || UserDefaults.standard.bool(forKey: "cbrEnabled")
-        return cbrEnabled ? ["cbz", "cbr", "pdf", "jpg", "jpeg", "png"] : ["cbz", "pdf", "jpg", "jpeg", "png"]
+        ["cbz", "cbr", "pdf", "jpg", "jpeg", "png"]
         #else
         ["cbz", "pdf", "jpg", "jpeg", "png"]
         #endif

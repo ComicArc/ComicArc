@@ -233,7 +233,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     /// Refreshes `comics.db.bak`, the snapshot `recoverIfCorrupted` falls back to. Called at
     /// launch (via `migrate()`) and again after a scan/resync completes -- previously this only
-    /// ever ran once per launch, so a corruption discovered after a long reading/tagging/rating
+    /// ever ran once per launch, so a corruption discovered after a long reading/tagging
     /// session, or right after importing a big batch of new comics, would recover to a backup
     /// that predated all of it. Cheap enough to call again after a scan: a WAL checkpoint plus a
     /// file copy, not a full re-export.

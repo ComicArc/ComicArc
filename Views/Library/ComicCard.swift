@@ -104,7 +104,7 @@ struct ComicCard: View {
                 let trimmed = newRunTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
                 let runId = vm.createRun(title: trimmed, description: "")
-                vm.addToRun(runId: runId, comicIds: [comic.id])
+                vm.addToRunWithUndo(runId: runId, runTitle: trimmed, comicIds: [comic.id])
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -190,7 +190,7 @@ struct ComicCard: View {
 
             Menu("Add to Reading Path") {
                 ForEach(vm.runs) { run in
-                    Button(run.title) { vm.addToRun(runId: run.id, comicIds: [comic.id]) }
+                    Button(run.title) { vm.addToRunWithUndo(runId: run.id, runTitle: run.title, comicIds: [comic.id]) }
                 }
                 if !vm.runs.isEmpty { Divider() }
                 Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }

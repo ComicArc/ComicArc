@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// The one genuinely loud moment in the app -- everything else in this design pass (spotlight
-/// hover, shop-floor wash, halftone) was deliberately kept to a whisper so restraint elsewhere
-/// would read as restraint, not blandness. This is the payoff: the front-window display, sized
-/// and saturated well past what any card in a scrolling grid gets, for the one comic that
-/// actually deserves it -- whatever was most recently read. Tints itself from that comic's own
-/// cover color (falling back to its publisher's color, never the neutral gold default), so the
 /// A larger featured cover for whatever was most recently read -- sized past what any card in a
 /// scrolling grid gets, since this is the one comic that actually deserves the extra attention.
 /// Tints itself from that comic's own cover color (falling back to its publisher's color, never
@@ -142,7 +136,7 @@ struct ContinueReadingShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
-                    ForEach(vm.inProgressComics) { comic in
+                    ForEach(vm.inProgressComics.dropFirst()) { comic in
                         ShelfCard(comic: comic)
                             .onTapGesture { vm.openReader(comic) }
                     }
@@ -199,7 +193,7 @@ struct ShelfCard: View {
                 .frame(width: 90, height: 130)
                 .comicCardStyle(accentColor: accentColor, isHovered: isHovered)
 
-                if !comic.isFinished {
+                if comic.isStarted && !comic.isFinished {
                     ZStack(alignment: .leading) {
                         Rectangle().fill(Color.black.opacity(0.35)).frame(height: 3)
                         Rectangle().fill(Design.brandBlue)
@@ -215,7 +209,7 @@ struct ShelfCard: View {
                 .frame(width: 90, alignment: .leading)
                 .foregroundStyle(.secondary)
 
-            Text("p. \(comic.progress + 1)/\(comic.pageCount)")
+            Text(shelfDetail)
                 .font(.system(size: 9)).foregroundStyle(.tertiary)
         }
         .hoverLift(scale: 1.04, isHovered: $isHovered)
@@ -224,7 +218,7 @@ struct ShelfCard: View {
             ThumbnailCache.shared.accentColor(for: comic) { accentColor = $0 }
         }
         .contextMenu {
-            Button("Continue Reading") { vm.readerComic = comic }
+            Button(comic.isStarted ? "Continue Reading" : "Read") { vm.openReader(comic) }
             Divider()
             Button("Mark as Read") { vm.markRead(comic) }
             Button("Metadata Inspector…") { showMetadataInspector = true }
@@ -232,8 +226,18 @@ struct ShelfCard: View {
         .sheet(isPresented: $showMetadataInspector) { MetadataInspectorView(comicId: comic.id) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(comic.title)
-        .accessibilityValue("Page \(comic.progress + 1) of \(comic.pageCount), \(Int(comic.progressPercent * 100))% complete")
-        .accessibilityHint("Double-tap to continue reading")
+        .accessibilityValue(comic.isStarted
+            ? "Page \(comic.progress + 1) of \(comic.pageCount), \(Int(comic.progressPercent * 100))% complete"
+            : "Unread")
+        .accessibilityHint(comic.isStarted ? "Double-tap to continue reading" : "Double-tap to start reading")
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// Page progress for something you're partway through; the issue number (or series) for an
+    /// unstarted Read Next suggestion, which would otherwise read "p. 1/24".
+    private var shelfDetail: String {
+        if comic.isStarted { return "p. \(comic.progress + 1)/\(comic.pageCount)" }
+        if let issue = comic.issueNumber, !issue.isEmpty { return "\(comic.series) #\(issue)" }
+        return comic.series
     }
 }
