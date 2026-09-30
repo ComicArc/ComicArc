@@ -16,7 +16,7 @@ struct ScanLibraryIntent: AppIntent {
 
 struct ResyncLibraryIntent: AppIntent {
     static var title: LocalizedStringResource = "Resync Comic Library"
-    static var description = IntentDescription("Fully rescans your ComicArc library, re-checking metadata and reading order for every comic, not just new files.")
+    static var description = IntentDescription("Fully rescans your ComicArc library, re-checking metadata and issue order for every comic, not just new files.")
 
     @MainActor
     func perform() async throws -> some IntentResult {

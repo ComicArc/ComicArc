@@ -160,7 +160,7 @@ extension LibraryViewModel {
     }
 
     /// Permanently removes a single trashed comic's row (and, via `ON DELETE CASCADE`, its
-    /// bookmarks/rating/progress/tags/run-items/tier-list-items/diary entries) -- Trash previously
+    /// bookmarks/progress/tags/Reading Path entries) -- Trash previously
     /// had no purge path at all. Never touches a file on disk: if `delete(fileService:)` already
     /// moved the file to the real system Trash, that's the user's Finder Trash to empty
     /// separately; a row soft-deleted without a file move ("missing"/"folder_removed") has no file

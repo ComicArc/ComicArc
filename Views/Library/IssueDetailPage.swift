@@ -87,11 +87,13 @@ struct IssueDetailPage: View {
                 let trimmed = newRunTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
                 let runId = vm.createRun(title: trimmed, description: "")
-                vm.addToRun(runId: runId, comicIds: [current.id])
+                vm.addToRunWithUndo(runId: runId, runTitle: trimmed, comicIds: [current.id])
             }
             Button("Cancel", role: .cancel) {}
         }
         .errorAlert("Couldn't Set Cover", message: $coverChangeError)
+        // Adding to (or undoing an add to) a path changes "Appears in Reading Paths".
+        .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in loadData() }
     }
 
     private var topBar: some View {
@@ -122,7 +124,7 @@ struct IssueDetailPage: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
-            .help("See exactly why ComicArc placed this issue where it did")
+            .help("See the file's embedded metadata and how ComicArc filed this issue")
 
             Button { showingEdit = true } label: {
                 Label("Edit", systemImage: "pencil")
@@ -267,19 +269,18 @@ struct IssueDetailPage: View {
                 .accessibilityHint("Choose a page from this issue or an image file to use as the cover")
 
                 Menu {
-                    Menu("Add to Reading Path") {
-                        let runs = DatabaseManager.shared.allRuns()
-                        ForEach(runs) { run in
-                            Button(run.title) { vm.addToRun(runId: run.id, comicIds: [current.id]) }
+                    ForEach(vm.runs) { run in
+                        Button(run.title) {
+                            vm.addToRunWithUndo(runId: run.id, runTitle: run.title, comicIds: [current.id])
                         }
-                        if !runs.isEmpty { Divider() }
-                        Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
                     }
+                    if !vm.runs.isEmpty { Divider() }
+                    Button("New Reading Path…") { newRunTitle = ""; showNewRunPrompt = true }
                 } label: {
                     VStack(spacing: 5) {
-                        Image(systemName: "square.stack.3d.up").font(.system(size: 22)).foregroundStyle(.secondary)
+                        Image(systemName: "text.badge.plus").font(.system(size: 22)).foregroundStyle(.secondary)
                             .accessibilityHidden(true)
-                        Text("Lists").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                        Text("Add to Path").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                     }
                 }
                 .menuStyle(.borderlessButton)
@@ -430,18 +431,27 @@ struct IssueDetailPage: View {
             Text("Appears in Reading Paths")
                 .font(.system(size: 13, weight: .bold)).foregroundStyle(Design.textPrimary)
             ForEach(appearsInRuns) { run in
-                HStack(spacing: 8) {
-                    Image(systemName: "list.bullet.rectangle")
-                        .foregroundStyle(Design.brandBlue).font(.subheadline)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(run.title).font(.subheadline)
-                        if !run.description.isEmpty {
-                            Text(run.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Button {
+                    vm.select(.runs)
+                    vm.selectedRun = run
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "list.bullet.rectangle")
+                            .foregroundStyle(Design.brandBlue).font(.subheadline)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(run.title).font(.subheadline)
+                            if !run.description.isEmpty {
+                                Text(run.description).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
-                    Spacer()
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+                .help("Open this Reading Path")
             }
         }
     }

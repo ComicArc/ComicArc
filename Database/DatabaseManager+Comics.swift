@@ -153,6 +153,28 @@ extension DatabaseManager {
         }
     }
 
+    /// How many comics `inProgress` would return with no limit (the sidebar's Continue Reading count).
+    func inProgressCount() -> Int {
+        queue.sync {
+            scalarInt("""
+                SELECT COUNT(*) FROM comics c JOIN reading_progress rp ON rp.comic_id = c.id
+                WHERE c.deleted_at IS NULL AND rp.current_page > 0
+                  AND (c.page_count = 0 OR rp.current_page < c.page_count - 2)
+            """)
+        }
+    }
+
+    /// Finished comics, most recently finished first -- what Read Next suggestions build on.
+    func recentlyFinished(limit: Int) -> [Comic] {
+        queue.sync {
+            rows("""
+                \(comicSelect)
+                WHERE c.deleted_at IS NULL AND rp.finished_at IS NOT NULL
+                ORDER BY rp.finished_at DESC LIMIT ?
+            """, args: [limit], map: comicRow)
+        }
+    }
+
     /// Nil if `current` is empty/a placeholder, or if it doesn't actually disagree with
     /// `proposed` (after case/whitespace-insensitive comparison) -- i.e. nil means "safe to
     /// auto-apply `proposed`, nothing worth flagging." Shared with `LibraryScanner`'s existing-
@@ -232,8 +254,8 @@ extension DatabaseManager {
                 // later reappears after being wrongly marked stale (e.g. a flaky/waking external
                 // drive during a scan), INSERT OR IGNORE would silently no-op on the UNIQUE
                 // conflict -- the comic would never come back, permanently orphaned. Reviving the
-                // SAME row on conflict instead means its reading_progress/ratings/tags/list-
-                // memberships (all keyed by this comic_id) are still correctly attached -- a plain
+                // SAME row on conflict instead means its reading_progress/tags/bookmarks/Reading
+                // Path memberships (all keyed by this comic_id) are still correctly attached -- a plain
                 // "delete and re-insert" would have orphaned all of that. added_at and position
                 // are deliberately left untouched: a revival isn't a new addition. The folder-
                 // derived identity columns (matching `folderDerivedColumns`, plus issue_number)

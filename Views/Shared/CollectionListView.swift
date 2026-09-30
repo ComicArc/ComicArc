@@ -11,9 +11,7 @@ struct CollectionListConfig {
     let emptyMessage: String
     let cardIcon: String                 // placeholder cover icon
     let subtitle: (Run) -> String          // "3/5 read"
-    /// `nil` disables the list-level "Delete" context-menu item (Reading Paths are deleted from
-    /// their detail screen).
-    let deleteWithUndo: (@MainActor (Run) -> Void)?
+    let deleteWithUndo: @MainActor (Run) -> Void
     let fetch: @MainActor () async -> [Run]
     let reorder: @MainActor ([Int64]) -> Void
     let create: @MainActor (_ title: String, _ description: String) -> Void
@@ -111,10 +109,8 @@ struct CollectionListView: View {
                                     Button("Move Up") { move(item, by: -1) }.disabled(items.first?.id == item.id)
                                     Button("Move Down") { move(item, by: 1) }.disabled(items.last?.id == item.id)
                                     Button("Move to Bottom") { move(item, to: items.count - 1) }.disabled(items.last?.id == item.id)
-                                    if config.deleteWithUndo != nil {
-                                        Divider()
-                                        Button("Delete \(config.noun)", role: .destructive) { pendingDelete = item }
-                                    }
+                                    Divider()
+                                    Button("Delete \(config.noun)…", role: .destructive) { pendingDelete = item }
                                 }
                                 .accessibilityActions {
                                     Button("Move Up") { move(item, by: -1) }
@@ -138,7 +134,7 @@ struct CollectionListView: View {
         ) {
             Button("Delete \(config.noun)", role: .destructive) {
                 guard let target = pendingDelete else { return }
-                config.deleteWithUndo?(target)
+                config.deleteWithUndo(target)
                 if selected?.id == target.id { selected = nil }
                 pendingDelete = nil
                 onListChanged()
@@ -146,7 +142,7 @@ struct CollectionListView: View {
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("The comics themselves are not affected -- only this ranking is removed.")
+            Text("The comics themselves aren't affected.")
         }
     }
 

@@ -48,11 +48,6 @@ enum SidebarCustomization {
         items.map(\.rawValue).joined(separator: ",")
     }
 
-    /// Daily-use Discover items that stay always visible in the sidebar; everything else collapses
-    /// into "More" so day one doesn't show 9 equally-weighted rows at once. Shared by Mac's
-    /// `SidebarView` and iPad's `iPadSidebar`.
-    static let coreDiscoverItems: Set<DiscoverItem> = [.stats]
-
     static func visibleItems(orderRaw: String, hiddenRaw: String) -> [DiscoverItem] {
         let hidden = decodeHidden(hiddenRaw)
         return decodeOrder(orderRaw).filter { !hidden.contains($0) }

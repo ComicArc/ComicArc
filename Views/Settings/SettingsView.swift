@@ -11,11 +11,10 @@ enum SettingsSearch {
         "Appearance": ["theme", "accent", "color", "colour", "dark", "light", "sepia"],
         "Library": ["folder", "path", "scan", "cache", "comics imported"],
         "Reader": ["scroll", "slideshow", "autoplay", "speed"],
-        "Import": ["cbr", "unar", "rar"],
         "Sidebar": ["discover", "reorder", "hide"],
         "ComicInfo Write-Back": ["comicinfo", "write back", "metadata", "xml", "portable"],
         "Data": ["backup", "export", "trash", "resync", "clear", "cache"],
-        "Sync": ["nearby", "multipeer", "ipad", "mac", "progress", "wifi", "network", "peer"],
+        "Sync": ["nearby", "multipeer", "ipad", "mac", "progress", "reading paths", "wifi", "network", "peer"],
         "Backup": ["export", "import", "restore"],
         "Help": ["tutorial", "onboarding"],
         "About": ["version"],
@@ -39,7 +38,6 @@ struct SettingsView: View {
 
     @AppStorage("scrollMode")       private var scrollMode       = false
 
-    @AppStorage("cbrEnabled")       private var cbrEnabled       = true
     @AppStorage("autoplaySpeed")    private var autoplaySpeed: Double = 6.0
     @AppStorage("progressFormat")   private var progressFormatRaw = ProgressFormat.fraction.rawValue
     @AppStorage("onboardingCompletedForBuild") private var completedBuild: String = ""
@@ -75,7 +73,6 @@ struct SettingsView: View {
         SettingsSearch.noneMatch(Self.sectionTitles, query: vm.searchText)
     }
 
-    @State private var unarAvailable         = false
     @State private var showTrash             = false
     @State private var showPeerSync          = false
     #if os(macOS)
@@ -104,9 +101,6 @@ struct SettingsView: View {
                 if sectionMatches("Appearance") { appearanceSection }
                 if sectionMatches("Library") { librarySection }
                 if sectionMatches("Reader") { readerSection }
-                #if os(macOS)
-                if sectionMatches("Import") { importSection }
-                #endif
                 if sectionMatches("Sidebar") { sidebarSection }
                 #if os(macOS)
                 if sectionMatches("ComicInfo Write-Back") { comicInfoWriteBackSection }
@@ -123,7 +117,6 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity)
         .background(Design.appBackground)
         .navigationTitle("Settings")
-        .onAppear { if cbrEnabled { checkUnarAsync() } }
         .task {
             comicCount = await Task.detached(priority: .utility) {
                 DatabaseManager.shared.allComics().count
@@ -265,26 +258,6 @@ struct SettingsView: View {
         }
     }
 
-    #if os(macOS)
-    // CBR extraction shells out to a command-line tool (`unar`) that doesn't exist in the iOS/
-    // iPadOS sandbox -- there's nothing this section could do there, so it's Mac-only rather than
-    // showing a toggle that can never actually turn anything on.
-    @ViewBuilder private var importSection: some View {
-        Section("Import") {
-            Toggle("CBR Support (requires unar)", isOn: $cbrEnabled)
-                .onChange(of: cbrEnabled) { _, enabled in if enabled { checkUnarAsync() } }
-            if cbrEnabled {
-                HStack {
-                    Image(systemName: unarAvailable ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(unarAvailable ? .green : .red)
-                    Text(unarAvailable ? "unar found" : "unar not found — install with: brew install unar")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-    #endif
-
     @ViewBuilder private var sidebarSection: some View {
         Section("Sidebar") {
             Text("Reorder or hide the Discover section. Library, Publishers, and Tags always show.")
@@ -342,11 +315,11 @@ struct SettingsView: View {
         Section("Sync") {
             VStack(alignment: .leading, spacing: 6) {
                 #if os(macOS)
-                Text("Sync your reading progress with another device (like an iPad) over your local network -- no account, no cloud.")
+                Text("Sync your reading progress and Reading Paths with another device (like an iPad) over your local network — no account, no cloud.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 #else
-                Text("Sync your reading progress with another device (like your Mac) over your local network -- no account, no cloud.")
+                Text("Sync your reading progress and Reading Paths with another device (like your Mac) over your local network — no account, no cloud.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 #endif
@@ -380,7 +353,7 @@ struct SettingsView: View {
                 }
             }
             .disabled(vm.isBusy)
-            .help("Rescans your folders and re-derives publisher, character, series, and issue number for every comic. Use this if reading order or metadata looks wrong.")
+            .help("Rescans your folders and re-derives publisher, character, series, and issue number for every comic. Use this if series, issue order, or metadata look wrong.")
             Button("Clear Thumbnail Cache") { clearCache() }
                 .help("Remove cached thumbnails — they regenerate on demand")
             Button("Clear Library…", role: .destructive) { confirmClear() }
@@ -388,7 +361,7 @@ struct SettingsView: View {
         } header: {
             Text("Data")
         } footer: {
-            Text("Backup includes reading progress, favorites, tags, bookmarks, manual issue orders, and lists. Comics themselves stay wherever they already are.")
+            Text("Backup includes reading progress, favorites, tags, bookmarks, manual issue orders, and Reading Paths. Comics themselves stay wherever they already are.")
         }
     }
 
@@ -416,15 +389,6 @@ struct SettingsView: View {
         fileService.pickFolder { url in
             if let url { vm.addLibraryFolder(url.path) }
         }
-    }
-
-    private func checkUnarAsync() {
-#if os(macOS)
-        Task.detached(priority: .utility) {
-            let found = ExternalTool.shared.which("unar") != nil
-            await MainActor.run { unarAvailable = found }
-        }
-#endif
     }
 
     private func clearCache() {

@@ -56,6 +56,8 @@ final class LibraryViewModel: ObservableObject {
     @Published var publishers:        [String] = []
     @Published var allTags:           [(tag: Tag, count: Int)] = []
     @Published var inProgressComics:  [Comic] = []
+    /// Total in-progress comics for the sidebar badge (`inProgressComics` is capped for the shelf).
+    @Published var inProgressCount:   Int = 0
     // Series the user actively favorites but has fully caught up on -- distinct from
     // inProgressComics (which only covers books with a page already turned). Previously a
     // finished favorite series just vanished from the home screen with no nudge toward its
@@ -154,10 +156,9 @@ final class LibraryViewModel: ObservableObject {
     @Published var duplicateGroups:   [[Comic]] = []
     @Published var pendingMetadataConflicts: [MetadataConflictRow] = []
 
-    /// So a collapsed "More" Discover section in the sidebar can't silently hide something that
-    /// actually needs attention -- shown as a badge on the disclosure row itself even while
-    /// collapsed. Shared by Mac's `SidebarView` and iPad's `iPadSidebar`.
-    var moreDiscoverAlertCount: Int {
+    /// Things waiting in Library Health (duplicates + metadata conflicts), shown as a badge on
+    /// its sidebar row. Shared by Mac's `SidebarView` and iPad's `iPadSidebar`.
+    var libraryHealthAlertCount: Int {
         duplicateGroups.count + pendingMetadataConflicts.count
     }
 
@@ -317,6 +318,8 @@ final class LibraryViewModel: ObservableObject {
     var reloadWorkItem: DispatchWorkItem?
 
     var reloadGeneration = 0
+    /// Separate from `reloadGeneration` so refreshing the home shelves never cancels a library reload.
+    private var homeShelvesGeneration = 0
 
     // Independent from `reloadGeneration` -- these guard three unrelated background computations
     // (duplicates, health report, rename candidates) that can each be kicked off from several call
@@ -404,6 +407,7 @@ final class LibraryViewModel: ObservableObject {
             let pubs   = db.publishers()
             let tags   = db.allTags()
             let shelf  = db.inProgress(limit: 8)
+            let inProgressCount = db.inProgressCount()
             let readNext = Self.computeReadNextSuggestions(db: db)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
@@ -411,6 +415,7 @@ final class LibraryViewModel: ObservableObject {
                 self.publishers          = pubs
                 self.allTags             = tags
                 self.inProgressComics    = shelf
+                self.inProgressCount     = inProgressCount
                 self.readNextSuggestions = readNext
                 self.comics              = []
                 self.isLoading           = false
@@ -418,22 +423,22 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// For each series with at least one favorited comic, if the furthest-along favorited issue
-    /// in that series is fully finished, look up the next issue in reading order and suggest it
-    /// if it's still unread. Bounded by favorite count (typically small), so this is cheap enough
-    /// to run on every reload rather than needing its own cached/invalidated state.
+    /// For each series you've recently finished an issue of (most recent first), suggest the
+    /// issue after the furthest one you've finished, if you haven't started it yet. Bounded by a
+    /// fixed window of recent finishes, so it's cheap enough to run on every reload.
     nonisolated private static func computeReadNextSuggestions(db: DatabaseManager) -> [Comic] {
-        let favorites = db.allComics(favoritesOnly: true)
-        let bySeries = Dictionary(grouping: favorites) { "\($0.publisher)|\($0.series)" }
+        var seenSeries = Set<String>()
         var suggestions: [Comic] = []
-        for (_, group) in bySeries {
-            guard let lastFinished = group.filter(\.isFinished).max(by: {
-                $0.position < $1.position
-            }) else { continue }
-            guard let next = db.nextComic(after: lastFinished), next.progress == 0 else { continue }
+        for finished in db.recentlyFinished(limit: 60) {
+            let key = "\(finished.publisher)|\(finished.series)"
+            guard seenSeries.insert(key).inserted else { continue }
+            let furthest = db.allComics(publisher: finished.publisher, series: finished.series, sortOrder: .manual)
+                .last(where: \.isFinished) ?? finished
+            guard let next = db.nextComic(after: furthest), !next.isStarted, !next.isFinished else { continue }
             suggestions.append(next)
+            if suggestions.count == 12 { break }
         }
-        return Array(suggestions.prefix(12))
+        return suggestions
     }
 
     func select(_ item: AppDestination) {
@@ -539,15 +544,17 @@ final class LibraryViewModel: ObservableObject {
     /// Without this, reading a comic opened from a home shelf (Now Reading, Continue Reading,
     /// Read Next) would leave that shelf showing pre-reading progress/finished state until the
     /// user happened to drill into a group and back out again.
-    private func refreshHomeShelves() {
-        reloadGeneration += 1
-        let gen = reloadGeneration
+    func refreshHomeShelves() {
+        homeShelvesGeneration += 1
+        let gen = homeShelvesGeneration
         Task.detached(priority: .utility) { [db] in
             let shelf = db.inProgress(limit: 8)
+            let inProgressCount = db.inProgressCount()
             let readNext = Self.computeReadNextSuggestions(db: db)
             await MainActor.run {
-                guard gen == self.reloadGeneration else { return }
+                guard gen == self.homeShelvesGeneration else { return }
                 self.inProgressComics    = shelf
+                self.inProgressCount     = inProgressCount
                 self.readNextSuggestions = readNext
             }
         }

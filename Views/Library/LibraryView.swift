@@ -115,7 +115,7 @@ struct LibraryFilterBar: View {
                                 .font(.system(size: 11, weight: .semibold))
                         }
                         .buttonStyle(.plain)
-                        .help("Back to Library home (Continue Reading, Recommended, and more)")
+                        .help("Back to Library home")
                         .accessibilityLabel("Back to Library home")
                     }
                 }

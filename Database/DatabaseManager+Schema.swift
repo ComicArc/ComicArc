@@ -55,8 +55,6 @@ extension DatabaseManager {
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             title       TEXT NOT NULL,
             description TEXT,
-            rating      INTEGER,
-            review      TEXT,
             buy_link    TEXT,
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
