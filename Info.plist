@@ -96,12 +96,6 @@
 	<true/>
 	<key>OSAScriptingDefinition</key>
 	<string>ComicArc.sdef</string>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUFeedURL</key>
-	<string>https://github.com/ComicArc/ComicArc/releases/latest/download/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>Lyc7isvqxkKnmODmWsfxYiKNAQOiamZmO+ld6oGMa48=</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

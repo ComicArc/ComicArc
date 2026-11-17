@@ -40,25 +40,11 @@ jobs:
           APP_PATH="build/Build/Products/Release/ComicArc.app"
           ditto -c -k --keepParent "$APP_PATH" ComicArc-macOS.zip
 
-      - name: Generate appcast
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          GENERATE_APPCAST="build/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast"
-          mkdir appcast_dir
-          cp ComicArc-macOS.zip appcast_dir/
-          echo "$SPARKLE_PRIVATE_KEY" | "$GENERATE_APPCAST" \
-            --ed-key-file - \
-            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
-            appcast_dir
-          cp appcast_dir/appcast.xml appcast.xml
-
       - uses: actions/upload-artifact@v4
         with:
           name: macOS
           path: |
             ComicArc-macOS.zip
-            appcast.xml
 
   release:
     needs: build
