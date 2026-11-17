@@ -2,13 +2,8 @@ import Quartz
 import AppKit
 import ZIPFoundation
 
-/// Renders a QuickLook preview for CBZ and PDF comics -- just the cover (first page), which is
-/// all a Finder preview needs. Deliberately standalone rather than reusing LibraryScanner: this
-/// runs in a separate, sandboxed extension process with no database and no need for one, so it
-/// has its own minimal, dependency-free extraction rather than dragging in the full scanner
-/// (which would instantiate DatabaseManager.shared for no reason). CBR is intentionally not
-/// supported here -- it would need to shell out to unar, which a sandboxed system extension
-/// shouldn't be doing.
+/// Quick Look preview of a CBZ or PDF's cover. Self-contained, since the extension runs in its own
+/// sandboxed process with no database.
 final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
     func providePreview(for request: QLFilePreviewRequest, completionHandler handler: @escaping (QLPreviewReply?, Error?) -> Void) {
         let url = request.fileURL
