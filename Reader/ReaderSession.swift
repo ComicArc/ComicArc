@@ -79,6 +79,9 @@ final class ReaderSession {
     }
 
     init(comic: Comic, runId: Int64? = nil, initialPage: Int? = nil) {
+        // The caller's copy can be stale (e.g. a detail page opened before the last read), so
+        // resume from the database's saved position.
+        let comic = DatabaseManager.shared.comic(id: comic.id) ?? comic
         self.comic = comic
         self.runId = runId
         self.pageCount = comic.pageCount

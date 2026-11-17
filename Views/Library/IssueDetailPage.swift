@@ -55,11 +55,15 @@ struct IssueDetailPage: View {
             return .handled
         }
         .task { loadData() }
-        .onChange(of: comic) { _, c in
+        .onChange(of: comic) { old, c in
             current = c
+            guard c.id != old.id else { return }  // same comic, newer progress/flags
             thumbnail = nil
             accentColor = nil
             loadData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
+            if let fresh = DatabaseManager.shared.comic(id: current.id) { current = fresh }
         }
         .sheet(isPresented: $showingEdit, onDismiss: { loadData() }) {
             EditComicView(comic: $current)

@@ -1193,8 +1193,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress with your other devices running ComicArc. Nothing leaves your network.";
+				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp _comicarc-sync._udp";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress and Reading Paths with your other devices running ComicArc. Nothing leaves your network.";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "-lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.vision;
@@ -1216,8 +1216,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress with your other devices running ComicArc. Nothing leaves your network.";
+				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp _comicarc-sync._udp";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress and Reading Paths with your other devices running ComicArc. Nothing leaves your network.";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "-lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = com.comicarc.vision;
@@ -1440,8 +1440,8 @@
 				CURRENT_PROJECT_VERSION = 9999;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress with your other devices running ComicArc. Nothing leaves your network.";
+				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp _comicarc-sync._udp";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress and Reading Paths with your other devices running ComicArc. Nothing leaves your network.";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1468,8 +1468,8 @@
 				CURRENT_PROJECT_VERSION = 9999;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress with your other devices running ComicArc. Nothing leaves your network.";
+				INFOPLIST_KEY_NSBonjourServices = "_comicarc-sync._tcp _comicarc-sync._udp";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ComicArc uses your local network to sync reading progress and Reading Paths with your other devices running ComicArc. Nothing leaves your network.";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

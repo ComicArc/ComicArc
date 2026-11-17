@@ -41,14 +41,19 @@ extension LibraryViewModel {
             let count = ComicFileNaming.renameCandidateCount(for: db.allComics())
             await MainActor.run {
                 guard gen == self.renameCandidatesGeneration else { return }
-                if count != self.renameCandidateCount { self.renameSuggestionDismissed = false }
+                // A dismissal sticks across launches until the number of candidates changes.
+                let dismissedAt = UserDefaults.standard.object(forKey: Self.renameDismissedCountKey) as? Int
+                self.renameSuggestionDismissed = dismissedAt == count
                 self.renameCandidateCount = count
             }
         }
     }
 
+    private static let renameDismissedCountKey = "renameSuggestionDismissedCount"
+
     func dismissRenameSuggestion() {
         renameSuggestionDismissed = true
+        UserDefaults.standard.set(renameCandidateCount, forKey: Self.renameDismissedCountKey)
     }
 
     /// `apply` adopts the ComicInfo.xml value; `dismiss` keeps the current one.

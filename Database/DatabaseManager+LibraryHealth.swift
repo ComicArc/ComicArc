@@ -13,6 +13,10 @@ extension DatabaseManager {
         }
     }
 
+    /// Jumps of more than this many issue numbers are legacy renumbering (e.g. #441 -> #500),
+    /// DC One Million-style issues, or a collection starting mid-run -- not missing comics.
+    static let maxReportedGap = 10
+
     func seriesWithNumberingGaps() -> [(publisher: String, series: String, count: Int)] {
         queue.sync {
             rows("""
@@ -28,7 +32,7 @@ extension DatabaseManager {
                     FROM nums
                 )
                 SELECT publisher, series, COUNT(*) FROM ranked
-                WHERE prev IS NOT NULL AND n - prev > 1
+                WHERE prev IS NOT NULL AND n - prev > 1 AND n - prev <= \(Self.maxReportedGap + 1)
                 GROUP BY publisher, series
                 """) { s in (colText(s, 0) ?? "Unknown", colText(s, 1) ?? "General", colInt(s, 2)) }
         }
@@ -145,17 +149,17 @@ extension DatabaseManager {
     func missingIssueNumbers(series: String, publisher: String) -> [String] {
         queue.sync {
             let nums = rows("""
-                SELECT CAST(issue_number AS INTEGER) as n FROM comics
+                SELECT DISTINCT CAST(issue_number AS INTEGER) as n FROM comics
                 WHERE deleted_at IS NULL AND series=? AND publisher=?
-                  AND issue_number IS NOT NULL AND issue_number != ''
-                  AND CAST(issue_number AS INTEGER) > 0
+                  AND issue_number GLOB '[0-9]*'
+                  AND comic_type(issue_number, title, series, format) = 'regular'
                 ORDER BY n
             """, args: [series, publisher]) { colInt($0, 0) }
             guard nums.count > 1 else { return [] }
             var missing: [String] = []
             for i in 1..<nums.count {
                 let prev = nums[i-1], curr = nums[i]
-                if curr - prev > 1 {
+                if curr - prev > 1, curr - prev <= Self.maxReportedGap + 1 {
                     for n in (prev+1)..<curr { missing.append("#\(n)") }
                 }
             }

@@ -8,6 +8,10 @@ import Sparkle
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let servicesProvider = ComicArcServicesProvider()
 
+    /// Off until a release with an appcast.xml is published; otherwise every check reports an
+    /// error. Turning it on restores the menu item and background checks.
+    static let updatesEnabled = false
+
     lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -131,7 +135,9 @@ struct ComicArcApp: App {
         #if os(macOS)
         .commands {
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: appDelegate.updaterController.updater)
+                if AppDelegate.updatesEnabled {
+                    CheckForUpdatesView(updater: appDelegate.updaterController.updater)
+                }
             }
 
             CommandGroup(replacing: .newItem) {}

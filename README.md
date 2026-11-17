@@ -30,12 +30,12 @@ Most comic readers want you to hand your library over to them — import it into
 
 Requires macOS 14 (Sonoma) or later. Apple Silicon native.
 
-1. Download and unzip `ComicArc-macOS.zip` from [the latest release](https://github.com/ComicArc/ComicArc/releases/latest).
+1. Download and unzip `ComicArc.app.zip` from [the latest release](https://github.com/ComicArc/ComicArc/releases/latest).
 2. Move **ComicArc.app** to `/Applications`.
 3. **Right-click → Open** the first time, to get past Gatekeeper (see below for why).
 4. Point the setup wizard at your comics folder — that's the whole install.
 
-No Homebrew, no Terminal, no config files. CBR support is bundled. ComicArc checks for updates in the background (via [Sparkle](https://sparkle-project.org/)), and **ComicArc → Check for Updates…** is always there if you want to check yourself.
+No Homebrew, no Terminal, no config files. CBR support is bundled.
 
 #### "ComicArc is damaged and can't be opened"
 
@@ -63,7 +63,7 @@ The iPad app (`ComicArcPad`, iPadOS 17+) isn't on the App Store yet — it lives
 - **Issue detail**: edit metadata, tag it, or add it to a Reading Path.
 - **Series Manager**: reorder issues in a series (your order survives rescans), rename it, or set a custom cover. Otherwise issues sort by issue number, with annuals and specials after the regular issues.
 - **Library Health** — one screen for maintenance:
-  - a health report (issue-number gaps, duplicate #1s, mixed volumes, unreadable files),
+  - a health report (issue-number gaps, duplicate #1s, mixed volumes, unreadable files). Large jumps such as legacy renumbering (#441 → #500) aren't reported as missing issues,
   - **Duplicates**: comics with the exact same file name or the exact same cover thumbnail (byte-identical copies included); matching title, series, or issue number alone never counts,
   - **Needs Review**: ComicInfo.xml values that disagree with how a comic is filed, never silently overwritten,
   - tools to clean up filenames, convert CBR to CBZ (macOS), and resync the library.
@@ -183,9 +183,11 @@ Press `?` inside the reader any time for the full list.
 | `B` | Bookmark current page |
 | `D` | Toggle double-page spread |
 | `R` | Toggle RTL direction |
-| `Esc` | Stop autoplay, close the filmstrip, or close the reader |
+| `G` | Show / hide the page filmstrip |
+| `?` | Show all reader shortcuts |
+| `Esc` / `W` | Stop autoplay, close the filmstrip, or close the reader |
 
-The main window also supports `⌘1`–`⌘6` (Library, Continue Reading, Favorites, Reading Paths, Stats, Highlights) to jump to any sidebar section, `⌘[` to go back, `⌘E` to toggle bulk-select, `⇧⌘R` to rescan, and `⇧⌘F` to open Clean Up Filenames.
+The main window also supports `⌘1`–`⌘6` (Library, Continue Reading, Favorites, Reading Paths, Stats, Highlights) to jump to any sidebar section, `⇧⌘1`–`⇧⌘3` for grid size, `⌘[` to go back, `⌘O` to import files, `⌘E` to toggle bulk-select, `⇧⌘R` to rescan, `⌥⇧⌘R` to resync, and `⇧⌘F` to open Clean Up Filenames.
 
 ### iPad (Magic Keyboard)
 
@@ -207,7 +209,7 @@ Everything lives on your device. Nothing leaves it.
 | Library database | `~/Library/Application Support/ComicArc/comics.db` (macOS) |
 | Cover thumbnails | `~/Library/Application Support/ComicArc/covers/` (macOS) |
 
-Your comic files themselves are **never moved, renamed, or modified** unless you use the Clean Up Filenames tool.
+Your comic files themselves are **never moved, renamed, or modified** unless you ask: Clean Up Filenames renames, Convert CBR to CBZ re-encodes, ComicInfo write-back (off by default) edits metadata inside a CBZ, and Delete moves a file to the system Trash, where Restore can bring it back.
 
 macOS and iPad each keep their own independent local library. Peer sync (see [Sync & Sharing](#sync--sharing)) keeps reading progress and Reading Paths in step between them over the local network; everything else — tags, bookmarks, manual issue orders — stays local to each device unless you move it yourself. Either platform can export a full JSON backup of all of it and restore it on the same device, or use it to move state to another device by hand.
 
@@ -227,6 +229,17 @@ Only import files you own or otherwise have the right to use.
 
 ---
 
+## How it's built
+
+| Layer | Folder | What it does |
+|---|---|---|
+| Data | `Database/` | SQLite through the C API on one serial queue, no ORM. `DatabaseManager` is split into extensions by concern (comics, groups, Reading Paths, stats, health, schema/migrations). Versioned one-time migrations keep existing libraries working. |
+| Scanning | `Scanner/` | Walks the library folders, derives publisher/character/series from the folder path, reads ComicInfo.xml, and identifies files by content hash, so moved or renamed files keep their progress. FSEvents keeps the library live after launch. |
+| Reader engine | `Reader/` | `ComicDocument` abstracts CBZ, CBR, PDF and single images. Pages are decoded with ImageIO at roughly the size they're shown, cached in a byte-budgeted `NSCache` with a reading-direction-aware prefetch window. `ReaderSession` is a platform-independent `@Observable` model shared by the Mac and iPad readers. |
+| State | `ViewModels/` | `LibraryViewModel` drives navigation and library state; heavy queries run off the main thread, guarded by generation counters so stale results never overwrite newer ones. |
+| Services | `Services/` | Cover thumbnails, Mac/iPad sync (MultipeerConnectivity), backups, Shortcuts/Siri (App Intents) and AppleScript, and platform services (files, windows) injected through the SwiftUI environment. |
+| UI | `Views/`, `iPad/` | SwiftUI throughout; the Mac reader's page view is an `NSScrollView` for native trackpad zoom and scrolling. |
+
 ## Building from source
 
 Requires Xcode 16+.
@@ -245,7 +258,7 @@ Pick the **ComicArc** scheme for macOS, **ComicArcPad** for iPad, or **ComicArcV
 
 - [ZIPFoundation](https://github.com/weichsel/ZIPFoundation) — CBZ archive extraction
 - [unar / The Unarchiver](https://theunarchiver.com/command-line) — CBR extraction, bundled
-- [Sparkle](https://sparkle-project.org/) — macOS auto-updates
+- [Sparkle](https://sparkle-project.org/) — macOS update framework (update checks are currently switched off)
 
 ---
 

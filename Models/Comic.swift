@@ -37,7 +37,8 @@ struct Comic: Identifiable, Equatable, Hashable {
     var isFinished: Bool { finishedAt != nil }
     var progressPercent: Double { pageCount > 0 ? Double(progress) / Double(pageCount) : 0 }
 
-    static func == (lhs: Comic, rhs: Comic) -> Bool { lhs.id == rhs.id }
+    // Equality compares every field so views refresh when progress or flags change; hashing by id
+    // alone stays consistent with that.
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 

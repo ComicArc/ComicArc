@@ -148,11 +148,14 @@ extension DatabaseManager {
         }
     }
 
+    /// Comics finished this calendar year (local time), for the reading-goal ring.
     func issuesReadThisYear() -> Int {
         queue.sync {
             let year = String(Calendar.current.component(.year, from: Date()))
-            return scalarInt("SELECT COUNT(DISTINCT comic_id) FROM reading_history WHERE strftime('%Y', read_at) = ?",
-                             args: [year])
+            return scalarInt("""
+                SELECT COUNT(*) FROM reading_progress rp JOIN comics c ON c.id = rp.comic_id
+                WHERE c.deleted_at IS NULL AND strftime('%Y', rp.finished_at, 'localtime') = ?
+                """, args: [year])
         }
     }
 
