@@ -8,8 +8,7 @@ struct LibraryBrowserView: View {
     @State private var gridWidth: CGFloat = 0
 
     private var density: GridDensity { GridDensity(rawValue: densityRaw) ?? .regular }
-    // Approximates LibraryGridView's `.adaptive(minimum: density.cardWidth, ...)` column count so
-    // Up/Down can jump by a row's worth of columns instead of behaving identically to Left/Right.
+    // Approximate column count, so Up/Down move by a whole row.
     private var columnsPerRow: Int {
         guard gridWidth > 0 else { return 1 }
         let itemStride = density.cardWidth + density.spacing
@@ -21,10 +20,6 @@ struct LibraryBrowserView: View {
             LibraryFilterBar()
             Rectangle().fill(Design.borderColor).frame(height: 1)
 
-            // Previously slid in/out directionally (trailing on drill-in, leading on
-            // navigateBack()) -- that read as an unwanted "sliding" motion, so this now just
-            // relies on the plain crossfade SwiftUI defaults to under the existing
-            // `withAnimation(Design.springGentle)` wrapping each browseLevel change.
             switch vm.browseLevel {
             case .characters:   CharacterGroupGridView()
             case .seriesGroups: SeriesGroupGridView()
@@ -75,8 +70,6 @@ struct LibraryFilterBar: View {
     @Environment(\.fileService) private var fileService
     @State private var confirmBulkDelete = false
     @State private var showBulkReassign = false
-    // The heading a user sees at the top of every browsing screen -- worth scaling with Dynamic
-    // Type even though most of this bar's smaller chrome text stays fixed-size.
     @ScaledMetric(relativeTo: .title2) private var headingSize: CGFloat = 22
 
     private var displayCount: Int {
@@ -105,10 +98,7 @@ struct LibraryFilterBar: View {
                     .buttonStyle(.plain)
                     .help("Go back (⌘[)")
 
-                    // The Continue Reading/Read Next shelves only ever
-                    // render at the top-level character grid -- previously the only way back to
-                    // them from several levels deep was clicking "Go back" repeatedly. One tap
-                    // back to the top of Library, not a duplicate copy of the shelves themselves.
+                    // Jumps straight back to the Library home (and its shelves).
                     if vm.selectedSection == .library {
                         Button { vm.select(.library) } label: {
                             Image(systemName: "house")
@@ -224,7 +214,7 @@ struct LibraryFilterBar: View {
                 Label("Delete", systemImage: "trash")
             }
             .disabled(vm.selectedComicIds.isEmpty).controlSize(.small)
-            // The menu's Delete Selected (⌘⌫) routes here too, so it always asks first.
+            // The Delete Selected menu item (⌘⌫) routes here too, so it always confirms.
             .onReceive(NotificationCenter.default.publisher(for: .triggerBulkDelete)) { _ in
                 if !vm.selectedComicIds.isEmpty { confirmBulkDelete = true }
             }

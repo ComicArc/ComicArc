@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// The user-facing surface for Layer 1's conflict detection: comics whose current series/
-/// publisher/issue_number disagrees with what their own ComicInfo.xml says, surfaced for manual
-/// review instead of either side being silently applied: a batch of automatically-produced
-/// findings to confirm or reject one by one.
+/// Comics whose series, publisher or issue number disagrees with their ComicInfo.xml, to accept or
+/// dismiss one by one.
 struct MetadataConflictsView: View {
     @EnvironmentObject var vm: LibraryViewModel
 

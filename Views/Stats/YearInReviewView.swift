@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// A "wrapped"-style recap of one calendar year's reading, built entirely from data ComicArc
-/// already tracks day-to-day (reading sessions and finished issues) -- no new instrumentation,
-/// just a year-scoped aggregation and a dedicated presentation for it.
+/// A yearly "wrapped"-style recap built from reading sessions and finished issues.
 struct YearInReviewView: View {
     @Environment(\.dismiss) private var dismiss
 

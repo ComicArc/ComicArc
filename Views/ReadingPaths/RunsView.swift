@@ -34,9 +34,7 @@ struct RunsListView: View {
                 vm.refreshRuns(); reloadToken = UUID()
             }
             .onReceive(NotificationCenter.default.publisher(for: .runUpdated)) { _ in
-                // Renaming a Run in its detail view only updates that view's own local
-                // @State copy and the DB -- without this, this list's row keeps showing the
-                // pre-edit title until an unrelated reload happens.
+                // A rename in the detail view updates only its own copy, so reload the list.
                 reloadToken = UUID()
             }
     }
@@ -131,9 +129,7 @@ struct RunDetailView: View {
             loadItems()
         }
         .onReceive(NotificationCenter.default.publisher(for: .readerDidClose)) { _ in
-            // The reader is a ZStack overlay, not a navigation push, so this view is never
-            // told a comic in it was just read -- refresh progress/"first unfinished" (Resume
-            // target) so they don't point at the issue the user just finished.
+            // The reader is an overlay, so refresh progress and the Resume target when it closes.
             loadItems()
         }
         .sheet(isPresented: $showingAddComics) {
@@ -264,7 +260,7 @@ struct RunDetailView: View {
 
 struct RunItemRow: View {
     let item:     RunItem
-    /// 1-based place in the path as shown -- stored positions can have gaps after removals.
+    /// 1-based position as shown (stored positions can have gaps).
     let number:   Int
     let runId:    Int64
     let onChange: () -> Void
@@ -431,8 +427,7 @@ struct RunsView: View {
     }
 }
 
-/// "Add to Reading Path" menu for places that act on several comics at once (the bulk-select
-/// bar): lists every path plus "New Reading Path…", and hands back the chosen path.
+/// "Add to Path" menu for multi-comic actions: every path plus "New Reading Path…".
 struct AddToReadingPathMenu: View {
     @EnvironmentObject var vm: LibraryViewModel
     let onPick: (_ runId: Int64, _ runTitle: String) -> Void

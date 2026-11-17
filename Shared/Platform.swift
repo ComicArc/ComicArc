@@ -3,19 +3,11 @@ import Foundation
 import ImageIO
 import CoreImage
 
-// A handful of real-world scanned/uncompressed comic pages come through at absurd pixel
-// dimensions (raw scanner output dropped into a CBZ with no resave) that would otherwise decode
-// to gigabytes of raw bitmap and can crash the reader outright. This caps the *decode* itself
-// (not just display) via ImageIO's thumbnail-from-source path, which is cheap to check (reads
-// only the header) and only kicks in when a page is genuinely pathological -- ordinary comic
-// pages (a few thousand pixels on a side) are decoded exactly as before. Not private: `PageDecoder`
-// reuses this same primitive with a caller-supplied (usually much smaller, viewport-sized)
-// `maxPixelSize` for its target-size-aware decode, rather than duplicating the ImageIO logic.
+// Some scanned pages are huge enough to decode to gigabytes. This caps the decode itself using
+// ImageIO's thumbnail path.
 let maxDecodedPixelDimension = 8000
 
-/// Decodes `data` at up to `maxPixelSize` on the long edge -- if the source is already smaller,
-/// decodes at its natural size; otherwise uses ImageIO's thumbnail-from-source path, which is a
-/// genuinely smaller/faster decode, not a full decode followed by a downscale.
+/// Decodes at up to `maxPixelSize` on the long edge, without a full decode first.
 func safeCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
     guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -32,14 +24,10 @@ func safeCGImage(from data: Data, maxPixelSize: Int) -> CGImage? {
     return CGImageSourceCreateThumbnailAtIndex(source, 0, opts as CFDictionary)
 }
 
-// Reused across every averageColor() call rather than allocated fresh each time -- CIContext
-// construction is the expensive part of this pipeline, and this one carries no per-image state.
+// Shared: creating a CIContext is the expensive part.
 private let averageColorContext = CIContext(options: [.workingColorSpace: NSNull()])
 
-/// Shared by both platforms' `averageColor()` -- a comic's cover-driven accent color, sampled
-/// once via CIAreaAverage (collapses the whole image to a single pixel) rather than manually
-/// walking raw bitmap bytes. Runs against an already-decoded, already-thumbnail-sized `CGImage`
-/// (see `ThumbnailCache`), never a full-resolution page.
+/// Average color of an already-small cover image, via CIAreaAverage.
 private func computeAverageColor(from cgImage: CGImage) -> Color? {
     let ciImage = CIImage(cgImage: cgImage)
     guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
@@ -93,10 +81,7 @@ extension NSImage {
         return cg.width * cg.height * 4
     }
 
-    /// The actual display's backing scale, clamped to a sane range -- rendering a PDF page at a
-    /// fixed 1.5x regardless of screen produced visibly soft pages on Retina displays (a typical
-    /// 6x9in page rendered to ~650x975px). Clamped rather than used raw so a rare very-high-DPI
-    /// external display doesn't balloon a single page's decoded size unbounded.
+    /// The display's backing scale, clamped, so PDF pages render sharply on Retina.
     static var pdfRenderScale: CGFloat { min(3.0, max(2.0, NSScreen.main?.backingScaleFactor ?? 2.0)) }
 
     static func renderPDFPage(_ page: CGPDFPage, scale: CGFloat = 1.5) -> NSImage? {
@@ -144,7 +129,6 @@ extension UIImage {
 
     var byteSize: Int { Int(size.width * scale) * Int(size.height * scale) * 4 }
 
-    /// Same intent as the macOS side's `pdfRenderScale` -- see its comment.
     static var pdfRenderScale: CGFloat {
         #if os(visionOS)
         2.0  // No UIScreen on visionOS; windows render at 2x.
@@ -170,6 +154,18 @@ extension UIImage {
 }
 #endif
 
+extension PlatformImage {
+    /// Loads and fully decodes an image file on the calling thread. `fromURL` decodes lazily on
+    /// first draw, which for grid covers means on the main thread while scrolling.
+    static func decodedFromURL(_ url: URL) -> PlatformImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateImageAtIndex(
+                  source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+        else { return nil }
+        return fromCGImage(cg)
+    }
+}
+
 extension Image {
     init(platformImage: PlatformImage) {
         #if os(macOS)
@@ -182,10 +178,7 @@ extension Image {
 }
 
 enum OnboardingGate {
-    /// Shared between the Mac and iPad app entry points -- previously duplicated verbatim in
-    /// both ComicArcMacApp.swift and ComicArcIPadApp.swift. Uses `readMigrating()` (not a raw
-    /// key read) so an existing install's pre-multi-folder single library path still counts as
-    /// "already configured" and never re-triggers onboarding after this update.
+    /// Onboarding is needed when no build has completed it and no library folder is configured.
     static func isNeeded(completedBuild: String) -> Bool {
         completedBuild.isEmpty && LibraryFolders.readMigrating().isEmpty
     }

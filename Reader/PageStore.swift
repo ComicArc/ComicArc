@@ -1,18 +1,15 @@
 import Foundation
+import CoreGraphics
 
-/// The decoded-page cache. Replaces the old `PageCache`'s hand-rolled dict+lock (capped at a
-/// flat 30-entry count, with zero response to system memory pressure) with an `NSCache` budgeted
-/// by actual decoded-image bytes -- pages range from ~200KB to tens of MB, so an entry-count cap
-/// protects nothing predictable, and `NSCache` gets automatic pressure-driven eviction for free.
+/// Decoded-page cache: an `NSCache` budgeted by decoded bytes, with automatic eviction under memory
+/// pressure.
 final class PageStore: @unchecked Sendable {
     static let shared = PageStore()
     private init() {
         cache.totalCostLimit = Self.defaultBudgetBytes
     }
 
-    /// Starting budget to validate empirically against real device memory profiles (iPad base vs.
-    /// Pro) -- not a number to treat as final. `NSCache` also evicts under system memory pressure
-    /// on top of this soft budget, independent of it.
+    /// Soft budget; `NSCache` also evicts under system memory pressure.
     private static let defaultBudgetBytes = 150 * 1024 * 1024
 
     private let cache = NSCache<NSString, PlatformImage>()
@@ -22,25 +19,14 @@ final class PageStore: @unchecked Sendable {
     private var generation: [Int64: Int] = [:]
     private var inFlight: [String: [(PlatformImage?) -> Void]] = [:]
     private var pendingPrefetches: [Int64: [DispatchWorkItem]] = [:]
-    /// Keys inserted per comic, tracked only so `evict(comicId:)` can proactively drop that
-    /// comic's pages instead of waiting on `NSCache`'s own (opaque, not necessarily comic-aware)
-    /// eviction heuristics or the total-cost budget to eventually reclaim them.
+    /// Keys per comic, so `evict(comicId:)` can drop a comic's pages immediately.
     private var insertedKeys: [Int64: Set<String>] = [:]
-    /// The `maxPixelSize` (`Int.max` for "decoded at full/native resolution") each cached entry
-    /// was actually decoded at. A cache hit only counts if the cached resolution is at least as
-    /// high as what the caller is asking for now -- without this, a page decoded small for a fit
-    /// mode (or a Mac paged-mode viewport size) would silently keep being served forever, even
-    /// after the caller asks for a bigger decode (zooming in, switching to "Original Size", or
-    /// scroll/iPad's own always-full-resolution requests) -- the exact "target-size-aware decode"
-    /// this store exists for would otherwise apply only to whichever request happened to reach a
-    /// page first.
+    /// The resolution each entry was decoded at (`Int.max` = full). A hit only counts if it's at
+    /// least as sharp as requested.
     private var decodedPixelSize: [String: Int] = [:]
 
     private func key(_ comicId: Int64, _ page: Int) -> String { "\(comicId):\(page)" }
 
-    /// Cache hit only if the cached decode is at least as high-resolution as `maxPixelSize`
-    /// requests (`nil` meaning "full resolution", i.e. only satisfied by a prior full-resolution
-    /// decode).
     private func sufficientlyCached(_ k: String, maxPixelSize: Int?) -> PlatformImage? {
         guard let image = cache.object(forKey: k as NSString) else { return nil }
         let requested = maxPixelSize ?? Int.max
@@ -55,11 +41,8 @@ final class PageStore: @unchecked Sendable {
         return generation[comicId] ?? 0
     }
 
-    /// The primary request path. Cache hits deliver synchronously (no dispatch round-trip) so an
-    /// already-warm page never visibly waits. A second request for a page already being decoded
-    /// attaches its completion to the in-flight decode instead of starting a redundant one --
-    /// the old `PageCache` had no such dedup, so a direct navigation racing a prefetch (or two
-    /// fast taps) could decode the same page twice.
+    /// Main request path. Cache hits return synchronously; a request for a page already being
+    /// decoded joins that decode.
     func request(document: ComicDocument, comicId: Int64, page: Int, maxPixelSize: Int?, completion: @escaping (PlatformImage?) -> Void) {
         let k = key(comicId, page)
         if let cached = sufficientlyCached(k, maxPixelSize: maxPixelSize) { completion(cached); return }
@@ -99,10 +82,8 @@ final class PageStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Prefetch window shape, in pages, depends on reading mode -- continuous scroll can outrun a
-    /// narrow forward window at real scroll velocity, so it gets a wider one; paged/spread modes
-    /// go forward far more than back, but keep a small behind-window for the common accidental-
-    /// overswipe case.
+    /// Prefetch window per reading mode: wider for continuous scroll, mostly forward for paged
+    /// modes.
     enum PrefetchMode {
         case paged, spread, scroll
         var window: (behind: Int, ahead: Int) {
@@ -114,9 +95,7 @@ final class PageStore: @unchecked Sendable {
         }
     }
 
-    /// Skips PDFs entirely (rendering is comparatively expensive -- matches the old `PageCache`'s
-    /// behavior), but PDF pages that do get rendered are still cached under the same rules once
-    /// the user actually reaches them.
+    /// PDFs aren't prefetched (rendering is expensive), but rendered PDF pages are cached normally.
     func prefetch(document: ComicDocument, comicId: Int64, around page: Int, pageCount: Int, mode: PrefetchMode, maxPixelSize: Int?, isPDF: Bool) {
         guard !isPDF else { return }
         let (behind, ahead) = mode.window
@@ -149,13 +128,8 @@ final class PageStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Cancels queued-but-not-yet-started prefetch work for a comic -- call before requesting a
-    /// far jump's window (scrubber drag, page-number entry, filmstrip tap far from the current
-    /// page), so a fast scrub doesn't leave a burst of decodes queued for pages already scrubbed
-    /// past. `DispatchWorkItem.cancel()` prevents work that hasn't started from running at all;
-    /// already-running decodes finish harmlessly (the result still gets cached, just wasn't
-    /// urgently needed) rather than needing cooperative-cancellation checks inside a decode that's
-    /// typically well under 50ms anyway.
+    /// Cancels queued prefetches for a comic, e.g. before a far jump. Decodes already running
+    /// finish.
     func cancelPrefetches(comicId: Int64) {
         lock.lock()
         let items = pendingPrefetches[comicId] ?? []
@@ -174,5 +148,59 @@ final class PageStore: @unchecked Sendable {
         lock.unlock()
         items.forEach { $0.cancel() }
         keys.forEach { cache.removeObject(forKey: $0 as NSString) }
+    }
+}
+
+/// Decodes a page at roughly the size it will be shown, which keeps decode time and memory low for
+/// large scans.
+enum PageDecoder {
+    /// `maxPixelSize`: target long edge in pixels, or nil for full resolution. Always capped at
+    /// `maxDecodedPixelDimension`.
+    static func decode(_ source: PageSource, maxPixelSize: Int?) -> PlatformImage? {
+        let cappedSize = min(maxPixelSize ?? maxDecodedPixelDimension, maxDecodedPixelDimension)
+        switch source {
+        case .imageData(let data):
+            guard let cg = safeCGImage(from: data, maxPixelSize: cappedSize) else { return nil }
+            return PlatformImage.fromCGImage(cg)
+        case .pdfPage(let page):
+            let box = page.getBoxRect(.mediaBox)
+            let longEdge = max(box.width, box.height, 1)
+            let scale: CGFloat
+            if maxPixelSize != nil {
+                scale = max(1.0, CGFloat(cappedSize) / longEdge)
+            } else {
+                scale = PlatformImage.pdfRenderScale
+            }
+            return PlatformImage.renderPDFPage(page, scale: scale)
+        }
+    }
+}
+
+/// Filmstrip thumbnails, cached separately from `PageStore` so scrubbing never evicts the pages
+/// being read.
+final class ThumbnailStore: @unchecked Sendable {
+    static let shared = ThumbnailStore()
+    private init() { cache.countLimit = 300 }
+
+    private let cache = NSCache<NSString, PlatformImage>()
+    private let queue = DispatchQueue(label: "com.comicarc.thumbnailstore", qos: .utility, attributes: .concurrent)
+    private static let thumbnailMaxPixelSize = 220
+
+    private func key(_ comicId: Int64, _ page: Int) -> NSString { "\(comicId):\(page)" as NSString }
+
+    /// Reuses the session's open document and decodes straight at thumbnail size.
+    func thumbnail(document: ComicDocument, comicId: Int64, page: Int, completion: @escaping (PlatformImage?) -> Void) {
+        let k = key(comicId, page)
+        if let cached = cache.object(forKey: k) { completion(cached); return }
+        queue.async { [self] in
+            let thumb: PlatformImage?
+            if let source = try? document.pageSource(index: page) {
+                thumb = PageDecoder.decode(source, maxPixelSize: Self.thumbnailMaxPixelSize)
+            } else {
+                thumb = nil
+            }
+            if let thumb { cache.setObject(thumb, forKey: k) }
+            DispatchQueue.main.async { completion(thumb) }
+        }
     }
 }

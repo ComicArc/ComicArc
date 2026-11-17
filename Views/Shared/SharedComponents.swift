@@ -17,8 +17,7 @@ struct ShimmerCard: View {
             )
             .frame(width: width, height: height)
             .onAppear {
-                // A repeatForever sweep is exactly the kind of motion Reduce Motion exists to
-                // suppress -- leave the gradient in its resting position instead of animating it.
+                // No shimmer animation under Reduce Motion.
                 guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                     animating = true
@@ -102,9 +101,7 @@ struct CoverPickerSheet: View {
         let query = searchText
         searchGeneration += 1
         let gen = searchGeneration
-        // Debounced and generation-guarded: without this, every keystroke fires its own
-        // detached query with no ordering guarantee, so a slow early query completing after a
-        // faster later one would overwrite the correct, more recent results with stale ones.
+        // Debounced and generation-guarded, so a slow earlier query can't overwrite newer results.
         Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard gen == searchGeneration else { return }
@@ -114,6 +111,20 @@ struct CoverPickerSheet: View {
             guard gen == searchGeneration else { return }
             results = Array(comics.prefix(300))
             isLoading = false
+        }
+    }
+}
+
+extension View {
+    /// Shows an alert while a `Binding<String?>` message is non-nil, and clears it on dismiss.
+    func errorAlert(_ title: String, message: Binding<String?>) -> some View {
+        alert(title, isPresented: Binding(
+            get: { message.wrappedValue != nil },
+            set: { if !$0 { message.wrappedValue = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(message.wrappedValue ?? "")
         }
     }
 }

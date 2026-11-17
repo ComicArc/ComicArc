@@ -15,28 +15,25 @@ extension LibraryViewModel {
         }
     }
 
-    /// Pins the current sort/filter/search combination -- deliberately just a snapshot of what
-    /// select()/reload() already track, not a new query concept, so applying one later is just
-    /// setting these same published properties back.
+    /// Recomputes the Library Health report and the set of broken (unreadable) comics.
     func refreshLibraryHealth() {
         healthGeneration += 1
         let gen = healthGeneration
         Task.detached(priority: .utility) { [db] in
             let report = LibraryHealthAnalyzer.analyze()
             let broken = db.brokenComicIds()
+            let emptySorts = db.sortOrdersWithoutData()
             await MainActor.run {
                 guard gen == self.healthGeneration else { return }
                 self.libraryHealthReport = report.isEmpty ? nil : report
                 self.brokenComicIds = broken
+                self.emptySortOrders = emptySorts
             }
         }
     }
 
-    /// Surfaces "N files could be renamed to match the library" as a dismissible sidebar banner
-    /// after a scan, rather than requiring the user to remember Settings > Rename Files exists.
-    /// Renaming itself stays a manual, reviewable action (RenameFilesView) -- it moves files on
-    /// disk, which is exactly the kind of permanent change the app's own philosophy says should
-    /// always be confirmed, not auto-applied.
+    /// Counts files whose names don't match the library's naming convention, for the sidebar
+    /// suggestion. Renaming stays a manual, reviewed action.
     func refreshRenameCandidates() {
         renameCandidatesGeneration += 1
         let gen = renameCandidatesGeneration
@@ -54,9 +51,7 @@ extension LibraryViewModel {
         renameSuggestionDismissed = true
     }
 
-    /// `apply`: adopts the proposed ComicInfo.xml-derived value. `dismiss`:
-    /// keeps the comic's current value untouched -- the conflict just stops being pending until
-    /// something re-detects it (e.g. a future rescan with a still-differing value).
+    /// `apply` adopts the ComicInfo.xml value; `dismiss` keeps the current one.
     func resolveMetadataConflict(_ row: MetadataConflictRow, apply: Bool) {
         Task.detached(priority: .userInitiated) { [db] in
             db.resolveMetadataConflict(id: row.conflict.id, apply: apply)

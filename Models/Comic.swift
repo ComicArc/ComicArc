@@ -25,17 +25,15 @@ struct Comic: Identifiable, Equatable, Hashable {
     var isFavorite: Bool = false
     var inReadingList: Bool = false
 
-    /// Why this comic is soft-deleted -- "user" (explicitly deleted) or "missing" (its file
-    /// vanished from disk during a scan). Nil for pre-existing soft-deletes, treated as "user".
-    /// Only meaningful when `deletedAt` is set; irrelevant otherwise.
+    /// Why the comic is soft-deleted: "user" or "missing" (nil is treated as "user").
     var deletedReason: String? = nil
     var finishedAt: String? = nil
+    /// The folder between the Character and Series folders, e.g. "Classic".
+    var folderGroup: String? = nil
 
     var fileExtension: String { URL(fileURLWithPath: filePath).pathExtension.lowercased() }
     var isStarted: Bool { progress > 0 }
-    /// Sticky once set -- driven by `finished_at`, not raw page position, so rereading an earlier
-    /// page of a finished issue (or briefly scrubbing to the last page without reading through)
-    /// doesn't flip completion state. See `DatabaseManager.markFinished`/`markUnfinished`.
+    /// Driven by the sticky `finished_at`, not the page position.
     var isFinished: Bool { finishedAt != nil }
     var progressPercent: Double { pageCount > 0 ? Double(progress) / Double(pageCount) : 0 }
 
@@ -52,11 +50,7 @@ struct Run: Identifiable, Equatable, Hashable {
     var readCount:  Int = 0
     var coverImagePath: String? = nil
 
-    // Explicit id-only equality (matching Comic's override above): editing a Run's title
-    // elsewhere and then reloading the sidebar's `runs` array must still recognize the edited
-    // row as "the same Run" for staleness checks like `if !runs.contains(selectedRun)` --
-    // synthesized field-wise Equatable would call the freshly-edited row "different" from the
-    // stale selection and silently clear the selection even though the Run still exists.
+    // Id-only equality, so an edited path still matches its selection.
     static func == (lhs: Run, rhs: Run) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
@@ -92,8 +86,7 @@ struct Bookmark: Identifiable {
     var isFavorite: Bool = false
 }
 
-/// A bookmark flagged as a "favorite moment" -- worth revisiting on its own, browsable across the
-/// whole library rather than only from within that one comic's own bookmark list.
+/// A bookmark flagged as a favorite moment, shown in Highlights.
 struct FavoriteMoment: Identifiable {
     let bookmark: Bookmark
     let comic: Comic
@@ -126,4 +119,20 @@ struct LibraryStats {
     let topSeries: [SeriesStat]
     let recentlyRead: [Comic]
     let collectionGrowth: [GrowthPoint]
+}
+
+/// An imported comic's series/publisher/issue number disagreeing with its ComicInfo.xml, held for
+/// review.
+struct MetadataConflict: Identifiable, Equatable {
+    let id: Int64
+    let field: String            // "series" | "publisher" | "issue_number"
+    let currentValue: String?
+    let proposedValue: String?
+    let proposedSource: String   // e.g. "ComicInfo.xml"
+}
+
+struct MetadataConflictRow: Identifiable, Equatable {
+    let conflict: MetadataConflict
+    let comic: Comic
+    var id: Int64 { conflict.id }
 }

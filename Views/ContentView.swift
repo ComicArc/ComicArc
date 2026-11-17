@@ -28,7 +28,7 @@ struct ContentView: View {
             } detail: {
                 detailContent
                     .id(vm.selectedSection)
-                    .toolbar(id: "main") { mainToolbar }
+                    .toolbar { mainToolbar }
             }
             .searchable(text: $vm.searchText, placement: .toolbar, prompt: "Search library…")
             .navigationSplitViewStyle(.balanced)
@@ -39,15 +39,11 @@ struct ContentView: View {
                 } onOpenComic: { next in
                     vm.openReader(next, runId: vm.readerRunId)
                 }
-                // Ties this view's identity to the comic itself rather than just to the `if`
-                // branch -- without it, a future reassignment of readerComic straight from one
-                // comic to another (skipping the nil in between) would carry over ReaderView's
-                // @State (currentPage, zoom, bookmarks) into the new comic instead of resetting.
+                // Keyed by comic so switching comics resets the reader's state.
                 .id(comic.id)
                 .transition(.opacity)
                 .zIndex(10)
             }
-
 
             if let action = vm.pendingUndo {
                 VStack {
@@ -87,13 +83,8 @@ struct ContentView: View {
         }
 
         .preferredColorScheme(AppTheme.current.isLight ? .light : .dark)
-        // Most of the app's text uses fixed-size fonts, not semantic text styles, so it doesn't
-        // scale with Dynamic Type -- a real gap, but fully migrating every font in the app to
-        // scale correctly is a much larger change than this pass can safely make. Capping the
-        // range (rather than leaving it fully unbounded) means a user with a moderately larger
-        // text size preference still gets what DOES scale (native controls, semantic-styled
-        // text already used in several screens) without the most extreme accessibility sizes
-        // visually breaking this app's fixed-width card grids and toolbars.
+        // Dynamic Type is capped: most text uses fixed sizes, and the largest accessibility sizes
+        // break the fixed-width grids.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .frame(minWidth: 960, minHeight: 640)
         .environment(\.readerNamespace, readerNamespace)
@@ -227,40 +218,40 @@ struct ContentView: View {
     }
 
     @ToolbarContentBuilder
-    private var mainToolbar: some CustomizableToolbarContent {
-        ToolbarItem(id: "scan", placement: .primaryAction) {
+    private var mainToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
             scanToolbarItem
         }
 
-        ToolbarItem(id: "import", placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             Button { importFiles() } label: {
                 Label("Import", systemImage: "square.and.arrow.down")
             }
             .help("Import comic files (⌘O)")
         }
 
-        ToolbarItem(id: "density", placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             DensityPicker()
                 .opacity(isLibrarySection ? 1 : 0)
                 .disabled(!isLibrarySection)
                 .allowsHitTesting(isLibrarySection)
         }
 
-        ToolbarItem(id: "sort", placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             SortPicker()
                 .opacity(isLibrarySection ? 1 : 0)
                 .disabled(!isLibrarySection)
                 .allowsHitTesting(isLibrarySection)
         }
 
-        ToolbarItem(id: "filter", placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             FilterPicker()
                 .opacity(isLibrarySection ? 1 : 0)
                 .disabled(!isLibrarySection)
                 .allowsHitTesting(isLibrarySection)
         }
 
-        ToolbarItem(id: "bulk", placement: .primaryAction) {
+        ToolbarItem(placement: .primaryAction) {
             let show = vm.browseLevel == .issues && isLibrarySection && vm.selectedComic == nil
             Button { vm.toggleBulkMode() } label: {
                 Label(vm.bulkMode ? "Exit Selection" : "Select Multiple",
@@ -382,8 +373,7 @@ struct SidebarView: View {
                                     Rectangle().fill(Design.brandGold).frame(height: 2)
                                 }
                             }
-                            // Keyboard/VoiceOver alternative to the drag reorder above -- onDrag/
-                            // onDrop alone has no accessible fallback for a user who can't drag.
+                            // Keyboard/VoiceOver alternative to drag reordering.
                             .accessibilityAction(named: "Move Up") {
                                 guard let idx = vm.publishers.firstIndex(of: pub), idx > 0 else { return }
                                 vm.movePublisher(from: pub, to: vm.publishers[idx - 1])

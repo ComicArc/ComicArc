@@ -44,8 +44,7 @@ extension DatabaseManager {
         let started: Int
         let finished: Int
         var coverImagePath: String? = nil
-        /// The folder between the Character folder and this series' own folder, if the library's
-        /// on-disk layout has one (e.g. "Batman (Modern)") -- nil for the common 1-3 level layout.
+        /// The folder between the Character folder and this series' folder, if any.
         var folderGroup: String? = nil
     }
 
@@ -54,10 +53,8 @@ extension DatabaseManager {
             var conds = ["c.deleted_at IS NULL"]
             var args: [Any?] = []
             if let pub = publisher, pub != "All" { conds.append("c.publisher = ?"); args.append(pub) }
-            if let q = search, !q.isEmpty {
-                conds.append("(c.series LIKE ? ESCAPE '\\' OR (c.character NOT LIKE '%,%' AND c.character NOT LIKE '%[%' AND LENGTH(COALESCE(c.character,'')) <= 60 AND c.character LIKE ? ESCAPE '\\'))")
-                let p = "%\(Self.likeEscaped(q))%"
-                args += [p, p]
+            if let q = search, let match = Self.searchCondition(q) {
+                conds.append(match.sql); args += match.args
             }
 
             let cleanChar = """
@@ -254,10 +251,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Every manual series/character/publisher reorder and every series' custom cover assignment
-    /// (comic-based only -- a custom *uploaded image* cover isn't included here, since restoring
-    /// one would mean embedding actual image bytes in the backup, not just a reference). All four
-    /// are deliberate user customizations with no automatic way to regenerate them.
+    /// Manual series/character/publisher orders and comic-based series covers, for backups.
     func allSeriesOrderPositions() -> [(groupName: String, publisher: String, series: String, position: Int)] {
         queue.sync {
             rows("SELECT group_name, publisher, series, position FROM series_order") { s in
@@ -286,6 +280,71 @@ extension DatabaseManager {
         queue.sync {
             rows("SELECT series, publisher, comic_id FROM series_covers WHERE comic_id IS NOT NULL") { s in
                 (colText(s, 0) ?? "", colText(s, 1) ?? "", colInt64(s, 2))
+            }
+        }
+    }
+
+}
+
+extension DatabaseManager {
+    /// Renames a series everywhere it's referenced by name, in one transaction.
+    func renameSeries(oldName: String, publisher: String?, newName: String) {
+        let scoped = publisher.map { !$0.isEmpty && $0 != "All" } ?? false
+        queue.sync {
+            _ = inTransaction {
+                ["comics", "series_covers", "series_reader_prefs", "series_order"].allSatisfy { table in
+                    scoped
+                        ? run("UPDATE \(table) SET series = ? WHERE series = ? AND publisher = ?",
+                              args: [newName, oldName, publisher]) != -1
+                        : run("UPDATE \(table) SET series = ? WHERE series = ?",
+                              args: [newName, oldName]) != -1
+                }
+            }
+        }
+    }
+
+    func seriesNameCollides(oldName: String, publisher: String?, newName: String) -> Bool {
+        guard newName != oldName else { return false }
+        return queue.sync {
+            if let pub = publisher, !pub.isEmpty, pub != "All" {
+                return scalarInt("SELECT COUNT(*) FROM comics WHERE series = ? AND publisher = ?",
+                                  args: [newName, pub]) > 0
+            }
+            return scalarInt("SELECT COUNT(*) FROM comics WHERE series = ?", args: [newName]) > 0
+        }
+    }
+}
+
+extension DatabaseManager {
+    func seedMissingPositions() {
+        queue.sync {
+            _ = exec("""
+            UPDATE comics SET position =
+                is_special_issue(issue_number, title, series) * \(ComicSortClassifier.specialBandOffset)
+                + COALESCE(CAST(NULLIF(issue_number,'') AS INTEGER), id) * \(ComicSortClassifier.mainlinePositionStride)
+            WHERE position IS NULL
+            """)
+        }
+    }
+
+    // Manual Series Manager orders, protected from the rescan reseed in `batchUpdateFolderMeta`.
+    func setReadingOrderOverride(comicId: Int64, position: Int, reason: String = "Manually placed") {
+        queue.sync {
+            _ = run("""
+                INSERT OR REPLACE INTO reading_order_overrides (comic_id, position, reason) VALUES (?, ?, ?)
+                """, args: [comicId, position, reason])
+            _ = run("UPDATE comics SET position = ? WHERE id = ?", args: [position, comicId])
+        }
+    }
+
+    func allReadingOrderOverrides() -> [(filePath: String, position: Int, reason: String)] {
+        queue.sync {
+            rows("""
+                SELECT c.file_path, o.position, o.reason
+                FROM reading_order_overrides o JOIN comics c ON c.id = o.comic_id
+                WHERE c.deleted_at IS NULL
+                """) { s in
+                (colText(s, 0) ?? "", colInt(s, 1), colText(s, 2) ?? "Manually placed")
             }
         }
     }

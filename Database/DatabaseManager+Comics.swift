@@ -4,12 +4,33 @@ import SQLite3
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 extension DatabaseManager {
-    /// Escapes literal `%`/`_`/`\` in free-text search input so a LIKE '%...%' pattern treats
-    /// them as literal characters instead of wildcards (paired with `ESCAPE '\'` at each call site).
+    /// Escapes `%`, `_` and `\` so user input is matched literally by LIKE (paired with `ESCAPE
+    /// '\'`).
     static func likeEscaped(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "%", with: "\\%")
          .replacingOccurrences(of: "_", with: "\\_")
+    }
+
+    /// Every word must match at least one field, so "batman classic 1987" narrows step by step.
+    /// Covers the folder hierarchy (publisher, character, folder group such as "Classic", series)
+    /// as well as title, issue number, year, credits, story arc, notes and tags.
+    static func searchCondition(_ query: String) -> (sql: String, args: [Any?])? {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return nil }
+        let fields = ["c.title", "c.series", "c.publisher", "c.character", "c.folder_group",
+                      "c.issue_number", "CAST(c.year AS TEXT)", "c.writer", "c.penciller",
+                      "c.story_arc", "c.notes"]
+        var clauses: [String] = []
+        var args: [Any?] = []
+        for word in words {
+            let pattern = "%\(likeEscaped(word))%"
+            var matches = fields.map { "\($0) LIKE ? ESCAPE '\\'" }
+            matches.append("c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name LIKE ? ESCAPE '\\')")
+            args += Array(repeating: pattern, count: matches.count)
+            clauses.append("(" + matches.joined(separator: " OR ") + ")")
+        }
+        return (clauses.joined(separator: " AND "), args)
     }
 
     func allComics(publisher: String? = nil, character: String? = nil, series: String? = nil,
@@ -24,16 +45,8 @@ extension DatabaseManager {
             if nullCharacterOnly { conds.append("c.character IS NULL") }
             else if let chr = character { conds.append("c.character = ?"); args.append(chr) }
             if let ser = series { conds.append("c.series = ?"); args.append(ser) }
-            if let q = search, !q.isEmpty {
-                // Covers catalog metadata plus the notes and tags a user attached themselves.
-                conds.append("""
-                    (c.title LIKE ? ESCAPE '\\' OR c.series LIKE ? ESCAPE '\\' OR c.publisher LIKE ? ESCAPE '\\'
-                     OR c.writer LIKE ? ESCAPE '\\' OR c.penciller LIKE ? ESCAPE '\\' OR c.character LIKE ? ESCAPE '\\'
-                     OR c.notes LIKE ? ESCAPE '\\'
-                     OR c.id IN (SELECT ct.comic_id FROM comic_tags ct JOIN tags t ON ct.tag_id = t.id WHERE t.name LIKE ? ESCAPE '\\'))
-                    """)
-                let p = "%\(Self.likeEscaped(q))%"
-                args += [p, p, p, p, p, p, p, p]
+            if let q = search, let match = Self.searchCondition(q) {
+                conds.append(match.sql); args += match.args
             }
             if favoritesOnly   { conds.append("f.comic_id IS NOT NULL") }
             if unreadOnly      { conds.append("COALESCE(rp.current_page, 0) = 0") }
@@ -52,13 +65,9 @@ extension DatabaseManager {
         }
     }
 
-    /// The next comic after `comic` in the same (publisher, series), using the exact same
-    /// ordering as `.manual` sort (position, then id) -- the order Series Manager edits, so
-    /// "next" always matches what a user sees when scrolling the series. Nil at the end.
+    /// The next comic in the same series, in manual order (position, then id). Nil at the end.
     func nextComic(after comic: Comic) -> Comic? { adjacentComic(to: comic, forward: true) }
 
-    /// Same series-scoped ordering as `nextComic(after:)`, opposite direction -- lets the reader
-    /// carry a page-turn backward across a comic boundary the same way it does forward.
     func previousComic(before comic: Comic) -> Comic? { adjacentComic(to: comic, forward: false) }
 
     private func adjacentComic(to comic: Comic, forward: Bool) -> Comic? {
@@ -128,10 +137,7 @@ extension DatabaseManager {
         }
     }
 
-    /// The ideal filename for one comic, computed with the exact same canonical-name/volume/title
-    /// disambiguation logic the bulk Rename Files tool uses (`ComicFileNaming`), scoped to just
-    /// this comic's (publisher, series) siblings rather than the whole library. Returns nil when
-    /// the file's current name already matches -- i.e. nothing to fix.
+    /// The ideal filename for this comic (see `ComicFileNaming`), or nil if it already matches.
     func proposedFilename(comicId: Int64) -> String? {
         queue.sync {
             guard let target = rows("\(comicSelect) WHERE c.id = ? AND c.deleted_at IS NULL",
@@ -142,18 +148,20 @@ extension DatabaseManager {
         }
     }
 
-    func inProgress(limit: Int = 20) -> [Comic] {
-        queue.sync {
+    /// Started but unfinished comics, most recently read first. `limit` nil returns all of them.
+    func inProgress(limit: Int? = nil, search: String? = nil) -> [Comic] {
+        let match = search.flatMap(Self.searchCondition)
+        return queue.sync {
             rows("""
                 \(comicSelect)
                 WHERE c.deleted_at IS NULL AND rp.current_page > 0
                   AND (c.page_count = 0 OR rp.current_page < c.page_count - 2)
+                  \(match.map { "AND \($0.sql)" } ?? "")
                 ORDER BY rp.last_read DESC LIMIT ?
-            """, args: [limit], map: comicRow)
+            """, args: (match?.args ?? []) + [limit ?? -1], map: comicRow)
         }
     }
 
-    /// How many comics `inProgress` would return with no limit (the sidebar's Continue Reading count).
     func inProgressCount() -> Int {
         queue.sync {
             scalarInt("""
@@ -164,7 +172,6 @@ extension DatabaseManager {
         }
     }
 
-    /// Finished comics, most recently finished first -- what Read Next suggestions build on.
     func recentlyFinished(limit: Int) -> [Comic] {
         queue.sync {
             rows("""
@@ -175,10 +182,8 @@ extension DatabaseManager {
         }
     }
 
-    /// Nil if `current` is empty/a placeholder, or if it doesn't actually disagree with
-    /// `proposed` (after case/whitespace-insensitive comparison) -- i.e. nil means "safe to
-    /// auto-apply `proposed`, nothing worth flagging." Shared with `LibraryScanner`'s existing-
-    /// library audit migration, so both use exactly the same disagreement rule.
+    /// Nil when `current` is empty/a placeholder or agrees with `proposed`, i.e. safe to auto-
+    /// apply.
     static func detectMetadataConflict(
         field: String, current: String?, proposed: String?, source: String, comicId: Int64
     ) -> MetadataConflictInput? {
@@ -192,16 +197,10 @@ extension DatabaseManager {
 
     func batchInsert(_ comics: [ComicInsert]) {
         guard !comics.isEmpty else { return }
-        // `upsertMetadataConflicts` takes `queue` itself -- collected here and applied AFTER this
-        // function's own `queue.sync` block returns, never from inside it, or a nested `queue.sync`
-        // on this serial queue would deadlock.
+        // Applied after this queue.sync returns: `upsertMetadataConflicts` takes the queue itself.
         let conflicts: [MetadataConflictInput] = queue.sync {
-            // If any of this batch's paths already have a row with meta_edited = 0, compare the
-            // newly-resolved series/publisher/issue_number against what's already there instead of
-            // blindly overwriting it -- a real disagreement (not a placeholder being filled in for
-            // the first time) gets flagged for review instead of silently applied in either
-            // direction. Empty/cheap on a normal new-files-only scan, where none of these paths
-            // exist yet.
+            // For paths already in the library, a genuine disagreement with existing metadata is
+            // flagged for review instead of overwritten.
             struct Existing { let id: Int64; let series: String?; let publisher: String?; let issueNumber: String?; let metaEdited: Bool }
             let paths = comics.map(\.filePath)
             let placeholders = paths.map { _ in "?" }.joined(separator: ",")
@@ -236,10 +235,6 @@ extension DatabaseManager {
             }
 
             _ = inTransaction {
-                // Each of these two statements is identical text across every comic in the
-                // batch -- prepared once and reused across all rows instead of `_insertRow`'s
-                // former per-comic prepare/finalize, which mattered for first-time imports of
-                // large libraries (chunks of up to 100 comics per flush, potentially many chunks).
                 let insertRows: [[Any?]] = resolvedComics.map { c in
                     [c.title, c.filePath, c.publisher, c.character,
                      c.series, c.issueNumber, c.pageCount, c.writer,
@@ -249,20 +244,8 @@ extension DatabaseManager {
                      c.volume, c.format, c.hasComicInfo.map { $0 ? Int64(1) : Int64(0) },
                      c.comicInfoSeries, c.comicInfoPublisher, c.folderSeries, c.folderPublisher, c.folderGroup]
                 }
-                // ON CONFLICT (not OR IGNORE): file_path is UNIQUE, and a soft-deleted comic keeps
-                // its row (deleted_at set, never removed) forever at that same path. If the file
-                // later reappears after being wrongly marked stale (e.g. a flaky/waking external
-                // drive during a scan), INSERT OR IGNORE would silently no-op on the UNIQUE
-                // conflict -- the comic would never come back, permanently orphaned. Reviving the
-                // SAME row on conflict instead means its reading_progress/tags/bookmarks/Reading
-                // Path memberships (all keyed by this comic_id) are still correctly attached -- a plain
-                // "delete and re-insert" would have orphaned all of that. added_at and position
-                // are deliberately left untouched: a revival isn't a new addition. The folder-
-                // derived identity columns (matching `folderDerivedColumns`, plus issue_number)
-                // are gated behind meta_edited like every other write path touches them -- without
-                // this, a user's manual correction survives right up until the file goes briefly
-                // missing (e.g. a flaky external drive) and reappears, at which point the revival
-                // would have silently reset it back to the raw filename/folder-parsed guess.
+                // ON CONFLICT revives a soft-deleted row at the same path, so its progress, tags
+                // and path memberships stay attached.
                 let ok1 = runBatch("""
                     INSERT INTO comics
                         (title, file_path, publisher, character, series, issue_number,
@@ -290,10 +273,7 @@ extension DatabaseManager {
                         folder_group = excluded.folder_group
                     """, rows: insertRows)
 
-                // A revival (or a metadata refresh) can leave a comic's page_count smaller than
-                // whatever page reading_progress last saved -- clamp it down so Stats/Continue
-                // Reading stop treating stale out-of-range progress as "finished", and the reader
-                // doesn't need to be the only place enforcing this.
+                // Clamp saved progress if the page count shrank.
                 let clampRows: [[Any?]] = comics.map { [$0.filePath, $0.filePath, $0.filePath] }
                 let ok2 = runBatch("""
                     UPDATE reading_progress SET current_page = MAX(0, (SELECT page_count FROM comics WHERE file_path = ?) - 1)
@@ -317,8 +297,7 @@ extension DatabaseManager {
     func updatePageCount(comicId: Int64, count: Int) {
         queue.sync {
             _ = run("UPDATE comics SET page_count = ? WHERE id = ?", args: [count, comicId])
-            // See _insertRow's matching comment -- a corrected page count can leave saved
-            // progress out of range.
+            // Clamp saved progress if the page count shrank.
             _ = run("""
                 UPDATE reading_progress SET current_page = MAX(0, ? - 1)
                 WHERE comic_id = ? AND current_page > MAX(0, ? - 1)
@@ -338,8 +317,6 @@ extension DatabaseManager {
         queue.sync { Set(rows("SELECT file_path FROM comics WHERE deleted_at IS NULL", map: { colText($0, 0) ?? "" })) }
     }
 
-    /// Returns the id of a soft-deleted comic at this exact path, if one exists -- used to evict its
-    /// (possibly stale/wrong) cached cover before the row is revived by a rescan.
     func softDeletedComicId(atPath path: String) -> Int64? {
         queue.sync {
             let id = scalarInt("SELECT id FROM comics WHERE file_path = ? AND deleted_at IS NOT NULL", args: [path])
@@ -347,9 +324,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Every active comic whose file lives under `folderPath` -- used when a library folder is
-    /// removed from configuration, so those comics can be soft-deleted along with it instead of
-    /// lingering in the library forever, pointing at a folder ComicArc no longer manages at all.
+    /// Active comics under `folderPath`, soft-deleted when that library folder is removed.
     func comicIds(underFolder folderPath: String) -> [Int64] {
         queue.sync {
             let prefix = folderPath.hasSuffix("/") ? folderPath : folderPath + "/"
@@ -368,9 +343,7 @@ extension DatabaseManager {
         }
     }
 
-    /// `reason` is "user" for an explicit delete, or "missing" for the scanner's own stale-file
-    /// cleanup -- lets the Trash screen (and its Restore action) tell the two apart instead of
-    /// treating a file that vanished off a drive identically to one someone chose to delete.
+    /// `reason`: "user" for an explicit delete, "missing" when the scanner can't find the file.
     func softDelete(_ ids: [Int64], reason: String = "user") {
         guard !ids.isEmpty else { return }
         queue.sync {
@@ -397,10 +370,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Sticky completion flag, deliberately separate from `current_page` -- `current_page` is
-    /// just the resume position (freely moves backward on a reread), while `finished_at` should
-    /// only ever be set by genuine sequential reading reaching the end, or an explicit Mark Read.
-    /// COALESCE keeps a reread from clearing/overwriting an already-recorded finish.
+    /// `finished_at` is sticky: set by reading to the end or Mark Read, never cleared by a reread.
     func markFinished(comicId: Int64) {
         queue.sync {
             _ = run("""
@@ -422,9 +392,6 @@ extension DatabaseManager {
         }
     }
 
-    /// Batch Mark Read/Unread: resume position and the sticky `finished_at` flag in one
-    /// transaction -- a bulk action that only moved `current_page` would leave `isFinished`
-    /// (driven solely by `finished_at`) untouched.
     func setFinished(_ comics: [(comicId: Int64, lastPage: Int)], finished: Bool) {
         guard !comics.isEmpty else { return }
         queue.sync {
@@ -455,11 +422,9 @@ extension DatabaseManager {
         }
     }
 
-    /// The Reading List is an ordinary Reading Path with this title -- the quick "Add to Reading
-    /// List" actions just add to (creating it if needed) or remove from that path.
+    /// The Reading List is an ordinary Reading Path with this title.
     static let readingListTitle = "Reading List"
 
-    /// The SQL expression for the Reading List path's id (NULL when it doesn't exist yet).
     static let readingListRunIdSQL = "(SELECT id FROM runs WHERE title = 'Reading List' ORDER BY id LIMIT 1)"
 
     func setInReadingList(_ comicId: Int64, _ value: Bool) { setInReadingList([comicId], value) }
@@ -486,11 +451,7 @@ extension DatabaseManager {
 
     static let folderDerivedColumns: Set<String> = ["title", "series", "publisher", "character"]
 
-    /// Every column `updateMeta` is allowed to touch -- every call site today passes compile-time
-    /// string literals, but the column name still gets interpolated straight into the SQL text
-    /// (only the value is bound), so this is the one thing standing between that and a real
-    /// injection vector the day some caller builds `fields` from anything less trusted than a
-    /// literal.
+    /// Column names are interpolated into SQL, so only these are allowed.
     static let updatableMetaColumns: Set<String> = folderDerivedColumns.union(["issue_number", "notes", "year"])
 
     func updateMeta(comicId: Int64, fields: [(String, Any?)]) {
@@ -571,34 +532,6 @@ extension DatabaseManager {
 
     func batchUpdateFolderMeta(_ items: [(id: Int64, pub: String?, char: String?, ser: String?, title: String, issueNumber: String?, year: Int?, group: String?)]) {
         queue.sync {
-            // Captured before the update -- a folder rename that changes a comic's (publisher,
-            // series) would otherwise silently orphan any series_links row still pointing at the
-            // old name (it no longer matches anything in `comics`), breaking whatever
-            // volume-aware reading-order chaining that link was providing. Only rows this update
-            // will actually touch (meta_edited=0) count, matching the same guard the update
-            // itself uses below.
-            var renameMappings: Set<[String]> = []
-            let idsWithNewSeries = items.compactMap { $0.ser != nil ? $0.id : nil }
-            if !idsWithNewSeries.isEmpty {
-                var current: [Int64: (pub: String, ser: String)] = [:]
-                for chunk in idChunks(idsWithNewSeries) {
-                    let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
-                    for (id, row) in rows(
-                        "SELECT id, publisher, series FROM comics WHERE id IN (\(placeholders)) AND meta_edited = 0",
-                        args: chunk.map { $0 as Any? },
-                        map: { s in (colInt64(s, 0), (pub: colText(s, 1) ?? "", ser: colText(s, 2) ?? "")) }
-                    ) {
-                        current[id] = row
-                    }
-                }
-                for item in items {
-                    guard let newSer = item.ser, let old = current[item.id] else { continue }
-                    let newPub = item.pub ?? old.pub
-                    guard old.ser != newSer || old.pub != newPub else { continue }
-                    renameMappings.insert([old.pub, old.ser, newPub, newSer])
-                }
-            }
-
             inTransaction {
                 var ok = true
                 for item in items {
@@ -614,10 +547,6 @@ extension DatabaseManager {
                     if let ser = item.ser {
                         if run("UPDATE comics SET series=? WHERE id=? AND meta_edited=0", args: [ser, item.id]) == -1 { ok = false }
                     }
-                    // Purely structural (which folder a file sits in), not user-editable content, but
-                    // still gated by meta_edited like every other folder-derived column -- unconditional
-                    // so a folder-group that's been removed (file moved up a level) correctly clears
-                    // back to NULL instead of keeping a stale value forever.
                     if run("UPDATE comics SET folder_group=? WHERE id=? AND meta_edited=0", args: [item.group, item.id]) == -1 { ok = false }
                     if run("UPDATE comics SET title=? WHERE id=? AND meta_edited=0", args: [item.title, item.id]) == -1 { ok = false }
 
@@ -628,30 +557,12 @@ extension DatabaseManager {
                             """, args: [num, item.id, num]) == -1 { ok = false }
                     }
                     if let year = item.year {
-                        // Only ever fills a genuinely empty year -- a real ComicInfo.xml <Year> tag
-                        // (on the rare file that has one) is always a better source than a filename
-                        // guess and must never be overwritten by it.
+                        // Only fills an empty year; a ComicInfo.xml year always wins over a
+                        // filename guess.
                         if run("UPDATE comics SET year=? WHERE id=? AND meta_edited=0 AND year IS NULL", args: [year, item.id]) == -1 { ok = false }
                     }
                 }
                 return ok
-            }
-
-            // Wrapped in its own transaction: a crash between the parent-side and child-side
-            // update for one mapping, or between mappings when several series are renamed in the
-            // same batch, would otherwise leave series_links partially resynced against comics
-            // rows that have already committed their new names.
-            if !renameMappings.isEmpty {
-                inTransaction {
-                    renameMappings.allSatisfy { mapping in
-                        let (oldPub, oldSer, newPub, newSer) = (mapping[0], mapping[1], mapping[2], mapping[3])
-                        let ok1 = run("UPDATE series_links SET parent_publisher = ?, parent_series = ? WHERE parent_publisher = ? AND parent_series = ?",
-                                     args: [newPub, newSer, oldPub, oldSer]) != -1
-                        let ok2 = run("UPDATE series_links SET child_publisher = ?, child_series = ? WHERE child_publisher = ? AND child_series = ?",
-                                     args: [newPub, newSer, oldPub, oldSer]) != -1
-                        return ok1 && ok2
-                    }
-                }
             }
 
             exec("""
@@ -688,11 +599,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Reading progress for every comic that has actually been started, keyed by file hash rather
-    /// than id -- ids are meaningless across two devices' separate databases (different scan
-    /// history/order), but a comic's file hash identifies the same underlying file wherever it
-    /// was imported. Used by local Mac<->iPad progress sync; no tags here,
-    /// since those have much messier merge semantics than a single scalar page number.
+    /// Progress for every started comic, keyed by file hash so it matches across devices.
     func progressSyncSnapshot() -> [(fileHash: String, progress: Int, pageCount: Int, lastRead: String, finished: Bool)] {
         queue.sync {
             rows("""
@@ -707,12 +614,8 @@ extension DatabaseManager {
         }
     }
 
-    /// Applies incoming progress from another device -- last-write-wins by `lastRead` timestamp,
-    /// per comic, matched by file hash. A comic this device doesn't have (different hash, not in
-    /// its library) is silently skipped rather than treated as an error -- the two devices'
-    /// libraries are not guaranteed to be identical. Returns how many comics were actually updated,
-    /// for a user-facing summary.
-    /// Finished is sticky: a comic finished on either device ends up finished on both.
+    /// Applies another device's progress: last write wins by timestamp, matched by file hash,
+    /// unknown comics skipped. Finished is sticky. Returns how many changed.
     func applySyncedProgress(_ items: [(fileHash: String, progress: Int, lastRead: String, finished: Bool)]) -> Int {
         queue.sync {
             var updated = 0
@@ -746,26 +649,19 @@ extension DatabaseManager {
         }
     }
 
-    /// For CBR-to-CBZ conversion: unlike a plain rename/move, the file's bytes genuinely change
-    /// (re-encoded as a zip), so its `file_hash` must be updated alongside `file_path` -- leaving
-    /// the old hash in place would make this comic look "moved away" from its own real location
-    /// on the next scan's hash-based move detection.
+    /// Conversion re-encodes the file, so its hash changes along with its path.
     func updateFilePathAndHash(id: Int64, newPath: String, newHash: String) {
         queue.sync {
             _ = run("UPDATE comics SET file_path = ?, file_hash = ? WHERE id = ?", args: [newPath, newHash, id])
         }
     }
 
-    /// Every comic currently backed by a `.cbr` file -- population for a "Convert CBR to CBZ"
-    /// batch tool.
     func cbrComics() -> [Comic] {
         queue.sync {
             rows("\(comicSelect) WHERE c.deleted_at IS NULL AND c.file_path LIKE '%.cbr'", map: comicRow)
         }
     }
 
-    /// Same query as `allComicPaths()` under a name that reads better at its "which of these
-    /// are still on disk" call sites; kept as a single query so the two never drift apart.
     func stalePaths() -> [(id: Int64, path: String)] { allComicPaths() }
 
 }

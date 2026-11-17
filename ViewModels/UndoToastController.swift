@@ -1,15 +1,11 @@
 import Foundation
 
-/// The bottom-of-window toast: an undoable action ("… deleted — Undo") or, with no `undo`, a
-/// plain notice. One at a time, auto-dismissed after 8 seconds. Genuinely independent of library
-/// data/navigation (previously mixed directly into `LibraryViewModel`), so it gets its own
-/// object; `LibraryViewModel` composes one and exposes thin passthroughs so every existing call
-/// site (`vm.offerUndo`, `vm.pendingUndo`, etc.) keeps working unchanged.
+/// The bottom-of-window toast: an undoable action, or a plain notice when `undo` is nil. One at a
+/// time, dismissed after 8 seconds.
 @MainActor
 final class UndoToastController: ObservableObject {
     struct Action {
         let message: String
-        /// Nil for a plain notice -- the toast then shows no Undo button.
         let undo: (() -> Void)?
     }
 
@@ -34,4 +30,16 @@ final class UndoToastController: ObservableObject {
         dismissTask?.cancel()
         pending = nil
     }
+}
+
+extension LibraryViewModel {
+    func offerUndo(_ message: String, undo: @escaping () -> Void) {
+        undoToastController.offer(message, undo: undo)
+    }
+    /// A toast with no Undo button, for a plain confirmation.
+    func showNotice(_ message: String) {
+        undoToastController.offer(message, undo: nil)
+    }
+    func performUndo() { undoToastController.perform() }
+    func dismissUndo() { undoToastController.dismiss() }
 }

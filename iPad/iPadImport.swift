@@ -19,14 +19,8 @@ struct iPadImportButton: View {
     }
 }
 
-/// `UIDocumentPickerViewController(forOpeningContentTypes:asCopy: true)` writes into a temporary,
-/// app-private staging area that Apple's own documentation only guarantees lives until the picker
-/// delegate callback returns -- not permanent storage. Previously the picked URLs were handed
-/// straight to `importFiles`/`addSingle`, which stored that ephemeral path verbatim as the
-/// comic's `file_path`; the comic could become permanently unreadable the next time iOS reclaimed
-/// that staging area (relaunch, low-disk purge), with no recovery path. This copies each picked
-/// file into a real, permanent, app-owned folder in Documents (visible in the Files app, so the
-/// user can find/back up their own comics) before it's ever inserted into the database.
+/// The document picker's copies are temporary, so imported files are copied into the app's own
+/// storage first.
 enum iPadImportStorage {
     @MainActor
     static func copyIntoLibrary(_ urls: [URL], vm: LibraryViewModel) -> [URL] {
@@ -48,9 +42,8 @@ enum iPadImportStorage {
                 try FileManager.default.copyItem(at: url, to: target)
                 return target
             } catch {
-                // Copy failed (disk full, permissions) -- fall back to the ephemeral picker URL
-                // rather than dropping the import silently; `addSingle` already surfaces a
-                // per-file failure reason if the path turns out to be unreadable.
+                // If the copy fails, fall back to the picker's URL; addSingle reports a per-file
+                // error if it's unreadable.
                 return url
             }
         }

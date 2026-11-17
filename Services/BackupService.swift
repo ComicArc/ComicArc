@@ -2,10 +2,8 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum BackupService {
-    /// Exports a specific, already-curated set of comics (a series or a reading path)
-    /// as a plain CSV -- distinct from `export()`'s full-library JSON backup, which round-trips
-    /// through the app but isn't meant for opening in a spreadsheet to print a checklist, share
-    /// a want-list, or hand off to another tool.
+    /// Exports a set of comics (a series or Reading Path) as CSV, for spreadsheets. Separate from
+    /// the full JSON backup.
     @MainActor
     static func exportCSV(comics: [Comic], fileService: any FileServiceProtocol,
                           filename: String, onError: @escaping (String) -> Void) {
@@ -79,10 +77,7 @@ enum BackupService {
                         ["file_path": o.filePath, "position": o.position, "reason": o.reason]
                     }
 
-                    // Manual sidebar/grid reordering and a series' custom "use this issue's cover"
-                    // pick -- deliberate user customizations with no automatic way to regenerate
-                    // them. Previously silently
-                    // dropped by both export and import.
+                    // Manual orders and series cover picks.
                     let seriesOrderJSON: [[String: Any]] = db.allSeriesOrderPositions().map {
                         ["group_name": $0.groupName, "publisher": $0.publisher, "series": $0.series, "position": $0.position]
                     }
@@ -136,12 +131,8 @@ enum BackupService {
 
                     let root = parsed as? [String: Any]
                     let comicsArr = root?["comics"] as? [[String: Any]] ?? (parsed as? [[String: Any]]) ?? []
-                    // Resolve each backed-up comic to its *current* row by file path rather than
-                    // trusting the numeric "id" stored in the backup JSON -- SQLite autoincrement
-                    // ids are reassigned after clearLibrary()/resyncLibrary(), both user-triggered,
-                    // so a path that still exists can belong to a different row than the id
-                    // recorded at backup time. Restoring against the wrong id would silently
-                    // overwrite an unrelated comic's favorites/progress/notes/tags/bookmarks.
+                    // Match each backed-up comic by file path, not id: ids change after Clear
+                    // Library or Resync.
                     let pathsInBackup = comicsArr.compactMap { $0["file_path"] as? String }
                     let currentIdByPath = Dictionary(uniqueKeysWithValues: db.comics(withPaths: pathsInBackup).map { ($0.filePath, $0.id) })
                     var comicIdByPath: [String: Int64] = [:]

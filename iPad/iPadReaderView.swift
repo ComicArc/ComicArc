@@ -24,12 +24,8 @@ struct iPadReaderView: View {
                                  differentiateWithoutColor: differentiateWithoutColor)
     }
 
-    // Same hero cover-morph the Mac reader uses (`ReaderView.swift`) -- grows from wherever this
-    // comic's cover was on screen into the reader, then fades to reveal the real page underneath,
-    // and reverses on close. Needs `iPadRootView` to present this view in the same view hierarchy
-    // as the library (not a `.fullScreenCover`) and inject a real `readerNamespace` for the
-    // `matchedGeometryEffect` to actually connect across the two. Pure transient UI/animation
-    // state, unrelated to reading -- stays local, same as the Mac reader.
+    // The cover-to-reader hero animation, as on Mac. Requires this view to be presented in the
+    // library's hierarchy, not as a full-screen cover.
     @State private var heroCoverImage: PlatformImage?
     @State private var showHeroCover = true
     @State private var isClosing = false
@@ -57,10 +53,7 @@ struct iPadReaderView: View {
             backdropColor.ignoresSafeArea()
 
             if pageCount == 0 {
-                // Previously: `ForEach(0..<pageCount, ...)` over an empty range rendered nothing
-                // at all -- a silent black screen with no explanation, unlike the Mac reader's
-                // graceful "Couldn't load page 1" fallback. Same underlying cause (a genuinely
-                // corrupt or empty archive), same visible treatment now on both platforms.
+                // An empty or corrupt archive shows an error instead of a black screen.
                 unavailablePlaceholder
             } else if session.scrollMode {
                 scrollReader
@@ -112,8 +105,7 @@ struct iPadReaderView: View {
         .onKeyPress(KeyEquivalent("b")) { session.toggleBookmark(); return .handled }
         .onKeyPress(KeyEquivalent("r")) { session.rtl.toggle(); return .handled }
         .onKeyPress(KeyEquivalent("g")) { withAnimation(Design.motion(.easeInOut(duration: 0.2), reduce: reduceMotion)) { showFilmstrip.toggle() }; return .handled }
-        // Parity with the Mac reader's zoom keys -- previously iPad had no keyboard zoom at all
-        // despite external keyboards being common on this platform.
+        // Keyboard zoom, matching the Mac reader.
         .onKeyPress(KeyEquivalent("=")) { session.setZoom(session.zoomLevel * 1.25); return .handled }
         .onKeyPress(KeyEquivalent("+")) { session.setZoom(session.zoomLevel * 1.25); return .handled }
         .onKeyPress(KeyEquivalent("-")) { session.setZoom(session.zoomLevel / 1.25); return .handled }
@@ -139,9 +131,7 @@ struct iPadReaderView: View {
         }
     }
 
-    /// Same hero-reverse-then-close sequence as the Mac reader (`ReaderView.handleClose()`):
-    /// brings the hero-cover layer back so there's something for the matched-geometry shrink to
-    /// animate, then tears the view down once that's had a moment to play out.
+    /// Plays the hero animation in reverse, then closes.
     private func handleClose() {
         guard !isClosing else { return }
         isClosing = true
@@ -165,9 +155,7 @@ struct iPadReaderView: View {
     }
 
     private var pageReader: some View {
-        // `set` fires only for the TabView's own swipe interaction (external, session-driven page
-        // changes update `get` without invoking `set`) -- a native swipe is genuine sequential
-        // reading, same as `reportVisiblePage` treats continuous-scroll visibility, not a jump.
+        // `set` fires only for the user's own swipes, which count as sequential reading.
         TabView(selection: Binding(get: { session.currentPage }, set: { session.reportVisiblePage($0) })) {
             ForEach(0..<pageCount, id: \.self) { idx in
                 ReaderPageView(session: session, pageIndex: idx)
@@ -178,8 +166,7 @@ struct iPadReaderView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        // Reverses swipe direction so a right-to-left manga-style series turns pages the way a
-        // reader familiar with that format expects, same intent as the Mac reader's own RTL mode.
+        // Reversed swipe direction for right-to-left comics.
         .environment(\.layoutDirection, session.rtl ? .rightToLeft : .leftToRight)
         .ignoresSafeArea()
         .simultaneousGesture(tapGesture)
@@ -249,11 +236,8 @@ struct iPadReaderView: View {
             }
     }
 
-    /// Live-gesture preview, same technique as the Mac reader: the committed
-    /// `session.zoomLevel`/`panOffsetInPoints` composed with whatever the in-flight pinch/drag
-    /// gesture is currently reporting, so the page tracks the user's fingers in real time without
-    /// waiting for the gesture to end and commit (which would also mean re-decoding on every
-    /// frame of the gesture, not just once at the end).
+    /// Live gesture preview: the committed zoom/pan combined with the in-flight gesture, so the
+    /// page follows the fingers without re-decoding every frame.
     private var liveZoom: CGFloat { session.zoomLevel * pinchScale }
     private var liveOffset: CGSize {
         let base = session.panOffsetInPoints
@@ -476,11 +460,7 @@ struct iPadReaderView: View {
     }
 }
 
-/// Each `TabView` page needs to load its own image independently -- unlike the Mac reader's
-/// custom-drag-gesture paged mode (which only ever renders the single current page/spread and can
-/// read straight from `session.currentImage`), `TabView` keeps swipe-adjacent pages rendered too,
-/// so this mirrors `ScrollPageView`'s pattern instead: talk to `PageStore` directly via the
-/// session's already-open document.
+/// Each TabView page loads its own image, since TabView keeps neighboring pages mounted.
 private struct ReaderPageView: View {
     let session: ReaderSession
     let pageIndex: Int
@@ -489,14 +469,8 @@ private struct ReaderPageView: View {
     @State private var retryToken = UUID()
     @State private var viewportSize: CGSize = .zero
 
-    /// Mirrors `ReaderSession.maxPixelSizeForCurrentZoom` (Mac paged mode's own target-size
-    /// computation) -- previously always requested `maxPixelSize: nil` (full/native resolution)
-    /// for every page in the `TabView`, unconditionally. Since `TabView` keeps swipe-adjacent
-    /// pages mounted alongside the current one, that meant iPad's primary reading surface never
-    /// got the "target-size-aware decode" the reader rebuild is built around at all -- every page
-    /// a user ever swiped past stayed decoded (and cached) at up to the 8000px safety cap.
-    /// `.original` fit mode is the one deliberate exception, same as Mac: it explicitly wants
-    /// full/native resolution.
+    /// Decode at the size the page is shown (like `ReaderSession.maxPixelSizeForCurrentZoom`), not
+    /// full resolution.
     private var targetMaxPixelSize: Int? {
         guard session.fitMode != .original else { return nil }
         guard viewportSize.width > 0, viewportSize.height > 0 else { return nil }
@@ -533,8 +507,6 @@ private struct ReaderPageView: View {
                 if let img = image {
                     fittedImage(img, size: geo.size)
                 } else if loadFailed {
-                    // A real dead end before this: no explanation, no way forward except
-                    // backing out of the reader entirely for one bad page.
                     Color.black
                         .overlay(
                             VStack(spacing: 12) {
@@ -558,10 +530,8 @@ private struct ReaderPageView: View {
             }
         }
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { viewportSize = $0 })
-        // Re-requests only when THIS page is the one currently being viewed -- zooming shouldn't
-        // trigger a redecode storm across every TabView-mounted neighbor page, only the one the
-        // user is actually looking at. A cache hit at the new target size (e.g. zooming back out)
-        // resolves synchronously with no visible flicker -- see `PageStore.sufficientlyCached`.
+        // Only the visible page re-decodes on zoom; a cached sharper decode is served
+        // synchronously.
         .onChange(of: session.zoomLevel) { _, _ in
             guard pageIndex == session.currentPage else { return }
             retryToken = UUID()

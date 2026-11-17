@@ -7,9 +7,9 @@ DerivedData/
 
 # Vendored local Swift packages: keep their source, drop their build output
 # and any accidentally-nested .git directories from cloning instead of vendoring.
-Packages/*/build/
-Packages/*/.build/
-Packages/*/.git/
+Vendor/*/build/
+Vendor/*/.build/
+Vendor/*/.git/
 
 # ── Xcode project state (machine/user-specific) ───────────────────────────────
 xcuserdata/

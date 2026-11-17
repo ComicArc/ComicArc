@@ -9,8 +9,7 @@ struct MetadataInspectorView: View {
     @State private var isRenaming = false
     @State private var renameError: String?
     #if os(macOS)
-    // ComicInfo write-back depends on LibraryScanner.writeComicInfoBack, which shells out via
-    // the same macOS-only archive-writing path as CBR-to-CBZ conversion -- no iPad equivalent.
+    // ComicInfo write-back is macOS-only (it uses the same archive tools as CBR conversion).
     @AppStorage("comicInfoWriteBackEnabled") private var writeBackEnabled = false
     @State private var isWritingBack = false
     @State private var writeBackError: String?

@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Wording, icons, and actions for the Reading Paths list. `CollectionListView` owns layout,
-/// drag-reorder, the Move Up/Down/Top/Bottom context menu, empty states, and the create sheet.
+/// Wording and actions for the Reading Paths list; `CollectionListView` handles layout, reordering,
+/// empty states and creation.
 @MainActor
 struct CollectionListConfig {
     let noun: String                    // "Reading Path"
@@ -23,13 +23,9 @@ struct CollectionListConfig {
 struct CollectionListView: View {
     let config: CollectionListConfig
     @Binding var selected: Run?
-    /// Fires after create/delete/cover-change so the caller can also refresh whatever cached
-    /// list (`vm.runs`) other screens read from.
+    /// Called after create/delete/cover changes, so the caller can refresh `vm.runs`.
     var onListChanged: () -> Void = {}
-    /// Bump this (from the caller) to force a reload -- e.g. when a `.runUpdated`
-    /// notification fires because the detail screen changed something. Plain reassignment of
-    /// `config`/`selected` doesn't itself trigger a re-fetch, since `items` is this view's own
-    /// `@State`, not derived from `config` on every body evaluation.
+    /// Change to force a reload, e.g. on `.runUpdated`.
     var reloadToken: UUID = UUID()
 
     @State private var items: [Run] = []
@@ -101,9 +97,7 @@ struct CollectionListView: View {
                                     draggedId = nil; dropTargetId = nil
                                     return true
                                 }
-                                // Drag-and-drop is the only way to reorder, which is both a hard
-                                // accessibility gap (no keyboard/VoiceOver path) and slow for a
-                                // long list -- these give a faster, non-drag alternative.
+                                // Non-drag reordering, for keyboard and VoiceOver.
                                 .contextMenu {
                                     Button("Move to Top") { move(item, to: 0) }.disabled(items.first?.id == item.id)
                                     Button("Move Up") { move(item, by: -1) }.disabled(items.first?.id == item.id)
@@ -204,6 +198,8 @@ private struct CollectionCard: View {
 
     @State private var isHovered = false
     @State private var showCoverPicker = false
+    @State private var customCover: PlatformImage?
+    @State private var coverVersion = 0  // bumped on cover changes; the file name stays the same
     @Environment(\.fileService) private var fileService
 
     var body: some View {
@@ -240,6 +236,12 @@ private struct CollectionCard: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .task(id: "\(item.coverImagePath ?? "")#\(coverVersion)") {
+            let path = item.coverImagePath
+            customCover = await Task.detached(priority: .utility) {
+                path.flatMap { PlatformImage.decodedFromURL(URL(fileURLWithPath: $0)) }
+            }.value
+        }
         .accessibilityLabel(item.description.isEmpty ? item.title : "\(item.title), \(item.description)")
         .accessibilityValue(config.subtitle(item))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -247,19 +249,19 @@ private struct CollectionCard: View {
             Button("Choose Existing Cover…") { showCoverPicker = true }
             Button("Custom Image…") { pickCoverImage() }
             if item.coverImagePath != nil {
-                Button("Remove Custom Cover") { config.clearCover(item); onCoverChanged() }
+                Button("Remove Custom Cover") { config.clearCover(item); coverVersion += 1; onCoverChanged() }
             }
         }
         .sheet(isPresented: $showCoverPicker) {
             CoverPickerSheet(title: "Choose Cover for \(item.title)") { comic in
-                config.setCoverFromComic(item, comic, onCoverChanged)
+                config.setCoverFromComic(item, comic) { coverVersion += 1; onCoverChanged() }
             }
         }
     }
 
     @ViewBuilder
     private var coverThumbnail: some View {
-        if let path = item.coverImagePath, let img = PlatformImage.fromFile(path) {
+        if let img = customCover {
             Image(platformImage: img).comicCoverStyle().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ZStack {
@@ -274,6 +276,7 @@ private struct CollectionCard: View {
                                prompt: "Set Cover", contentTypes: [.image]) { urls in
             if let url = urls.first {
                 config.setCoverFromURL(item, url)
+                coverVersion += 1
                 onCoverChanged()
             }
         }

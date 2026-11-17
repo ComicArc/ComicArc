@@ -19,8 +19,7 @@ final class FileWatcher {
         self.onVolumeUnavailable  = onVolumeUnavailable
     }
 
-    /// One FSEventStream watching every configured root at once -- FSEvents natively accepts an
-    /// array of paths here, so this needs no per-folder stream/callback multiplication.
+    /// One FSEventStream for every configured root.
     func start(paths: [String]) {
         stop()
         let cfPaths = paths as CFArray

@@ -1,9 +1,7 @@
 import Foundation
 
 extension LibraryViewModel {
-    /// Called at launch and after any mutation that changes the run *list* (create/delete/
-    /// reorder) -- edits to a single run's fields (title, cover, notes) don't need this since
-    /// they don't change membership/order of `runs` itself.
+    /// Reloads `runs`. Needed after create/delete/reorder, not single-path edits.
     func refreshRuns() {
         runsGeneration += 1
         let gen = runsGeneration
@@ -89,8 +87,7 @@ extension LibraryViewModel {
         db.updateRun(id: id, title: title, description: description, buyLink: buyLink)
         NotificationCenter.default.post(name: .runUpdated, object: nil)
     }
-    /// Adds comics to a Reading Path in the given order (skipping any already in it) and offers
-    /// an undo -- the multi-comic entry point behind bulk-select and "Add Series to Reading Path".
+    /// Adds comics to a path in order, skipping ones already in it, with Undo.
     func addToRunWithUndo(runId: Int64, runTitle: String, comicIds: [Int64]) {
         let already = db.comicIdsInRun(runId: runId)
         let added = comicIds.filter { !already.contains($0) }
@@ -111,14 +108,13 @@ extension LibraryViewModel {
         }
     }
 
-    /// Bulk-select: adds the selected comics in the order they're shown in the grid.
     func bulkAddToRun(runId: Int64, runTitle: String) {
         let ids = comics.filter { selectedComicIds.contains($0.id) }.map(\.id)
         selectedComicIds.removeAll()
         addToRunWithUndo(runId: runId, runTitle: runTitle, comicIds: ids)
     }
 
-    /// Adds every issue of a series, in series order (the same order the series view shows).
+    /// Adds every issue of a series, in series order.
     func addSeriesToRun(series: String, publisher: String?, runId: Int64, runTitle: String) {
         Task.detached(priority: .userInitiated) { [db] in
             let ids = db.allComics(publisher: publisher, series: series, sortOrder: .manual).map(\.id)
@@ -126,7 +122,7 @@ extension LibraryViewModel {
         }
     }
 
-    /// Opens Reading Paths with the built-in "Reading List" path selected (if it exists yet).
+    /// Opens Reading Paths with the "Reading List" path selected, if it exists.
     func showReadingList() {
         select(.runs)
         selectedRun = db.allRuns().first { $0.title == DatabaseManager.readingListTitle }

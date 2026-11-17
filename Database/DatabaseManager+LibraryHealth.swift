@@ -48,12 +48,8 @@ extension DatabaseManager {
         queue.sync { scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL AND page_count = 0") }
     }
 
-    /// The subset of zero-page comics the scanner has genuinely given up on (`scan_retry_count`
-    /// hit `LibraryScanner`'s cap of 3 -- see `zeroPageCountPaths()`), as opposed to one that's
-    /// merely zero-page for now (freshly imported, a slow/waking external drive not yet rescanned
-    /// successfully). Distinguishing the two matters for UI: a per-comic "this file looks broken"
-    /// marker should only ever fire once retries are exhausted, not on every ordinary
-    /// just-added-and-not-yet-confirmed-readable comic.
+    /// Zero-page comics the scanner has given up on after 3 retries, as opposed to ones not yet
+    /// rescanned.
     func brokenComicIds() -> Set<Int64> {
         queue.sync {
             Set(rows("SELECT id FROM comics WHERE deleted_at IS NULL AND page_count = 0 AND scan_retry_count >= 3") {
@@ -78,11 +74,8 @@ extension DatabaseManager {
         }
     }
 
-    /// Duplicates are deliberately strict: two comics only match when they share the exact same
-    /// file name, a byte-identical cover thumbnail, or a byte-identical file (which always implies
-    /// the same thumbnail, and still catches copies whose thumbnail hasn't been generated yet).
-    /// Matching title, series, issue number, or other metadata alone never makes two books
-    /// duplicates. Matches are transitive, so each group is a connected set of copies.
+    /// Strict duplicates: same file name, byte-identical cover, or byte-identical file. Metadata
+    /// alone never matches. Groups are transitive.
     func duplicateGroups() -> [[Comic]] {
         let components = queue.sync { () -> [[Int64]] in
             let entries = rows("SELECT id, file_path, file_hash FROM comics WHERE deleted_at IS NULL") {
@@ -106,8 +99,8 @@ extension DatabaseManager {
         return max(0, group.count - 1)
     }
 
-    /// Union-find over the three exact-match keys. Cover files are only hashed when another
-    /// cover has the same byte size, so a normal library reads almost none of them.
+    /// Union-find over the three keys. Covers are only hashed when another cover has the same byte
+    /// size.
     static func duplicateComponents(_ entries: [(id: Int64, path: String, hash: String?)], coversDir: URL) -> [[Int64]] {
         var parent: [Int64: Int64] = [:]
         func find(_ x: Int64) -> Int64 {
@@ -170,4 +163,51 @@ extension DatabaseManager {
         }
     }
 
+}
+
+struct LibraryHealthReport {
+    struct SeriesIssue: Identifiable {
+        let publisher: String; let series: String; let count: Int
+        var id: String { "\(publisher):\(series)" }
+    }
+
+    var duplicateGroupCount: Int = 0
+    var multipleFirstIssues: [SeriesIssue] = []
+    var numberingGaps: [SeriesIssue] = []
+    var multipleVolumes: [SeriesIssue] = []
+    var corruptArchiveCount: Int = 0
+    var numberingMismatches: [SeriesIssue] = []
+
+    var isEmpty: Bool {
+        duplicateGroupCount == 0 && multipleFirstIssues.isEmpty
+            && numberingGaps.isEmpty && multipleVolumes.isEmpty
+            && corruptArchiveCount == 0 && numberingMismatches.isEmpty
+    }
+
+    var totalCount: Int {
+        duplicateGroupCount + multipleFirstIssues.count
+            + numberingGaps.count + multipleVolumes.count
+            + corruptArchiveCount + numberingMismatches.count
+    }
+}
+
+enum LibraryHealthAnalyzer {
+    static func analyze(db: DatabaseManager = .shared) -> LibraryHealthReport {
+        LibraryHealthReport(
+            duplicateGroupCount: db.duplicateGroups().count,
+            multipleFirstIssues: db.seriesWithMultipleFirstIssues().map {
+                .init(publisher: $0.publisher, series: $0.series, count: $0.count)
+            },
+            numberingGaps: db.seriesWithNumberingGaps().map {
+                .init(publisher: $0.publisher, series: $0.series, count: $0.count)
+            },
+            multipleVolumes: db.seriesWithMultipleVolumes().map {
+                .init(publisher: $0.publisher, series: $0.series, count: $0.count)
+            },
+            corruptArchiveCount: db.corruptArchiveCount(),
+            numberingMismatches: db.seriesWithNumberingMismatches().map {
+                .init(publisher: $0.publisher, series: $0.series, count: $0.count)
+            }
+        )
+    }
 }

@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// The one home for library maintenance: the health report plus tools, possible duplicates, and
-/// ComicInfo.xml conflicts that need a decision -- previously a pop-up sheet, two sidebar
-/// sections, and several Settings buttons.
+/// Library maintenance: the health report and tools, duplicates, and ComicInfo.xml conflicts.
 struct LibraryHealthView: View {
     enum Tab: String, CaseIterable { case overview = "Overview", duplicates = "Duplicates", needsReview = "Needs Review" }
 
@@ -180,6 +178,5 @@ struct LibraryHealthView: View {
         .background(Design.surfaceBg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
-
 
 }

@@ -56,12 +56,10 @@ final class LibraryViewModel: ObservableObject {
     @Published var publishers:        [String] = []
     @Published var allTags:           [(tag: Tag, count: Int)] = []
     @Published var inProgressComics:  [Comic] = []
-    /// Total in-progress comics for the sidebar badge (`inProgressComics` is capped for the shelf).
+    /// Total in-progress comics for the sidebar badge (`inProgressComics` is capped at the shelf
+    /// size).
     @Published var inProgressCount:   Int = 0
-    // Series the user actively favorites but has fully caught up on -- distinct from
-    // inProgressComics (which only covers books with a page already turned). Previously a
-    // finished favorite series just vanished from the home screen with no nudge toward its
-    // next unread issue.
+    // Next unstarted issue of series you've recently finished an issue of.
     @Published var readNextSuggestions: [Comic] = []
     @Published var destination: AppDestination = .library
     @Published var selectedSeries:    String? = nil
@@ -71,8 +69,7 @@ final class LibraryViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(sortOrder.rawValue, forKey: "comicSortOrder") }
     }
 
-    /// Persists across navigation the same way sortOrder does, rather than silently resetting --
-    /// so "show me only what I haven't read" stays on while browsing from series to series.
+    /// Persists across navigation, like sortOrder.
     @Published var unreadOnly: Bool = false { didSet { reload() } }
 
     @Published var scanState:           LibraryScanner.ScanState = .init()
@@ -80,13 +77,10 @@ final class LibraryViewModel: ObservableObject {
     @Published var showScanReport:      Bool = false
     @Published var libraryHealthReport: LibraryHealthReport? = nil
     @Published var renameCandidateCount: Int = 0
-    /// Comics the scanner has given up retrying (zero-page after 3 rescans) -- lets the library
-    /// grid/detail view show a distinct "this file looks broken" marker instead of leaving a
-    /// permanently-unreadable comic looking identical to an ordinary unread one. Refreshed
-    /// alongside `libraryHealthReport` rather than added to `Comic`/`comicRow` -- that mapping is
-    /// shared by ~15 call sites across `Database/`, so a small, independently-refreshed side set
-    /// is the lower-risk way to surface this.
+    /// Comics the scanner gave up on (zero pages after 3 retries), shown with a broken-file badge.
     @Published var brokenComicIds: Set<Int64> = []
+    /// Sort orders with no data in this library (e.g. Writer when no comic has credits).
+    @Published var emptySortOrders: Set<DatabaseManager.SortOrder> = []
 
     struct ImportProgress: Equatable { var done: Int; var total: Int }
     struct ImportSummary: Equatable {
@@ -103,32 +97,22 @@ final class LibraryViewModel: ObservableObject {
     @Published var renameSuggestionDismissed: Bool = false
     var scanReportDismissTask: DispatchWorkItem?
 
-    /// See `UndoToastController`. `pendingUndo` is a thin passthrough (kept as the same name/type
-    /// existing call sites already use) onto the controller's own `@Published` storage.
     let undoToastController = UndoToastController()
     var pendingUndo: UndoToastController.Action? { undoToastController.pending }
 
     @Published var isResyncing:         Bool = false
 
-    /// A resync's `reparseAllMeta` pass runs after its underlying scan already reports
-    /// `isScanning = false`, so checking `isScanning` alone during that window misses it -- any
-    /// UI gating "don't let the user start another library-wide operation" should check this,
-    /// not either flag individually.
+    /// True during any library-wide operation, including a resync's metadata pass after its scan
+    /// ends.
     var isBusy: Bool { isScanning || isResyncing }
 
     @Published var isLoading:           Bool = false
     @Published var isLibraryAvailable:  Bool = true
     @Published var selectedComic:     Comic? = nil
     @Published var selectedRun:       Run? = nil
-    /// The full list, kept live here rather than fetched ad hoc by whichever view needs it --
-    /// `ComicCard`'s "Add to Reading Path" submenu used to call
-    /// `DatabaseManager.shared.allRuns()` synchronously inside their own
-    /// `.contextMenu` closure (blocking the main thread every time a card's menu opened); reading
-    /// from here instead means that data is already warm.
+    /// All Reading Paths, kept warm for menus.
     @Published var runs: [Run] = []
-    /// The reader-presentation subsystem, genuinely independent of library data/navigation --
-    /// see `ReaderCoordinator`'s doc comment. `readerComic`/`readerInitialPage`/`readerRunId`
-    /// below are thin passthroughs so every existing call site keeps working unchanged.
+    /// Reader presentation state; `readerComic` and friends below forward to it.
     let readerCoordinator = ReaderCoordinator()
     var readerInitialPage: Int? {
         get { readerCoordinator.initialPage }
@@ -156,8 +140,7 @@ final class LibraryViewModel: ObservableObject {
     @Published var duplicateGroups:   [[Comic]] = []
     @Published var pendingMetadataConflicts: [MetadataConflictRow] = []
 
-    /// Things waiting in Library Health (duplicates + metadata conflicts), shown as a badge on
-    /// its sidebar row. Shared by Mac's `SidebarView` and iPad's `iPadSidebar`.
+    /// Duplicates plus metadata conflicts, shown as a badge on Library Health.
     var libraryHealthAlertCount: Int {
         duplicateGroups.count + pendingMetadataConflicts.count
     }
@@ -201,13 +184,7 @@ final class LibraryViewModel: ObservableObject {
     private var readerCoordinatorCancellable: AnyCancellable?
     private var undoToastCancellable: AnyCancellable?
 
-    /// The list of configured library folders -- the single source of truth every scan/watch/
-    /// import operation threads through. Backed by a real `@Published` var (not a plain computed
-    /// UserDefaults getter) so SwiftUI views observing this view model -- the Settings folder
-    /// list chief among them -- actually redraw when a folder is added or removed, not just
-    /// incidentally alongside some unrelated state change. `LibraryFolders.readMigrating()` seeds
-    /// the initial value, transparently upgrading an existing install's old single `libraryPath`
-    /// value into a one-element array the first time this runs.
+    /// The configured library folders. Published so views redraw when one is added or removed.
     @Published private var libraryPathsStorage: [String] = LibraryFolders.readMigrating()
     var libraryPaths: [String] {
         get { libraryPathsStorage }
@@ -226,18 +203,14 @@ final class LibraryViewModel: ObservableObject {
         scan()
     }
 
-    /// Comics currently living under `path` -- callers can show this count in a confirmation
-    /// before actually removing the folder, since doing so also removes those comics from the
-    /// library (see `removeLibraryFolder`).
+    /// How many comics live under `path`, for the remove-folder confirmation.
     func comicCount(underFolder path: String) -> Int {
         db.comicIds(underFolder: path).count
     }
 
     func removeLibraryFolder(_ path: String) {
-        // Previously left every comic from this folder in the library forever, pointing at a
-        // path ComicArc no longer manages at all -- soft-deleting them (reason "folder_removed",
-        // distinct from a genuinely missing file) means they land in the same Trash/restore flow
-        // as everything else instead of becoming permanent, untouchable ghosts.
+        // Removing a folder soft-deletes its comics (reason "folder_removed"), so they can be
+        // restored from Trash.
         let orphaned = db.comicIds(underFolder: path)
         if !orphaned.isEmpty {
             db.softDelete(orphaned, reason: "folder_removed")
@@ -249,8 +222,7 @@ final class LibraryViewModel: ObservableObject {
         paths.removeAll { $0 == path }
         libraryPaths = paths
         #if os(iOS) || os(visionOS)
-        // Otherwise the underlying security-scoped bookmark survives in its own array and
-        // silently re-adds this path back to `libraryPaths` on the next launch.
+        // Also drop its bookmark, or the path comes back on next launch.
         removeLibraryFolderBookmark(path: path)
         #endif
         restartWatcher()
@@ -269,9 +241,7 @@ final class LibraryViewModel: ObservableObject {
         searchCancellable = $searchText
             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reload() }
-        // `readerComic`/etc. are passthroughs onto `readerCoordinator`'s own `@Published`
-        // storage now, not stored properties here -- without forwarding its `objectWillChange`,
-        // views observing `vm` wouldn't re-render when only the coordinator's state changes.
+        // Forward the coordinator's changes so views observing `vm` re-render.
         readerCoordinatorCancellable = readerCoordinator.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
         undoToastCancellable = undoToastController.objectWillChange
@@ -283,17 +253,11 @@ final class LibraryViewModel: ObservableObject {
         refreshDuplicates()
         refreshRuns()
 
-        // Scanning at launch (and every time the app is brought back to the foreground) is
-        // driven uniformly by `scenePhase == .active` in both app entry points (ComicArcMacApp,
-        // ComicArcIPadApp) rather than here -- init() itself only needs to get everything else
-        // ready. A cold launch's very first `.active` transition covers the "scan on open" case
-        // without this also firing a redundant second scan a moment later.
+        // Launch scans are triggered by scenePhase in the app entry points, not here.
     }
 
     func reparseMetaIfNeeded() {
-        // V4: backfills folder_group (the folder between Character and Series, e.g. "Batman
-        // (Modern)") for every existing comic -- that column didn't exist before this version, so
-        // a real one-time reparse is needed for it to ever show up for libraries scanned earlier.
+        // V4: backfills folder_group for libraries scanned before that column existed.
         let key = "folderMetaReparseV4"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         let paths = libraryPaths
@@ -318,14 +282,11 @@ final class LibraryViewModel: ObservableObject {
     var reloadWorkItem: DispatchWorkItem?
 
     var reloadGeneration = 0
-    /// Separate from `reloadGeneration` so refreshing the home shelves never cancels a library reload.
+    /// Separate from `reloadGeneration` so a shelf refresh never cancels a library reload.
     private var homeShelvesGeneration = 0
 
-    // Independent from `reloadGeneration` -- these guard three unrelated background computations
-    // (duplicates, health report, rename candidates) that can each be kicked off from several call
-    // sites (post-scan, post-conflict-resolution, a manual re-check) with no fixed ordering. Sharing
-    // `reloadGeneration` would mean an unrelated navigation/filter change (which bumps it) discards
-    // an in-flight one of these for no reason; each needs to invalidate only its own earlier runs.
+    // Separate generations for the background health computations, so navigation doesn't discard
+    // them.
     var duplicatesGeneration = 0
     var healthGeneration = 0
     var renameCandidatesGeneration = 0
@@ -375,7 +336,7 @@ final class LibraryViewModel: ObservableObject {
             let loaded: [Comic]
             switch section {
             case .continueReading:
-                loaded = db.inProgress()
+                loaded = db.inProgress(search: q)
             case .favorites:
                 loaded = db.allComics(publisher: pub, search: q, sortOrder: sort, favoritesOnly: true,
                                       unreadOnly: unread)
@@ -423,9 +384,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// For each series you've recently finished an issue of (most recent first), suggest the
-    /// issue after the furthest one you've finished, if you haven't started it yet. Bounded by a
-    /// fixed window of recent finishes, so it's cheap enough to run on every reload.
     nonisolated private static func computeReadNextSuggestions(db: DatabaseManager) -> [Comic] {
         var seenSeries = Set<String>()
         var suggestions: [Comic] = []
@@ -465,11 +423,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func drillIntoGroup(_ group: DatabaseManager.CharacterGroup) {
-        // Bulk selection is scoped to whatever grid is currently on screen -- carrying it across
-        // a navigation change (unlike `select()`, which already clears it) let a selection made
-        // in one series/group silently apply to comics selected-looking in a completely
-        // different one the bulk bar reappears over, since only `browseLevel` gates the bar's
-        // visibility, not the selection itself.
+        // Selection belongs to the grid on screen, so clear it on navigation.
         bulkMode = false
         selectedComicIds.removeAll()
         let pub = activePublisher
@@ -479,11 +433,8 @@ final class LibraryViewModel: ObservableObject {
             let series = db.seriesGroups(groupName: group.groupName, publisher: pub)
             await MainActor.run {
                 guard gen == self.reloadGeneration else { return }
-                // springGentle -- a bouncy overshoot on every drill-down read as
-                // the library "shaking" on navigation, same complaint as the hover-lift jitter.
                 withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) {
-                    // Always land on the group's own series grid, even with a single series --
-                    // skipping straight into it made one-series groups behave differently.
+                    // Always open the group's series grid, even when it holds one series.
                     self.selectedGroup = group
                     self.seriesGroups = series
                 }
@@ -537,13 +488,7 @@ final class LibraryViewModel: ObservableObject {
         refreshHomeShelves()
     }
 
-    /// Independent of the big character-group/comics reload. Every reader progress/finish write
-    /// goes through `patchComicLocally` (`updateProgress`/`markFinished`), which only ever
-    /// mutates `comics`/`selectedComic` -- it never touches `inProgressComics`/
-    /// `readNextSuggestions`, which are otherwise refreshed only inside `loadCharacterGroups()`.
-    /// Without this, reading a comic opened from a home shelf (Now Reading, Continue Reading,
-    /// Read Next) would leave that shelf showing pre-reading progress/finished state until the
-    /// user happened to drill into a group and back out again.
+    /// Refreshes the home shelves, which progress updates via `patchComicLocally` don't touch.
     func refreshHomeShelves() {
         homeShelvesGeneration += 1
         let gen = homeShelvesGeneration
@@ -566,10 +511,7 @@ final class LibraryViewModel: ObservableObject {
         let w = FileWatcher(
             onAdded: { [weak self] url in
                 self?.isLibraryAvailable = true
-                // addSingle does file hashing, ComicInfo.xml parsing, and a synchronous DB
-                // write on the scanner's serial queue -- run it off the main thread like
-                // importFiles does, or a Finder drop into the watched folder freezes the UI
-                // for the duration of that work, one file at a time.
+                // addSingle hashes and parses the file, so keep it off the main thread.
                 Task.detached(priority: .utility) {
                     LibraryScanner.shared.addSingle(url: url, libraryRoots: roots)
                     await self?.reload()
@@ -616,11 +558,7 @@ final class LibraryViewModel: ObservableObject {
             selectedComic = sc
         }
         if removeIfNoLongerVisible { comics.remove(at: idx) }
-        // Invalidate any reload that's still in flight: _reload() only applies its result if
-        // its captured generation still matches when it lands (see _reload()'s `guard gen ==
-        // self.reloadGeneration`). Without bumping it here too, a reload started just before
-        // this optimistic patch but landing just after it would silently overwrite this fresher
-        // state with the stale pre-patch snapshot it queried.
+        // Invalidate any in-flight reload so it can't overwrite this fresher state.
         reloadGeneration += 1
     }
 
@@ -629,9 +567,7 @@ final class LibraryViewModel: ObservableObject {
         patchComicLocally(comic.id) { $0.progress = page }
     }
 
-    /// Called only when the reader determines a page-turn reached the end via genuine sequential
-    /// reading (see `ReaderView.suppressCompletionCheck`) -- sticky, so it's safe to call again on
-    /// a later reread without needing to check `comic.isFinished` first.
+    /// Called when sequential reading reaches the last page. Sticky, so safe to call on rereads.
     func markFinished(comic: Comic) {
         db.markFinished(comicId: comic.id)
         let now = ISO8601DateFormatter().string(from: Date())

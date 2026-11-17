@@ -7,8 +7,7 @@ final class DatabaseManager: @unchecked Sendable {
     static let shared = DatabaseManager()
     let queue = DispatchQueue(label: "com.comicarc.mac.db", qos: .userInitiated)
     var db: OpaquePointer?
-    /// This instance's own database file. Backups and the covers folder are derived from it,
-    /// so a test database never touches the real library's `comics.db.bak` or `covers/`.
+    /// This instance's database file; backups and covers live beside it.
     let dbURL: URL
     var backupURL: URL { URL(fileURLWithPath: dbURL.path + ".bak") }
     var coversDir: URL { dbURL.deletingLastPathComponent().appendingPathComponent("covers") }
@@ -37,13 +36,8 @@ final class DatabaseManager: @unchecked Sendable {
         registerCustomFunctions()
         recoverIfCorrupted(dbURL: dbURL)
         migrate()
-        // Backup freshness doesn't gate query correctness the way the integrity check above
-        // does (queries are safe to run against this file regardless of when it was last backed
-        // up) -- deferred onto a background queue so a full WAL checkpoint + file copy can't
-        // block app launch on a large library or a slow disk. Must NOT use `self.queue` here:
-        // refreshBackup() itself calls `queue.sync`, and dispatching it via `queue.async` would
-        // mean that sync call re-enters a queue already running on the current thread --
-        // `libdispatch` detects that and crashes outright rather than deadlocking silently.
+        // Backup runs off-queue so a large checkpoint + copy can't block launch. Not on
+        // `self.queue`: refreshBackup() calls queue.sync and would deadlock.
         DispatchQueue.global(qos: .utility).async { [weak self] in self?.refreshBackup() }
     }
 
@@ -88,10 +82,7 @@ final class DatabaseManager: @unchecked Sendable {
         try? FileManager.default.removeItem(at: dbURL)
         try? FileManager.default.copyItem(at: bakURL, to: dbURL)
         _ = sqlite3_open(dbURL.path, &db)
-        // PRAGMAs are per-connection, not persisted in the file -- this is a brand new
-        // connection, so foreign_keys/journal_mode/etc. default back off/unset unless
-        // reapplied here. Without this, every ON DELETE CASCADE in the schema silently
-        // stops firing for the rest of the app session after a corruption recovery.
+        // PRAGMAs are per-connection, so they must be reapplied on the new connection.
         exec("PRAGMA foreign_keys = ON")
         exec("PRAGMA journal_mode = WAL")
         exec("PRAGMA synchronous = NORMAL")
@@ -184,17 +175,11 @@ final class DatabaseManager: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, sql, -1, &raw, nil) == SQLITE_OK, let stmt = raw else { return -1 }
         defer { sqlite3_finalize(stmt) }
         bindArgs(stmt, args: args)
-        // Must actually check the result: silently ignoring a failed step (constraint violation,
-        // SQLITE_BUSY, etc.) would fall through to sqlite3_last_insert_rowid, which on failure
-        // still returns the *previous* successful insert's rowid -- handing callers a wrong id
-        // that looks valid instead of a way to detect the write never happened.
         guard sqlite3_step(stmt) == SQLITE_DONE else { return -1 }
         return sqlite3_last_insert_rowid(db)
     }
 
-    /// Runs `body` inside a transaction, rolling back if it returns `false` (e.g. a `run(...)`
-    /// call inside it returned -1). Used for batch mutations where a partial failure mid-loop
-    /// would otherwise commit inconsistent data with no way to detect it after the fact.
+    /// Runs `body` in a transaction, rolling back if it returns false.
     @discardableResult
     func inTransaction(_ body: () -> Bool) -> Bool {
         exec("BEGIN")
@@ -203,10 +188,8 @@ final class DatabaseManager: @unchecked Sendable {
         return true
     }
 
-    /// Prepares `sql` once and reuses that single compiled statement across every row in
-    /// `rows` (reset + re-bound each iteration) instead of calling `run(...)` per row, which
-    /// re-parses and re-plans identical SQL text on every iteration. Meant to be called inside
-    /// `inTransaction`; returns `false` on the first row that fails to step to completion.
+    /// Executes one prepared statement for every row. Call inside `inTransaction`; returns false on
+    /// the first failure.
     @discardableResult
     func runBatch(_ sql: String, rows: [[Any?]]) -> Bool {
         guard !rows.isEmpty else { return true }
@@ -223,49 +206,29 @@ final class DatabaseManager: @unchecked Sendable {
         return true
     }
 
-    /// Splits a large id/path array for use in an `IN (...)` clause -- past SQLite's bound-
-    /// parameter ceiling, `sqlite3_prepare_v2` fails and callers that don't check for that
-    /// silently no-op on the whole operation. 500 is comfortably under even the old, most
-    /// conservative default (999), so a single chunk never risks tripping it.
+    /// Splits ids for `IN (...)` clauses, keeping each chunk under SQLite's bound-parameter limit.
     func idChunks<T>(_ ids: [T], size: Int = 500) -> [[T]] {
         stride(from: 0, to: ids.count, by: size).map { Array(ids[$0..<Swift.min($0 + size, ids.count)]) }
     }
 
-    /// Refreshes `comics.db.bak`, the snapshot `recoverIfCorrupted` falls back to. Called at
-    /// launch (via `migrate()`) and again after a scan/resync completes -- previously this only
-    /// ever ran once per launch, so a corruption discovered after a long reading/tagging
-    /// session, or right after importing a big batch of new comics, would recover to a backup
-    /// that predated all of it. Cheap enough to call again after a scan: a WAL checkpoint plus a
-    /// file copy, not a full re-export.
+    /// Refreshes `comics.db.bak`, the snapshot `recoverIfCorrupted` falls back to. Runs at launch
+    /// and after each scan.
     func refreshBackup() {
         queue.sync {
             let dbPath = dbURL
             let bakPath = backupURL
             guard FileManager.default.fileExists(atPath: dbPath.path) else { return }
-            // Checkpoint first so the backup reflects all committed data, not just whatever has
-            // landed in the main file so far -- WAL-mode commits can live only in the -wal file
-            // for a while, and a prior session that ended without a full checkpoint (killed, not
-            // quit normally) would otherwise be missing its most recent writes from this backup.
+            // Checkpoint first so the backup includes writes still in the WAL file.
             exec("PRAGMA wal_checkpoint(TRUNCATE)")
-            // copyItem throws if the destination already exists -- remove the stale backup first
-            // so this snapshot is genuinely replaced each time, not silently left as the very
-            // first one ever written.
             try? FileManager.default.removeItem(at: bakPath)
             try? FileManager.default.copyItem(at: dbPath, to: bakPath)
         }
     }
 
-    /// The plain, zero-offset reader -- kept as its own overload (rather than a default argument
-    /// on `comicRow(_:offset:)` below) so it still matches `(OpaquePointer) -> Comic` when passed
-    /// as a bare function reference (`rows(sql, map: comicRow)`), which the ~15 existing call
-    /// sites across `Database/` all do; a default-valued parameter doesn't get elided for an
-    /// unapplied reference like that.
     func comicRow(_ s: OpaquePointer) -> Comic { comicRow(s, offset: 0) }
 
-    /// Reads a `Comic` from a row whose columns are `comicColumns`, offset when other columns
-    /// (e.g. a `run_items` join row's own id/position) precede them -- see
-    /// `DatabaseManager+Collections.swift`'s `runItems`, which select
-    /// `comicColumns` alongside their own extra columns rather than duplicating this mapping.
+    /// Reads a `Comic` whose `comicColumns` start at `offset` (e.g. after a join row's own
+    /// columns).
     func comicRow(_ s: OpaquePointer, offset: Int32) -> Comic {
         Comic(
             id: colInt64(s, offset), title: colText(s, offset + 1) ?? "", filePath: colText(s, offset + 2) ?? "",
@@ -280,13 +243,11 @@ final class DatabaseManager: @unchecked Sendable {
             progress: colInt(s, offset + 17),
             isFavorite: colBool(s, offset + 18), inReadingList: colBool(s, offset + 19),
             deletedReason: colText(s, offset + 22),
-            finishedAt: colText(s, offset + 23)
+            finishedAt: colText(s, offset + 23),
+            folderGroup: colText(s, offset + 24)
         )
     }
 
-    /// The column list `comicRow(_:offset:)` reads -- factored out from `comicSelect` so joins
-    /// that need their own extra columns alongside a comic's (`runItems`) can
-    /// select `comicColumns` themselves instead of duplicating this list and `comicRow`'s mapping.
     let comicColumns = """
         c.id, c.title, c.file_path, c.publisher, c.character, c.series,
         c.issue_number, c.page_count, c.writer, c.penciller, c.year,
@@ -296,13 +257,10 @@ final class DatabaseManager: @unchecked Sendable {
         (f.comic_id IS NOT NULL) as is_favorite,
         (rl.comic_id IS NOT NULL) as in_reading_list,
         c.volume, c.format,
-        c.deleted_reason, rp.finished_at
+        c.deleted_reason, rp.finished_at, c.folder_group
     """
 
-    /// The per-comic annotation joins (progress/favorite/reading-list) every comic query
-    /// needs -- shared so `runItems` (which need their own leading columns
-    /// alongside a comic's, so they can't just use `comicSelect` outright) don't each hand-roll
-    /// their own copy of the same three lines.
+    /// Progress, favorite, and Reading List joins every comic query needs.
     var comicJoins: String {
         """
         LEFT JOIN reading_progress rp ON c.id = rp.comic_id
@@ -359,24 +317,18 @@ final class DatabaseManager: @unchecked Sendable {
         var volume: String? = nil
         var format: String? = nil
         var hasComicInfo: Bool? = nil
-        /// Raw-fact mirrors: what ComicInfo.xml/the folder actually said, independent of which one
-        /// won for the primary series/publisher columns above -- lets a priority decision made at
-        /// import time be revisited later instead of being permanently lost. See
-        /// `ComicIdentityResolver`.
+        /// What ComicInfo.xml and the folder each said, independent of which one won.
         var comicInfoSeries: String? = nil
         var comicInfoPublisher: String? = nil
         var folderSeries: String? = nil
         var folderPublisher: String? = nil
         var folderGroup: String? = nil
-        /// Which raw-fact source actually won for series/publisher/issueNumber above -- used to
-        /// label a metadata conflict with where the proposed value came from (e.g. "ComicInfo.xml"
-        /// vs "folder"), not persisted on `comics` itself.
+        /// Which source won for series/publisher/issue number.
         var seriesSource: String = ComicIdentityResolver.defaultSource
         var publisherSource: String = ComicIdentityResolver.defaultSource
         var issueNumberSource: String = ComicIdentityResolver.defaultSource
     }
 
-    /// The placeholder values the scanner itself writes when a source has nothing real to offer --
-    /// never worth protecting as if they were a genuine prior value.
+    /// Placeholder values the scanner writes when a source has nothing real.
     static let identityPlaceholders: Set<String> = ["general", "unknown"]
 }

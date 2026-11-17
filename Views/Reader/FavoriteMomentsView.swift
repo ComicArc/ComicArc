@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Browses every bookmark flagged as a favorite moment across the whole library -- distinct from
-/// the resume-reading position on `Comic`, and from a comic's own per-issue bookmark list, which
-/// only shows bookmarks for that one comic. Tapping a row jumps straight into the reader at that
-/// exact page via `LibraryViewModel.openReader(_:atPage:)`.
+/// Every favorite-moment bookmark across the library; tapping one opens the reader at that page.
 struct FavoriteMomentsView: View {
     @EnvironmentObject var vm: LibraryViewModel
     @State private var moments: [FavoriteMoment] = []
@@ -113,9 +110,7 @@ struct FavoriteMomentsView: View {
     }
 }
 
-/// Renders a specific page of a comic as a thumbnail (as opposed to `MiniComicCard`, which always
-/// shows the cover) -- used to make a favorite moment recognizable in a browsing list without
-/// opening the reader first.
+/// Thumbnail of a specific page (not the cover), so a favorite moment is recognizable.
 private struct PageThumbnail: View {
     let comic: Comic
     let page: Int
@@ -134,9 +129,7 @@ private struct PageThumbnail: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: "\(comic.id):\(page)") {
-            // A standalone one-off (each favorite moment is typically a different comic), so
-            // there's no already-open document to reuse the way the filmstrip/cover-picker do --
-            // open, decode at a thumbnail-appropriate size, close.
+            // Each moment is usually a different comic, so open, decode small, and close.
             guard let document = try? await ComicDocumentFactory.open(path: comic.filePath),
                   let source = try? document.pageSource(index: page) else { return }
             defer { document.close() }

@@ -71,8 +71,7 @@ struct OnboardingView: View {
                 Circle()
                     .stroke(Design.brandGold.opacity(0.3), lineWidth: 1.5)
                     .frame(width: 130, height: 130)
-                // The app's own mark -- same shape as the real app icon, so
-                // this reads as brand consistency, not an extra decoration.
+                // The app's mark, matching the app icon.
                 ComicBurstShape()
                     .fill(Design.goldGradient)
                     .frame(width: 64, height: 64)
@@ -309,7 +308,6 @@ struct OnboardingView: View {
                     .font(.title3).foregroundStyle(.secondary)
             }
 
-            // The whole quick start -- replaces the separate multi-step tutorial overlay.
             VStack(alignment: .leading, spacing: 12) {
                 quickStartRow(icon: "books.vertical.fill", title: "Your Library",
                               text: "Folders become Publisher → Character → Series. Open any comic to start reading.")
@@ -370,10 +368,8 @@ struct OnboardingView: View {
                 scanDone  = state.done
                 scanTotal = state.total
                 guard !state.running else { return }
-                // The scanner already distinguishes "path isn't accessible" (e.g. a file was
-                // picked instead of a folder, or permissions were denied) from a genuinely empty
-                // folder -- without checking this, both cases used to silently advance straight
-                // to "You're All Set! 0 comics indexed," which reads as broken, not empty.
+                // Distinguish an inaccessible path from an empty folder, rather than reporting "0
+                // comics" for both.
                 if let err = state.error {
                     scanError = err
                     return
@@ -388,8 +384,7 @@ struct OnboardingView: View {
         }
     }
 
-    /// Resets back to folder selection after a failed or empty scan, so the user can pick a
-    /// different folder rather than being stuck on an error screen with no way forward.
+    /// Back to folder selection after a failed or empty scan.
     private func chooseDifferentFolder() {
         libraryPaths = []
         UserDefaults.standard.removeObject(forKey: LibraryFolders.key)

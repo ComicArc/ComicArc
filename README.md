@@ -58,6 +58,7 @@ The iPad app (`ComicArcPad`, iPadOS 17+) isn't on the App Store yet — it lives
 - **Multiple library folders.** Point ComicArc at more than one folder — a NAS share and a local drive, say — and it treats them as one combined library. Add or remove folders any time from Settings.
 - **Publisher / Character / Series / Issue**, read from your folder structure and browsable from the sidebar.
 - Cover thumbnails with inline progress bars; **Continue Reading** surfaces whatever you're mid-issue on.
+- **Search** matches every word you type against the whole folder hierarchy (publisher, character, folder groups such as "Classic" or "Modern", series), plus title, issue number, year, credits, story arc, notes and tags, so "batman classic" narrows to exactly those comics. On an issue's page, click its group, year or credits to see everything that shares them.
 - Bulk select: mark read/unread, add to a Reading Path (or the Reading List), delete, or reassign series/publisher across many issues at once.
 - **Issue detail**: edit metadata, tag it, or add it to a Reading Path.
 - **Series Manager**: reorder issues in a series (your order survives rescans), rename it, or set a custom cover. Otherwise issues sort by issue number, with annuals and specials after the regular issues.
@@ -151,8 +152,6 @@ Comics/
 ComicInfo.xml fills in whatever the folder structure alone can't tell it. Once you've corrected a title, series, publisher, or character by hand, ComicArc remembers — a later rescan never silently overwrites a manual edit.
 
 **Give each volume its own folder.** If a series has more than one volume (a legacy relaunch, a new #1, a different creative run), put each volume in its own folder — e.g. `Robin (1993)/` and `Robin (2021)/` side by side, not both dumped into a single `Robin/` folder. ComicArc derives a lot from the folder a file sits in, and two unrelated volumes sharing one folder is the single most common cause of issues sorting strangely or a rename producing an unexpected name. A folder named `Series (Year)` is a great, well-supported convention for this.
-
-See [FILE_NAMING.md](FILE_NAMING.md) for the full folder and filename naming guide.
 
 ---
 

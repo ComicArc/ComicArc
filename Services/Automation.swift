@@ -1,7 +1,6 @@
 import AppIntents
 
-// A deliberately conservative App Intents surface -- only intents that are safe to run
-// unattended (no destructive actions, no ambiguous parameters) are exposed here.
+// App Intents for Shortcuts and Siri. Only actions safe to run unattended (nothing destructive).
 
 struct ScanLibraryIntent: AppIntent {
     static var title: LocalizedStringResource = "Scan Comic Library"
@@ -61,12 +60,9 @@ struct ShowReadingListIntent: AppIntent {
     }
 }
 
-/// A comic, exposed to Shortcuts/Siri as a pickable, searchable entity -- backed directly by the
-/// same `allComics(search:)` the in-app search field already uses, so "which comic did you mean"
-/// suggestions match what a user would actually find by typing in the app itself.
+/// A comic as a Shortcuts entity, searched the same way as the in-app search.
 struct ComicEntity: AppEntity {
-    // AppEntity's ID must conform to EntityIdentifierConvertible, which Int64 doesn't -- the
-    // comic's real database id is kept separately as `comicId` for internal use.
+    // Shortcuts needs a string id; the database id is kept in `comicId`.
     let id: String
     let comicId: Int64
     let title: String
@@ -140,8 +136,7 @@ struct MarkComicReadIntent: AppIntent {
     }
 }
 
-/// Deliberately returns a spoken summary rather than just opening the app -- a "how am I doing"
-/// question is exactly the kind of thing worth answering via Siri without a screen at all.
+/// Answers with a spoken summary, so it works without opening the app.
 struct ReadingProgressSummaryIntent: AppIntent {
     static var title: LocalizedStringResource = "Reading Progress Summary"
     static var description = IntentDescription("Tells you your reading streak and how many issues you've read.")
@@ -206,3 +201,34 @@ struct ComicArcShortcuts: AppShortcutsProvider {
         )
     }
 }
+
+#if os(macOS)
+import AppKit
+
+// AppleScript commands declared in ComicArc.sdef. `@objc(Name)` must match the sdef's cocoa class
+// names exactly.
+
+@objc(ScanLibraryScriptCommand)
+final class ScanLibraryScriptCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        DispatchQueue.main.async { LibraryViewModel.shared.scan() }
+        return nil
+    }
+}
+
+@objc(ResyncLibraryScriptCommand)
+final class ResyncLibraryScriptCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        DispatchQueue.main.async { LibraryViewModel.shared.resyncLibrary() }
+        return nil
+    }
+}
+
+@objc(ShowContinueReadingScriptCommand)
+final class ShowContinueReadingScriptCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        DispatchQueue.main.async { LibraryViewModel.shared.select(.continueReading) }
+        return nil
+    }
+}
+#endif

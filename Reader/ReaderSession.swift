@@ -1,15 +1,9 @@
 import Foundation
 import SwiftUI
 
-/// The one platform-agnostic reader view model, shared verbatim by the Mac, iPad, and iPhone
-/// reader shells. Owns navigation, reading-mode, zoom, chrome-visibility, autoplay, and bookmark
-/// state for a single open comic. Does NOT own gesture recognizers, view layout, animation
-/// curves, or anything AppKit/UIKit-specific -- platform shells translate raw input into calls on
-/// this session (`advance()`, `jump(to:)`, `setZoom(...)`), never the other way around.
-///
-/// One session per open comic, matching the existing `.id(comic.id)`-keyed presentation in
-/// `ContentView`/`iPadRootView`: advancing into the next issue tears this session down and a new
-/// one is created for the next comic, not reused in place.
+/// Platform-agnostic reader model shared by the Mac and iPad readers: navigation, reading mode,
+/// zoom, chrome, autoplay and bookmarks for one open comic. Platform views translate input into
+/// calls on it.
 @MainActor
 @Observable
 final class ReaderSession {
@@ -44,22 +38,17 @@ final class ReaderSession {
 
     private(set) var nextIssue: Comic?
     private(set) var previousIssue: Comic?
-    /// Set once by the platform view right after creating the session -- the one hook this
-    /// session uses to ask the app to open a different comic. Needed because autoplay's page
-    /// advance is self-driven by a timer inside this class, not a one-off view-initiated call the
-    /// view could intercept the `BoundaryOutcome` of; every boundary-crossing path (manual or
-    /// autoplay) funnels through here so the view only has to wire this up once.
+    /// Set by the platform view; how the session asks the app to open a different comic (needed
+    /// because autoplay advances on its own).
     var onRequestIssueTransition: ((Comic) -> Void)?
 
     private(set) var boundaryMessage: String?
     private(set) var showFinishToast = false
-    /// Not `private(set)` -- the platform view's `.sheet(isPresented:)` binding needs to reset
-    /// this to `false` itself on dismiss.
+    /// Settable so the view's sheet binding can reset it.
     var showSeriesComplete = false
     private var didShowFinishToast = false
 
-    /// Reader controls start hidden and are only revealed deliberately (a tap on iPad, hovering
-    /// an edge on Mac) -- never by opening a comic or turning a page.
+    /// Controls start hidden and only appear on purpose (a tap on iPad, hovering an edge on Mac).
     var shouldShowChrome = false
     var toolbarLocked = false
 
@@ -70,21 +59,12 @@ final class ReaderSession {
     private var sessionStartPage: Int
     private var hideWorkItem: DispatchWorkItem?
     private var autoplayTask: Task<Void, Never>?
-    /// Whether the *last* page change was genuine sequential reading vs. a jump -- mirrors the
-    /// `isSequential` argument of the most recent `setPage` call, so `teardown()`/
-    /// `handleScenePhaseChange()` can flush with the same completion semantics that governed that
-    /// change instead of assuming sequential unconditionally. Without this, scrubbing straight to
-    /// the last page and then closing the reader (or backgrounding the app) would flush as if that
-    /// jump were genuine forward reading and incorrectly, permanently mark the issue finished
-    /// (`finished_at` is sticky -- see `ReadingProgressStore`/`DatabaseManager.markFinished`).
+    /// Whether the last page change was sequential reading or a jump, so teardown flushes with
+    /// matching completion rules.
     private var lastPositionWasSequential = true
 
-    /// What happened when the reader tried to advance/retreat past the current page. `.advanced`
-    /// needs no action from the caller; `.atBoundary` hands back the adjacent issue (if any) so
-    /// the platform view -- which owns the "open a different comic" routing, not this session --
-    /// can carry the transition through. Silent auto-advance into that adjacent issue on reaching
-    /// the end is a deliberate product decision (kept from the 2026-08-07 pass, not revisited
-    /// here); a `nil` adjacent issue means there's genuinely nowhere to go.
+    /// Result of advancing/retreating past the current page; `.atBoundary` carries the adjacent
+    /// issue, if any.
     enum BoundaryOutcome: Equatable {
         case advanced
         case atBoundary(adjacentIssue: Comic?)
@@ -161,8 +141,7 @@ final class ReaderSession {
 
     // MARK: - Page loading
 
-    /// `keepingCurrentImage` is for zoom-driven re-decodes of the same page: the current image
-    /// stays on screen until the sharper one arrives, instead of blanking mid-zoom.
+    /// `keepingCurrentImage`: keep showing the current image until the sharper re-decode arrives.
     private func loadCurrentPage(keepingCurrentImage: Bool = false) {
         guard let document else { return }
         loadFailed = false
@@ -230,9 +209,8 @@ final class ReaderSession {
         return .advanced
     }
 
-    /// Non-sequential navigation -- slider, page-jump, filmstrip, bookmark, Home/End. Never earns
-    /// completion, however far it lands, and cancels any queued prefetch for the old window since
-    /// a far jump means those pages likely aren't needed anymore.
+    /// Jumps (slider, page entry, filmstrip, bookmark, Home/End) never mark a comic finished, and
+    /// cancel stale prefetches.
     func jump(to page: Int) {
         let clamped = max(0, min(page, max(0, pageCount - 1)))
         guard clamped != currentPage else { return }
@@ -240,8 +218,7 @@ final class ReaderSession {
         setPage(clamped, isSequential: false)
     }
 
-    /// Continuous-scroll mode's own page-visibility tracking -- genuine reading, same as
-    /// `advance()`.
+    /// Continuous scroll's page tracking counts as sequential reading.
     func reportVisiblePage(_ page: Int) {
         guard page != currentPage, page >= 0, page < pageCount else { return }
         setPage(page, isSequential: true)
@@ -266,9 +243,8 @@ final class ReaderSession {
         checkSeriesComplete()
     }
 
-    /// "Complete" is library-relative: every issue currently on disk for this (publisher, series)
-    /// has been read, not a claim the real-world series has ended. Requires more than one issue --
-    /// finishing a single one-shot isn't a series milestone.
+    /// "Complete" means every issue of the series in the library is read. Needs more than one
+    /// issue.
     private func checkSeriesComplete() {
         let pub = comic.publisher, ser = comic.series
         Task.detached(priority: .utility) { [weak self] in
@@ -310,8 +286,6 @@ final class ReaderSession {
         isBookmarked = bookmarks.contains { $0.page == currentPage }
     }
 
-    /// Re-reads the bookmark list from disk without touching any bookmark's state -- for the
-    /// bookmarks panel after a favorite toggle or delete made through `DatabaseManager` directly.
     func refreshBookmarks() { loadBookmarks() }
 
     func toggleBookmark() {
@@ -321,14 +295,8 @@ final class ReaderSession {
 
     // MARK: - Zoom
 
-    /// Zoom is two committed values -- level and a normalized (0...1) anchor within the image --
-    /// rather than accumulated pixel offsets. A normalized anchor trivially survives a fit-mode
-    /// change, window resize, or page change without the pixel-offset clamp math the 2026-08-07
-    /// pass had to write (and fix) separately per platform. The valid anchor range shrinks as
-    /// zoom drops toward 1 (only `.center` is valid at zoom == 1, where there's no pan room at
-    /// all) -- `clampAnchor(_:zoom:)` derives that range from the geometry rather than a flat
-    /// 0...1 clamp, which would let the anchor imply an offset larger than the content actually
-    /// has room to pan.
+    /// Zoom is a level plus a normalized (0...1) anchor in the image, which survives fit-mode
+    /// changes, resizes and page changes.
     func setZoom(_ level: CGFloat, anchorInViewport point: CGPoint? = nil) {
         let clampedLevel = max(1.0, min(5.0, level))
         if clampedLevel <= 1.05 {
@@ -362,9 +330,7 @@ final class ReaderSession {
         return UnitPoint(x: min(maxC, max(minC, anchor.x)), y: min(maxC, max(minC, anchor.y)))
     }
 
-    /// The point-space offset a platform view should apply (after `.scaleEffect(zoomLevel)`) to
-    /// bring `zoomAnchor` to the center of the viewport -- centralized here so no platform shell
-    /// has to re-derive this geometry itself.
+    /// Offset to apply after `.scaleEffect(zoomLevel)` to center `zoomAnchor` in the viewport.
     var panOffsetInPoints: CGSize {
         guard isZoomed, viewportSize.width > 0, viewportSize.height > 0 else { return .zero }
         return CGSize(
@@ -373,10 +339,7 @@ final class ReaderSession {
         )
     }
 
-    /// State-only reset, no reload -- used internally by `setPage`/`onFitModeChanged`/
-    /// `onScrollModeChanged`, which each already call `loadCurrentPage()` separately right after.
-    /// View-facing "zoom back out" actions should call `setZoom(1.0)` instead, which resets *and*
-    /// reloads at the now-smaller target size.
+    /// Resets zoom state without reloading; views should call `setZoom(1.0)` instead.
     func resetZoom() {
         zoomLevel = 1.0
         zoomAnchor = .center
@@ -444,5 +407,144 @@ final class ReaderSession {
         saveSeriesPrefs()
         resetZoom()
         if scrollMode, autoplay { autoplay = false }
+    }
+}
+
+enum FitMode: String, CaseIterable {
+    case fitPage    = "fitPage"
+    case fitWidth   = "fitWidth"
+    case fitHeight  = "fitHeight"
+    case original   = "original"
+
+    var label: String {
+        switch self {
+        case .fitPage:   return "Fit Page"
+        case .fitWidth:  return "Fit Width"
+        case .fitHeight: return "Fit Height"
+        case .original:  return "Original Size"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .fitPage:   return "arrow.up.left.and.arrow.down.right"
+        case .fitWidth:  return "arrow.left.and.right"
+        case .fitHeight: return "arrow.up.and.down"
+        case .original:  return "1.circle"
+        }
+    }
+}
+
+enum ColorFilter: String, CaseIterable {
+    case none, night, sepia, grayscale
+    var label: String {
+        switch self {
+        case .none:      return "Normal"
+        case .night:     return "Night"
+        case .sepia:     return "Sepia"
+        case .grayscale: return "Grayscale"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .none:      return "circle.lefthalf.filled"
+        case .night:     return "moon.fill"
+        case .sepia:     return "photo.artframe"
+        case .grayscale: return "circle.fill"
+        }
+    }
+}
+
+/// Rules for saving the reading position and deciding when a page counts as finished reading rather
+/// than a jump.
+@MainActor
+final class ReadingProgressStore {
+    private var debounceWorkItem: DispatchWorkItem?
+    private let debounceInterval: TimeInterval = 0.25
+
+    /// Resume page, clamped in case the page count shrank since it was saved.
+    nonisolated static func resumePage(for comic: Comic) -> Int {
+        min(max(0, comic.progress), max(0, comic.pageCount - 1))
+    }
+
+    /// Called on every page change. Only sequential reading can mark a comic finished; the resume
+    /// position always updates.
+    func recordPosition(comic: Comic, page: Int, isSequential: Bool, onFinished: (() -> Void)? = nil) {
+        debounceWorkItem?.cancel()
+        let work = DispatchWorkItem {
+            LibraryViewModel.shared.updateProgress(comic: comic, page: page)
+            if isSequential, comic.pageCount > 1, page >= comic.pageCount - 1 {
+                LibraryViewModel.shared.markFinished(comic: comic)
+                onFinished?()
+            }
+        }
+        debounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: work)
+    }
+
+    /// Synchronous flush on teardown, so the last position survives a quit.
+    func flush(comic: Comic, page: Int, isSequential: Bool) {
+        debounceWorkItem?.cancel()
+        debounceWorkItem = nil
+        LibraryViewModel.shared.updateProgress(comic: comic, page: page)
+        if isSequential, comic.pageCount > 1, page >= comic.pageCount - 1 {
+            LibraryViewModel.shared.markFinished(comic: comic)
+        }
+    }
+}
+
+/// Previous/next issue for a comic: within its Reading Path when opened from one, otherwise in
+/// series order.
+enum NextIssueResolver {
+    struct Result { let next: Comic?; let previous: Comic? }
+
+    static func resolve(for comic: Comic, runId: Int64?) -> Result {
+        if let runId {
+            let items = DatabaseManager.shared.runItems(runId: runId)
+            guard let idx = items.firstIndex(where: { $0.comic.id == comic.id }) else {
+                return Result(next: nil, previous: nil)
+            }
+            let next = idx + 1 < items.count ? items[idx + 1].comic : nil
+            let previous = idx > 0 ? items[idx - 1].comic : nil
+            return Result(next: next, previous: previous)
+        }
+        return Result(
+            next: DatabaseManager.shared.nextComic(after: comic),
+            previous: DatabaseManager.shared.previousComic(before: comic)
+        )
+    }
+
+    /// Warms just the next issue's cover; prefetching its pages is `ReaderSession`'s decision.
+    static func prefetchCover(for comic: Comic?) {
+        guard let comic else { return }
+        ThumbnailCache.shared.thumbnail(for: comic) { _ in }
+    }
+}
+
+/// Which comic is open in the reader overlay, and the context it was opened with.
+@MainActor
+final class ReaderCoordinator: ObservableObject {
+    /// Starting page override (e.g. a favorite moment), instead of the saved resume position.
+    @Published var initialPage: Int? = nil
+    /// The Reading Path the reader was opened from, for path-scoped next/previous.
+    @Published var runId: Int64? = nil
+    @Published var comic: Comic? = nil {
+        didSet {
+            // Posted on close so views showing progress (e.g. a Reading Path) can refresh.
+            if oldValue != nil, comic == nil {
+                NotificationCenter.default.post(name: .readerDidClose, object: nil)
+            }
+        }
+    }
+
+    func open(_ comic: Comic, atPage page: Int? = nil, runId: Int64? = nil) {
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) {
+            self.initialPage = page; self.runId = runId; self.comic = comic
+        }
+    }
+
+    func close() {
+        withAnimation(Design.motion(Design.springGentle, reduce: Design.systemReduceMotionEnabled)) {
+            comic = nil; initialPage = nil; runId = nil
+        }
     }
 }

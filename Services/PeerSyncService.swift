@@ -6,11 +6,9 @@ import AppKit
 import UIKit
 #endif
 
-/// Local, cloud-free sync between a Mac and an iPad on the same network, over
-/// MultipeerConnectivity -- no account, no server, nothing leaves the local network. Syncs reading
-/// progress (last-write-wins page, sticky finished flag) and Reading Paths (additive merge by
-/// title), matched by file hash rather than database id, since ids are meaningless across two
-/// independently-scanned libraries. Tags and manual issue orders stay local.
+/// Mac/iPad sync over the local network (MultipeerConnectivity), no account or server. Syncs
+/// progress (last write wins, finished is sticky) and Reading Paths (merged by title), matched by
+/// file hash.
 @MainActor
 final class PeerSyncService: NSObject, ObservableObject {
     static let shared = PeerSyncService()
@@ -46,8 +44,7 @@ final class PeerSyncService: NSObject, ObservableObject {
         #endif
     }
 
-    /// Starts both browsing (to find nearby devices) and advertising (so nearby devices can find
-    /// this one) -- either device can be the one that taps "Connect" first.
+    /// Browses and advertises, so either device can connect first.
     func start() {
         guard !isActive else { return }
         isActive = true

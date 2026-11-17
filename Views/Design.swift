@@ -1,4 +1,5 @@
 import SwiftUI
+
 #if os(macOS)
 import AppKit
 #else
@@ -25,11 +26,8 @@ extension Color {
         return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
     }
 
-    /// HSB-clamps a cover-derived color into a specific saturation/brightness band -- shared by
-    /// every "cover color drives a background/wash/scrim" use case below, since an unclamped
-    /// cover average can be near-black, neon-saturated, or near-white, any of which looks broken
-    /// stretched across something bigger than a small swatch. Named presets below pick the band;
-    /// this just does the one HSB extraction they all need.
+    /// Clamps a cover-derived color into a saturation/brightness band, so it works stretched across
+    /// a large area.
     func clamped(saturation: ClosedRange<Double>, brightness: ClosedRange<Double>) -> Color {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         #if os(macOS)
@@ -43,9 +41,7 @@ extension Color {
         return Color(hue: Double(h), saturation: clampedS, brightness: clampedB)
     }
 
-    /// Low-saturation, near-black version of this color -- for the reader's near-black
-    /// backdrop, which should read as "a hint of this cover's color in the dark," not an actual
-    /// colored background competing with the page art itself.
+    /// A low-saturation, near-black version of this color, for the reader backdrop.
     func clampedForDeepBackdrop() -> Color { clamped(saturation: 0.25...0.45, brightness: 0.05...0.12) }
 }
 
@@ -66,9 +62,6 @@ enum Design {
     static let cardWidth:       CGFloat = 172
     static let cardHeight:      CGFloat = 258
     static let groupCardWidth:  CGFloat = 220
-    // Matches cardWidth:cardHeight's exact 2:3 ratio (was 310, a noticeably wider 0.71 ratio than
-    // real comic covers, which run close to 2:3 -- that mismatch alone forced significantly more
-    // of every cover to be cropped away than the individual issue card needed).
     static let groupCardHeight: CGFloat = 330
     static let cardCorner:      CGFloat = 10
     static let gridSpacing:     CGFloat = 22
@@ -77,16 +70,13 @@ enum Design {
         static let sm: CGFloat = 4
     }
 
-    /// Named large-display styles for the handful of spots hand-rolling `.font(.system(size: N))`
-    /// at similar-but-not-identical sizes (recap hero numbers, empty-state icons) -- one definition
-    /// each instead of several slightly different ad hoc sizes.
+    /// Named large display font sizes.
     enum Typography {
         static let heroNumber    = Font.system(size: 64, weight: .black, design: .rounded)
         static let heroSeal      = Font.system(size: 40, weight: .regular)
         static let emptyStateIcon = Font.system(size: 52, weight: .regular)
 
-        /// The small end of the scale -- row-metadata text (item counts, trailing chevrons, small
-        /// placeholder icons) shared by several card-style rows.
+        /// Small row-metadata text sizes.
         static let microLabel     = Font.system(size: 10)
         static let microGlyph     = Font.system(size: 9)
         static let rowIcon        = Font.system(size: 14)
@@ -109,9 +99,7 @@ enum Design {
     }
     static var brandGold: Color { AppTheme.current.palette.brandGold }
 
-    /// The hover spotlight's fallback tint for a cover whose accent color hasn't loaded yet (or
-    /// never resolved to anything strongly saturated) -- a warm amber-white standing in for
-    /// "display-case light" rather than falling back to a cold/neutral glow.
+    /// Hover glow tint used until a cover's accent color loads.
 
     static var textPrimary: Color { AppTheme.current.isLight ? Color(red: 0.13, green: 0.11, blue: 0.08) : .white }
 
@@ -131,11 +119,8 @@ enum Design {
         reduce ? .default : animation
     }
 
-    /// The system Reduce Motion setting, read directly rather than via `@Environment` -- for the
-    /// handful of `withAnimation` call sites that live in a `ViewModel`/non-View type (navigation
-    /// state changes in `LibraryViewModel`), which has no SwiftUI environment to read from.
-    /// View-level code should still prefer `@Environment(\.accessibilityReduceMotion)`; this is
-    /// only for call sites that structurally can't.
+    /// The system Reduce Motion setting, for animations started outside views. Views should use
+    /// `@Environment(\.accessibilityReduceMotion)`.
     static var systemReduceMotionEnabled: Bool {
         #if os(macOS)
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -144,8 +129,7 @@ enum Design {
         #endif
     }
 
-    /// Returns plain black when Increase Contrast or Differentiate Without Color is on -- a hint of the comic's own cover color behind the page rather than flat
-    /// black, without touching the reader chrome's white icon/text contrast system at all.
+    /// Plain black when Increase Contrast or Differentiate Without Color is on.
     static func deepBackdropTint(_ color: Color?, increaseContrast: Bool, differentiateWithoutColor: Bool) -> Color {
         guard !increaseContrast, !differentiateWithoutColor, let color else { return .black }
         return color.clampedForDeepBackdrop()
@@ -191,5 +175,246 @@ enum ProgressFormat: String, CaseIterable {
             if started > 0 || finished > 0    { return "In Progress" }
             return "Unread"
         }
+    }
+}
+
+extension View {
+    /// Card chrome for Stats and the recap sheets.
+    func dashboardCardStyle(padding: CGFloat = 20) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Design.cardBg)
+            .clipShape(RoundedRectangle(cornerRadius: Design.cardCorner))
+            .overlay(RoundedRectangle(cornerRadius: Design.cardCorner).stroke(Design.borderColor, lineWidth: 1))
+    }
+
+    func ambientBackground() -> some View {
+        background(Design.appBackground.ignoresSafeArea())
+    }
+
+    /// Cover chrome: a soft shadow at rest, a ring and shadow tinted by the cover's accent color on
+    /// hover.
+    func comicCardStyle(accentColor: Color? = nil, isHovered: Bool = false) -> some View {
+        let hoverTint = isHovered ? (accentColor ?? Design.brandGold) : nil
+        return self
+            .clipShape(Rectangle())
+            .shadow(color: hoverTint?.opacity(0.45) ?? .black.opacity(0.45),
+                    radius: hoverTint != nil ? 14 : 8, x: 0, y: hoverTint != nil ? 8 : 4)
+            .overlay(Rectangle().stroke(hoverTint?.opacity(0.6) ?? .clear, lineWidth: 1.5))
+    }
+
+    func goldButton() -> some View {
+        self
+            .buttonStyle(GoldCapsuleStyle())
+    }
+
+    /// The hover-scale effect shared by every library card. Pass `isHovered:` to also read the
+    /// state.
+    func hoverLift(scale: CGFloat = 1.03, duration: Double = 0.15, isHovered: Binding<Bool>? = nil) -> some View {
+        modifier(HoverLiftModifier(scale: scale, duration: duration, externalIsHovered: isHovered))
+    }
+}
+
+private struct HoverLiftModifier: ViewModifier {
+    let scale: CGFloat
+    var duration: Double = 0.15
+    var externalIsHovered: Binding<Bool>? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var internalIsHovered = false
+
+    private var isHovered: Bool { externalIsHovered?.wrappedValue ?? internalIsHovered }
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isHovered && !reduceMotion ? scale : 1.0)
+            // A plain ease, not a spring: springs overshoot and make the grid look like it's
+            // shaking.
+            .animation(Design.motion(.easeOut(duration: duration), reduce: reduceMotion), value: isHovered)
+            .onHover { hovering in
+                if let externalIsHovered { externalIsHovered.wrappedValue = hovering }
+                else { internalIsHovered = hovering }
+            }
+    }
+}
+
+struct GoldCapsuleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 20).padding(.vertical, 8)
+            .background(Rectangle().fill(Design.goldGradient).opacity(configuration.isPressed ? 0.75 : 1))
+            .clipShape(Capsule())
+            .shadow(color: Design.brandGold.opacity(0.35), radius: 8, x: 0, y: 3)
+            .contentShape(Capsule())
+    }
+}
+
+struct EmptyStateView<Action: View>: View {
+    let icon: String
+    let title: String
+    var message: String? = nil
+    var iconFont: Font = Design.Typography.emptyStateIcon
+    var messageWidth: CGFloat = 340
+    @ViewBuilder var action: () -> Action
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(iconFont)
+                .foregroundStyle(.quaternary)
+            Text(title)
+                .font(.title3.bold())
+                .foregroundStyle(.secondary)
+            if let message {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: messageWidth)
+            }
+            action()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+}
+
+/// Kerned all-caps header style used for section and screen titles.
+struct SignageLabel: View {
+    let text: String
+    var size: CGFloat = 13
+    var kerning: CGFloat = 1.5
+    var tint: Color = Design.secondaryLabel
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: size, weight: .black, design: .rounded))
+            .foregroundStyle(tint)
+            .kerning(kerning)
+    }
+}
+
+extension EmptyStateView where Action == EmptyView {
+    init(icon: String, title: String, message: String? = nil, iconFont: Font = Design.Typography.emptyStateIcon, messageWidth: CGFloat = 340) {
+        self.init(icon: icon, title: title, message: message, iconFont: iconFont, messageWidth: messageWidth, action: { EmptyView() })
+    }
+}
+
+/// Stat tile shared by the recap sheets.
+struct RecapStatTile: View {
+    let label: String
+    let value: String
+    let icon: String
+    var tint: Color = Design.brandGold
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon).font(.system(size: 16, weight: .semibold)).foregroundStyle(tint)
+            Text(value).font(.system(size: 24, weight: .black)).lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).kerning(0.5)
+        }
+        .dashboardCardStyle(padding: 16)
+    }
+}
+
+/// Highlight row shared by the recap sheets.
+struct RecapHighlightRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    var detail: String? = nil
+    var tint: Color = Design.brandGold
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.title3).foregroundStyle(tint).frame(width: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(value).font(.subheadline.weight(.semibold)).lineLimit(1)
+            }
+            Spacer()
+            if let detail {
+                Text(detail).font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .dashboardCardStyle(padding: 14)
+    }
+}
+
+extension Image {
+    /// Shows the full cover, letterboxed if needed, never cropped. Callers set the frame.
+    func comicCoverStyle() -> some View {
+        self.resizable().aspectRatio(contentMode: .fit)
+    }
+}
+
+struct TagChip: View {
+    let name: String
+    var category: String? = nil
+    var onRemove: (() -> Void)? = nil
+
+    private var tint: Color {
+        switch TagCategory(rawValue: category ?? "") {
+        case .genre:  return Design.brandGold
+        case .mood:   return .purple
+        case .format: return .teal
+        case .custom, nil: return Design.brandBlue
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("#\(name)").font(.caption)
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill").font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove tag \(name)")
+            }
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(tint.opacity(0.14))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(tint.opacity(0.3)))
+    }
+}
+
+struct PublisherBadge: View {
+    let publisher: String
+
+    var body: some View {
+        Text(publisher.uppercased())
+            .font(.system(size: 9, weight: .black, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Design.publisherColor(publisher))
+            .clipShape(RoundedRectangle(cornerRadius: Design.Radius.sm))
+            .shadow(color: Design.publisherColor(publisher).opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+}
+
+/// The app's mark: a comic "impact burst", drawn as a Shape so it scales and tints cleanly.
+struct ComicBurstShape: Shape {
+    var points: Int = 10
+    var innerRatio: CGFloat = 0.5
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let outerRadius = min(rect.width, rect.height) / 2
+        let innerRadius = outerRadius * innerRatio
+        let totalPoints = points * 2
+        var path = Path()
+        for i in 0..<totalPoints {
+            let angle = CGFloat(i) * .pi / CGFloat(points) - .pi / 2
+            let radius = i.isMultiple(of: 2) ? outerRadius : innerRadius
+            let point = CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        path.closeSubpath()
+        return path
     }
 }

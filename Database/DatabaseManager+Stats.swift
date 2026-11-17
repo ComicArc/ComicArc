@@ -2,6 +2,16 @@ import Foundation
 import SQLite3
 
 extension DatabaseManager {
+    /// Sort orders whose field is empty for every comic in the library, so they can be hidden.
+    func sortOrdersWithoutData() -> Set<SortOrder> {
+        let fields: [(SortOrder, String)] = [(.writer, "writer"), (.storyArc, "story_arc"), (.year, "year")]
+        return queue.sync {
+            Set(fields.filter { _, column in
+                scalarInt("SELECT EXISTS(SELECT 1 FROM comics WHERE deleted_at IS NULL AND \(column) IS NOT NULL AND \(column) != '')") == 0
+            }.map(\.0))
+        }
+    }
+
     func loadStats() -> LibraryStats {
         queue.sync {
             let total     = scalarInt("SELECT COUNT(*) FROM comics WHERE deleted_at IS NULL")
@@ -47,14 +57,8 @@ extension DatabaseManager {
         }
     }
 
-    // Not queue.sync'd itself -- `queue` is a serial DispatchQueue, so this must stay a plain
-    // unwrapped helper (matching `readingActivityMap(days:)`'s convention below) to be safely
-    // callable from inside another already-`queue.sync`'d block without deadlocking.
-    //
-    // 'localtime': last_read is stored as CURRENT_TIMESTAMP (UTC) -- bucketing by the raw
-    // UTC date would split/merge reading days across a boundary that has nothing to do
-    // with the user's actual calendar day (e.g. for US timezones, UTC midnight falls in
-    // the evening local time, right in the middle of a normal reading session).
+    // Call from inside queue.sync (it doesn't take the queue itself). Days are bucketed in local
+    // time, since last_read is stored in UTC.
     private func streakDates() -> [String] {
         rows("""
             SELECT DISTINCT date(last_read, 'localtime') FROM reading_progress ORDER BY date(last_read, 'localtime') DESC
@@ -83,23 +87,14 @@ extension DatabaseManager {
         return points
     }
 
-    // Parses a plain "yyyy-MM-dd" produced by one of this file's own `date(..., 'localtime')`
-    // queries -- must assume the *local* timezone (`Calendar.current`'s own, the implicit
-    // default when none is set), not UTC. Parsing a local calendar day as if it were UTC and
-    // then re-bucketing the result through `Calendar.current.startOfDay` silently shifts it by a
-    // day for anyone west of UTC, which broke `computeStreak`'s "is the most recent read today or
-    // yesterday" anchor check specifically (verified: a read logged 1 day ago stopped counting as
-    // a live streak at all). `longestStreak` below isn't affected either way -- it only compares
-    // consecutive parsed days to each other, so a uniform shift cancels out.
+    // Parses a local "yyyy-MM-dd" day from the queries above, so it must use the local time zone.
     static let yyyyMMddFormatter: DateFormatter = {
         let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"
         fmt.locale = Locale(identifier: "en_US_POSIX")
         return fmt
     }()
 
-    // 'localtime': same reasoning as streakDates() above -- this feeds the Stats heatmap, whose
-    // Swift-side lookup keys are built from a local-timezone Calendar, so the SQL side must bucket
-    // by local calendar day too or the two silently disagree near a UTC day boundary.
+    // Local-time days, matching the heatmap's local calendar keys.
     func readingActivityMap(days: Int) -> [String: Int] {
         var map: [String: Int] = [:]
         let rows = self.rows("""
@@ -174,9 +169,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Every calendar year that has at least one real reading session -- backs the year picker on
-    /// the Year in Review screen, most recent first, so a user isn't stuck looking at a hardcoded
-    /// "this year" that might be empty in their first days using the app.
+    /// Years with at least one reading session, most recent first.
     func availableReadingYears() -> [Int] {
         queue.sync {
             rows("SELECT DISTINCT strftime('%Y', read_at) FROM reading_history ORDER BY 1 DESC") { colText($0, 0) }
@@ -194,9 +187,6 @@ extension DatabaseManager {
         let busiestMonthLabel: String?
     }
 
-    /// A "wrapped"-style recap for one calendar year, built entirely from data the app already
-    /// tracks day-to-day (reading sessions) -- no new instrumentation needed, just
-    /// year-scoped aggregation over what's already there.
     func yearInReview(year: Int) -> YearInReviewStats {
         queue.sync {
             let yearStr = String(year)
@@ -249,10 +239,8 @@ extension DatabaseManager {
         return fmt.monthSymbols[n - 1]
     }
 
-    /// Longest run of consecutive calendar days with at least one reading session, within an
-    /// arbitrary (not necessarily today-anchored) set of dates -- distinct from `computeStreak`,
-    /// which only ever counts backward from today/yesterday for the *current* streak. This finds
-    /// the best run anywhere in a bounded year, which could be months in the past.
+    /// Longest run of consecutive reading days in `dates` (unlike `computeStreak`, not anchored to
+    /// today).
     func longestStreak(dates: [String]) -> Int {
         let cal = Calendar.current
         let days = dates.compactMap { Self.yyyyMMddFormatter.date(from: $0) }

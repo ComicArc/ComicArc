@@ -1,16 +1,7 @@
 import SwiftUI
 
-/// A larger featured cover for whatever was most recently read -- sized past what any card in a
-/// scrolling grid gets, since this is the one comic that actually deserves the extra attention.
-/// Tints itself from that comic's own cover color (falling back to its publisher's color, never
-/// the neutral gold default), so the one enlarged moment in the library is also its most personal
-/// one, not another gold accent.
-///
-/// The cover art is the actual centerpiece, "Now Playing"-style (matches Apple Music/TV's own
-/// hero pattern rather than inventing a new one): the same cover, heavily blurred, fills the whole
-/// band as an ambient backdrop behind a dark scrim, while the sharp cover stays the sole focal
-/// point in front. No hover-tracking tilt, no extra ribbon/texture layered on top -- the enlarged
-/// cover and its own color are the whole effect.
+/// A large featured cover for the comic you're currently reading, over a blurred copy of its cover
+/// and tinted by its color.
 struct NowReadingHero: View {
     let comic: Comic
     @EnvironmentObject var vm: LibraryViewModel
@@ -34,9 +25,8 @@ struct NowReadingHero: View {
         .buttonStyle(.plain)
         .padding(28)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // `backdrop` as a `.background()`, not a `ZStack` sibling -- a `GeometryReader` sibling
-        // inside a `ScrollView` would be proposed an unbounded height and blow up to fill it. As
-        // a background it's proposed exactly this button's own content-driven size instead.
+        // A `.background()` so the GeometryReader gets this view's size, not the ScrollView's
+        // unbounded height.
         .background(backdrop)
         .onAppear {
             ThumbnailCache.shared.thumbnail(for: comic) { thumbnail = $0 }
@@ -49,9 +39,7 @@ struct NowReadingHero: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The cover, heavily blurred and extended edge-to-edge, behind a dark scrim so foreground
-    /// text stays readable -- a single static image, blurred once when it loads, not re-rendered
-    /// per frame, so this costs nothing extra during scroll or hover.
+    /// The cover blurred behind a dark scrim, so the text stays readable.
     @ViewBuilder
     private var backdrop: some View {
         GeometryReader { geo in
@@ -233,8 +221,7 @@ struct ShelfCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// Page progress for something you're partway through; the issue number (or series) for an
-    /// unstarted Read Next suggestion, which would otherwise read "p. 1/24".
+    /// Page progress if started; otherwise the issue number or series.
     private var shelfDetail: String {
         if comic.isStarted { return "p. \(comic.progress + 1)/\(comic.pageCount)" }
         if let issue = comic.issueNumber, !issue.isEmpty { return "\(comic.series) #\(issue)" }

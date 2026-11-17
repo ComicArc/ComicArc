@@ -7,10 +7,7 @@ struct AllTagsView: View {
     @State private var renameText = ""
     @State private var pendingDeleteTag: Tag?
 
-    // Reads vm.allTags directly instead of maintaining a separate local copy -- vm already
-    // fetches and republishes this exact same (tag, count) list on every reload(), which
-    // renameTag/deleteTagGlobally/setTagCategory already trigger, so this view updates live
-    // with no extra fetch of its own to keep in sync.
+    // Reads `vm.allTags` directly; it's republished on every reload, which tag edits trigger.
     private var grouped: [(category: String, tags: [(tag: Tag, count: Int)])] {
         let byCategory = Dictionary(grouping: vm.allTags) { $0.tag.category ?? TagCategory.custom.rawValue }
         let order = TagCategory.allCases.map(\.rawValue)

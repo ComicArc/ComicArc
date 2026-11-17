@@ -11,9 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Disable AppKit window restoration before any window exists; restoring an old session's
+        // toolbar state has crashed AppKit.
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
         guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        // Ignore a previous copy that is still shutting down.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }
         if let existing = others.first {
             existing.activate()
             NSApp.terminate(nil)
@@ -118,9 +122,7 @@ struct ComicArcApp: App {
                 vm.openComicFromSpotlight(activity)
             }
             .onChange(of: scenePhase) { _, phase in
-                // One scan per launch catches anything changed while the app wasn't running;
-                // after that the FSEvents watcher (`FileWatcher`) picks up adds/removes live, so
-                // rescanning on every window activation would just repeat work.
+                // One scan per launch; after that the FSEvents watcher handles changes.
                 guard phase == .active, !didLaunchScan, !vm.libraryPaths.isEmpty else { return }
                 didLaunchScan = true
                 vm.scan()
@@ -189,7 +191,7 @@ struct ComicArcApp: App {
                 Divider()
                 Button(vm.bulkMode ? "Exit Selection Mode" : "Select Multiple") { vm.toggleBulkMode() }
                     .keyboardShortcut("e", modifiers: .command)
-                // ⇧⌘A, not ⌘A -- plain ⌘A belongs to the Edit menu's text Select All.
+                // ⇧⌘A: plain ⌘A is the Edit menu's Select All.
                 Button("Select All") { vm.selectAll() }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .disabled(!vm.bulkMode)

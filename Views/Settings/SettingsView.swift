@@ -1,11 +1,6 @@
 import SwiftUI
 
-// `SettingsView` is shared verbatim by all three platforms (Mac, iPad, visionOS) -- section-level
-// search (the toolbar's search field is shared app-wide) is coarser than filtering every
-// individual control,
-// but matches how most macOS/iOS settings search actually behaves: it finds the relevant *pane*,
-// not every label inside it. Each section gets a handful of terms a user would plausibly type to
-// find it, beyond its own visible title.
+// Settings search matches whole sections by title and a few keywords each.
 enum SettingsSearch {
     static let keywords: [String: [String]] = [
         "Appearance": ["theme", "accent", "color", "colour", "dark", "light", "sepia"],
@@ -13,9 +8,8 @@ enum SettingsSearch {
         "Reader": ["scroll", "slideshow", "autoplay", "speed"],
         "Sidebar": ["discover", "reorder", "hide"],
         "ComicInfo Write-Back": ["comicinfo", "write back", "metadata", "xml", "portable"],
-        "Data": ["backup", "export", "trash", "resync", "clear", "cache"],
+        "Data": ["backup", "export", "import", "restore", "trash", "resync", "clear", "cache"],
         "Sync": ["nearby", "multipeer", "ipad", "mac", "progress", "reading paths", "wifi", "network", "peer"],
-        "Backup": ["export", "import", "restore"],
         "Help": ["tutorial", "onboarding"],
         "About": ["version"],
     ]
@@ -54,13 +48,12 @@ struct SettingsView: View {
                 set: { progressFormatRaw = $0.rawValue })
     }
 
-    // Kept platform-conditional so a search matching only a Mac-only section (e.g. "cbr") doesn't
-    // leave `noSectionsMatch` false while nothing actually renders on iPad/visionOS.
+    // Only sections that render on this platform, so "no results" is accurate.
     private static let sectionTitles: [String] = {
         var titles = ["Appearance", "Library",
                       "Reader", "Sidebar", "Data", "Sync", "Help", "About"]
         #if os(macOS)
-        titles.append("Import")
+        titles.append("ComicInfo Write-Back")
         #endif
         return titles
     }()
@@ -418,10 +411,8 @@ struct TrashView: View {
     @State private var purgeTarget: Comic?
     @State private var confirmEmptyTrash = false
 
-    /// "missing" (file vanished from disk) and "folder_removed" (its library folder was removed
-    /// from Settings, file likely untouched) are both distinct from an explicit user delete (or
-    /// nil, for anything soft-deleted before this distinction existed) -- restoring either only
-    /// really makes sense once the file is confirmed to still be reachable, checked before acting.
+    /// Files reported missing (or whose folder was removed) are only restored once the file is
+    /// reachable again.
     private func badge(for comic: Comic) -> (label: String, systemImage: String)? {
         switch comic.deletedReason {
         case "missing":        return ("Missing", "questionmark.folder")

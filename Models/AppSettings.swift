@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 enum AppTheme: String, CaseIterable, Identifiable {
     case dark, pureBlack, graphite, midnightBlue, forest, sepia
@@ -29,12 +30,6 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var palette: Palette {
         switch self {
         case .dark:
-            // Previously a distinctly navy-tinted, near-pitch-black (blue channel ran noticeably
-            // ahead of red/green, more so at each lighter step, at a luminance so low the tint was
-            // barely perceptible anyway). This is a decisively lighter, flatter charcoal -- still a
-            // hair cooler than `graphite` so the two remain distinguishable -- with much wider
-            // app/nav/card/surface steps so elevation actually reads at a glance instead of in
-            // theory.
             return Palette(
                 appBackground: Color(red: 0.075, green: 0.078, blue: 0.094),
                 navBackground: Color(red: 0.105, green: 0.109, blue: 0.128),
@@ -102,4 +97,93 @@ enum AppTheme: String, CaseIterable, Identifiable {
     }
 
     var isLight: Bool { self == .sepia }
+}
+
+/// Stores the configured library folders as JSON (paths can contain commas).
+enum LibraryFolders {
+    static let key = "libraryPathsJSON"
+
+    /// Legacy single-folder key, migrated on first read.
+    static let legacySingleKey = "libraryPath"
+
+    static func decode(_ raw: String) -> [String] {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return decoded
+    }
+
+    static func encode(_ paths: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(paths),
+              let string = String(data: data, encoding: .utf8) else { return "[]" }
+        return string
+    }
+
+    /// The folder list, migrating a legacy single `libraryPath` the first time.
+    static func readMigrating(defaults: UserDefaults = .standard) -> [String] {
+        let raw = defaults.string(forKey: key) ?? ""
+        let decoded = decode(raw)
+        guard decoded.isEmpty else { return decoded }
+        guard let legacy = defaults.string(forKey: legacySingleKey), !legacy.isEmpty else { return [] }
+        let migrated = [legacy]
+        defaults.set(encode(migrated), forKey: key)
+        return migrated
+    }
+
+    static func write(_ paths: [String], defaults: UserDefaults = .standard) {
+        defaults.set(encode(paths), forKey: key)
+    }
+}
+
+enum DiscoverItem: String, CaseIterable, Identifiable, Codable {
+    case favoriteMoments, stats, libraryHealth
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .favoriteMoments:     return "Highlights"
+        case .stats:               return "Stats"
+        case .libraryHealth:       return "Library Health"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .favoriteMoments:     return "star.circle.fill"
+        case .stats:               return "chart.bar.xaxis"
+        case .libraryHealth:       return "stethoscope"
+        }
+    }
+
+    var destination: AppDestination {
+        switch self {
+        case .favoriteMoments:     return .favoriteMoments
+        case .stats:               return .stats
+        case .libraryHealth:       return .libraryHealth
+        }
+    }
+}
+
+enum SidebarCustomization {
+    static let orderKey  = "sidebarDiscoverOrder"
+    static let hiddenKey = "sidebarDiscoverHidden"
+
+    static func decodeOrder(_ raw: String) -> [DiscoverItem] {
+        let saved = raw.split(separator: ",").compactMap { DiscoverItem(rawValue: String($0)) }
+        let missing = DiscoverItem.allCases.filter { !saved.contains($0) }
+        return saved + missing
+    }
+
+    static func decodeHidden(_ raw: String) -> Set<DiscoverItem> {
+        Set(raw.split(separator: ",").compactMap { DiscoverItem(rawValue: String($0)) })
+    }
+
+    static func encode(_ items: [DiscoverItem]) -> String {
+        items.map(\.rawValue).joined(separator: ",")
+    }
+
+    static func visibleItems(orderRaw: String, hiddenRaw: String) -> [DiscoverItem] {
+        let hidden = decodeHidden(hiddenRaw)
+        return decodeOrder(orderRaw).filter { !hidden.contains($0) }
+    }
 }

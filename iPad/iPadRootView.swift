@@ -7,11 +7,7 @@ struct iPadRootView: View {
     @State private var selectedComic: Comic?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showRenameFilesGlobal = false
-    // Shared with every comic cover rendered inside the split view below (`ComicCard`,
-    // `IssueDetailPage`, etc. all already read `@Environment(\.readerNamespace)`) so the reader's
-    // own hero-cover layer can `matchedGeometryEffect` against whichever cover was on screen.
-    // Previously unset on iPad -- the Mac-only reason the grid-to-reader hero morph existed only
-    // on one platform wasn't the reader itself, it was this namespace never being injected here.
+    // Shared with every cover in the split view, for the reader's hero animation.
     @Namespace private var readerNamespace
 
     var body: some View {
@@ -30,18 +26,12 @@ struct iPadRootView: View {
             .onChange(of: vm.destination) { selectedComic = nil }
             .environment(\.readerNamespace, readerNamespace)
 
-            // A same-hierarchy overlay instead of `.fullScreenCover(item:)` -- a system sheet/cover
-            // presentation is a separate view-controller-level transition that can't participate in
-            // a `matchedGeometryEffect` with the grid underneath, which is exactly why the hero
-            // cover morph (see `iPadReaderView`) could never work on iPad while this used
-            // `fullScreenCover`. Mirrors the Mac reader's identical ZStack-overlay presentation in
-            // `ContentView.swift`, a pattern already proven there.
+            // An overlay rather than `.fullScreenCover`, so the hero animation can match the cover
+            // underneath.
             if let comic = vm.readerComic {
                 iPadReaderView(comic: comic, runId: vm.readerRunId, onClose: { vm.closeReader() })
                     .environmentObject(vm)
-                    // Same fix as the Mac reader: without this, swapping straight from one comic
-                    // to another (e.g. advancing to the next issue) reuses this view's existing
-                    // @State (currentPage, zoom, autoplay) instead of resetting it for the new comic.
+                    // Reset the reader's state when switching straight to another comic.
                     .id(comic.id)
                     .transition(.opacity)
                     .zIndex(10)
@@ -112,11 +102,8 @@ struct iPadRootView: View {
         } message: { summary in
             Text(iPadImportSummaryMessage(summary))
         }
-        // See the matching comment on Mac's ContentView -- most of this app's text uses fixed-
-        // size fonts rather than semantic text styles, so a full Dynamic Type migration is a
-        // larger change than this pass can safely make. Capping the range keeps a moderately
-        // larger text preference usable without the most extreme accessibility sizes breaking
-        // this app's fixed-width grids.
+        // Dynamic Type is capped: most text uses fixed sizes, and the largest accessibility sizes
+        // break the fixed-width grids.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
@@ -248,8 +235,7 @@ private struct iPadSidebar: View {
                                 draggedPublisher = nil
                                 return true
                             }
-                            // Keyboard/VoiceOver alternative to the drag reorder above -- onDrag/
-                            // onDrop alone has no accessible fallback for a user who can't drag.
+                            // Keyboard/VoiceOver alternative to drag reordering.
                             .accessibilityAction(named: "Move Up") {
                                 guard let idx = vm.publishers.firstIndex(of: pub), idx > 0 else { return }
                                 vm.movePublisher(from: pub, to: vm.publishers[idx - 1])
@@ -382,9 +368,7 @@ struct iPadContentColumn: View {
             switch vm.destination {
             case .library, .continueReading, .favorites, .publisher, .tag:
                 VStack(spacing: 0) {
-                    // Mac shows Read Next as an inline shelf on its home grid; iPad's
-                    // library view is a flat grid with no natural "home" section, so it's shown here
-                    // only on the plain .library destination rather than every filtered view.
+                    // Read Next appears only on the plain Library view.
                     if case .library = vm.destination, !vm.readNextSuggestions.isEmpty {
                         iPadReadNextShelf()
                     }

@@ -99,24 +99,18 @@ struct SeriesGroupGridView: View {
     var body: some View {
         ScrollView {
             if vm.isLoading && vm.seriesGroups.isEmpty {
-                // Previously this branched straight to `emptyState` while loading too -- a slow
-                // series-grid load would flash "No Series Here" (an error-sounding message) before
-                // the real data arrived, instead of a neutral loading state like the other two
-                // grids (`CharacterGroupGridView`/`LibraryGridView`) already have.
                 skeletonGrid
             } else if vm.seriesGroups.isEmpty {
                 emptyState
             } else if folderGroupBuckets.count <= 1 {
-                // The common case (1-3 level folder layout, no in-between grouping folder) --
-                // render exactly as before, no header.
+                // No in-between grouping folder: render flat.
                 LazyVGrid(columns: columns, spacing: Design.gridSpacing) {
                     ForEach(vm.seriesGroups) { sg in seriesCard(sg) }
                 }
                 .padding(Design.gridSpacing)
             } else {
-                // A real on-disk folder sits between this Character and some of its series (e.g.
-                // "Batman (Modern)") -- surface it as a section header instead of silently
-                // discarding it, so that grouping the user built on disk actually shows up here.
+                // A folder between the Character and its series (e.g. "Batman (Modern)") becomes a
+                // section header.
                 LazyVStack(alignment: .leading, spacing: 24) {
                     ForEach(folderGroupBuckets, id: \.label) { bucket in
                         VStack(alignment: .leading, spacing: 12) {
@@ -164,22 +158,15 @@ struct SeriesGroupGridView: View {
             )
     }
 
-    /// Buckets `vm.seriesGroups` by their on-disk folder group, preserving each series' existing
-    /// relative order (manual reorder / series_order) both within and across buckets. A single
-    /// bucket means no meaningful in-between folder exists anywhere in this character -- callers
-    /// should render flat with no header in that case, matching every library that's just 1-3
-    /// folder levels deep.
+    /// Buckets series by their on-disk folder group, keeping their order. One bucket means render
+    /// flat.
     private var folderGroupBuckets: [(label: String, groups: [DatabaseManager.SeriesGroup])] {
         var buckets: [String: [DatabaseManager.SeriesGroup]] = [:]
         for sg in vm.seriesGroups {
             let label = (sg.folderGroup?.isEmpty == false) ? sg.folderGroup! : "Other"
             buckets[label, default: []].append(sg)
         }
-        // Previously ordered by whichever label's first series happened to sort earliest
-        // overall (e.g. "Batman (Modern)" could land before "Batman (Classic)" just because
-        // some 2016-dated issue alphabetized ahead of an annual) -- sort the labels themselves
-        // instead, so folder-group headers read in a predictable order. "Other" (comics with no
-        // real on-disk group) always trails, regardless of where it'd fall alphabetically.
+        // Group headers sorted by label, with "Other" last.
         let realLabels = buckets.keys.filter { $0 != "Other" }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         let labels = buckets["Other"] != nil ? realLabels + ["Other"] : realLabels
@@ -349,10 +336,8 @@ private struct GroupCard: View {
     var coverImagePath: String? = nil
     let placeholderIcon: String
     let placeholderIconSize: CGFloat
-    // Stable identity key ("chargroup_<publisher>_<group>" / "series_<publisher>_<series>",
-    // matching `ThumbnailCache`'s existing custom-cover naming) this group's own "identity
-    // color" is cached under -- lets the whole card carry a bit of its own color at rest, the
-    // "maximal art-driven" browsing treatment `ComicCard` deliberately doesn't get.
+    // Key this group's accent color is cached under (matches `ThumbnailCache`'s custom-cover
+    // names).
     let identityKey: String
 
     @State private var thumbnail: PlatformImage?
@@ -424,11 +409,11 @@ private struct GroupCard: View {
     private func loadThumbnail() {
         ThumbnailCache.shared.groupAccentColor(key: identityKey, coverImagePath: coverImagePath,
                                                 representativeComicId: coverId) { identityColor = $0 }
-        if let path = coverImagePath, let img = PlatformImage.fromFile(path) {
-            thumbnail = img
-            return
-        }
+        let customPath = coverImagePath
         Task.detached(priority: .utility) {
+            if let customPath, let img = PlatformImage.decodedFromURL(URL(fileURLWithPath: customPath)) {
+                await MainActor.run { thumbnail = img }; return
+            }
             if let img = ThumbnailCache.shared.thumbnailFromCache(comicId: coverId) {
                 await MainActor.run { thumbnail = img }; return
             }

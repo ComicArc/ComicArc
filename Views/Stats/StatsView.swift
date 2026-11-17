@@ -12,7 +12,6 @@ struct StatsView: View {
     @State private var showYearInReview = false
     @State private var tab: Tab = .overview
 
-    /// Statistics and reading history are one screen; History is a tab, not a separate section.
     private enum Tab: String, CaseIterable { case overview = "Overview", history = "History" }
 
     private let gridColumns = [GridItem(.adaptive(minimum: 320, maximum: 480), spacing: 20, alignment: .top)]
@@ -389,9 +388,7 @@ private struct DashboardCard<Content: View>: View {
 struct HeatmapView: View {
     let activityMap: [String: Int]
 
-    // Computed once and cached in @State instead of being rebuilt (including a fresh
-    // Calendar/DateFormatter) on every single body evaluation -- SwiftUI re-evaluates body far
-    // more often than activityMap actually changes.
+    // Cached in @State; rebuilt only when the activity data changes.
     @State private var cells: [(date: String, count: Int)] = []
 
     private static let dayKeyFormatter: DateFormatter = {

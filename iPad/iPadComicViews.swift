@@ -135,8 +135,7 @@ struct iPadComicGrid: View {
                             }
                             .accessibilityAction(named: "Move Down") {
                                 guard let idx = comics.firstIndex(where: { $0.id == comic.id }), idx + 1 < comics.count else { return }
-                                // Moving the *next* comic to before this one is equivalent to
-                                // moving this comic down by one, without needing a "move after" API.
+                                // Moving the next comic before this one moves this one down.
                                 vm.moveComic(id: comics[idx + 1].id, before: comic.id)
                             }
                     }

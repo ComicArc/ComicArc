@@ -194,7 +194,6 @@ extension DatabaseManager {
 
         exec("ALTER TABLE comics ADD COLUMN comicinfo_issue_number TEXT")
 
-
         exec("ALTER TABLE comics ADD COLUMN volume TEXT")
 
         exec("ALTER TABLE comics ADD COLUMN format TEXT")
@@ -206,50 +205,28 @@ extension DatabaseManager {
 
         exec("CREATE INDEX IF NOT EXISTS idx_comics_pub_series_issue ON comics(publisher, series, issue_number) WHERE deleted_at IS NULL")
 
-        // Raw-fact mirrors: comicinfo_issue_number (above) already preserves what ComicInfo.xml
-        // said even when a different source wins for the primary `issue_number` column -- these
-        // extend that same pattern to series/publisher, plus the folder-derived guess, so a
-        // priority decision made at import time can always be revisited later instead of being
-        // silently permanent. Always written through unconditionally on every insert, never
-        // gated by which source won.
+        // What ComicInfo.xml and the folder each said, kept even when another source wins.
         exec("ALTER TABLE comics ADD COLUMN comicinfo_series TEXT")
         exec("ALTER TABLE comics ADD COLUMN comicinfo_publisher TEXT")
         exec("ALTER TABLE comics ADD COLUMN folder_series TEXT")
         exec("ALTER TABLE comics ADD COLUMN folder_publisher TEXT")
 
-        // Whatever folder(s) sit between the Character folder and the Series folder itself (e.g.
-        // "Batman (Modern)" in DC/Batman/Batman (Modern)/Batman (2016)/) -- folderComponents used
-        // to silently discard everything except the first, second, and last folder, so a 4th
-        // level a user built to group volumes/eras existed on disk but was invisible everywhere
-        // in the app. Nil for the (very common) 1-3 level layout, where there's no such folder.
+        // Folder(s) between the Character and Series folders, e.g. "Batman (Modern)". Nil for 1-3
+        // level layouts.
         exec("ALTER TABLE comics ADD COLUMN folder_group TEXT")
 
-        // Where a deleted comic's file currently sits in the system Trash, if it was moved there
-        // (nil if trashing wasn't supported/failed, in which case the file was simply left alone).
-        // Needed so restoring from the in-app Trash screen (Settings -> View Trash), which can
-        // happen long after the delete's own undo toast has expired or the app's been relaunched,
-        // still knows where to move the file back from -- without this, that restore path would
-        // bring the database row back while the file stayed stranded in the system Trash.
+        // Where a deleted comic's file sits in the system Trash, so Restore can move it back.
         exec("ALTER TABLE comics ADD COLUMN trashed_file_path TEXT")
 
-        // Distinguishes a comic soft-deleted because the user chose to delete it from one that
-        // was soft-deleted because its file vanished from disk (drive unplugged, moved/renamed
-        // outside the app) -- previously both looked identical in the Trash screen, and
-        // "Restore" on a still-missing file would silently bring the row back pointing at
-        // nothing. NULL (pre-existing soft-deletes) is treated as "user" by the app.
+        // "user" (deliberately deleted) or "missing" (file vanished). NULL is treated as "user".
         exec("ALTER TABLE comics ADD COLUMN deleted_reason TEXT")
 
-        // A "favorite moment" is just a bookmark the user has flagged as worth revisiting on its
-        // own -- not a new table, since every favorite moment is already a page-position bookmark
-        // (with its own label). Distinct from the resume-reading position, which lives on `comics`.
+        // A favorite moment is a bookmark flagged with is_favorite.
         exec("ALTER TABLE bookmarks ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
         exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_favorite ON bookmarks(is_favorite) WHERE is_favorite = 1")
 
-        // Surfaces a disagreement between an already-imported comic's current series/publisher/
-        // issue_number and what a corrected priority resolution would now produce, instead of
-        // silently overwriting (or silently ignoring) either side. UNIQUE(comic_id, field) so a
-        // re-detected conflict updates the existing row (and re-opens it if it had been
-        // dismissed) rather than accumulating duplicates.
+        // ComicInfo.xml values that disagree with how a comic is filed, held for review. One row
+        // per (comic, field).
         exec("""
         CREATE TABLE IF NOT EXISTS metadata_conflicts (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,11 +254,7 @@ extension DatabaseManager {
         resortSpecialIssuesIfNeeded()
         widenMainlinePositionStrideIfNeeded()
 
-        // Decouples "finished" from the raw resume position: `current_page` alone used to double
-        // as completion state, so scrubbing the reader's page slider to the last page (without
-        // reading through it) instantly marked the issue finished. This is set only via
-        // markFinished()/markUnfinished() -- sticky once set, and only from genuine sequential
-        // reading or an explicit Mark Read/Unread action, never from jump-style navigation.
+        // Sticky completion flag, set only by reading to the end or Mark Read/Unread.
         exec("ALTER TABLE reading_progress ADD COLUMN finished_at TIMESTAMP")
 
         addCascadeToProgressIfNeeded()
@@ -290,15 +263,8 @@ extension DatabaseManager {
         moveReadingListIntoPathIfNeeded()
     }
 
-    /// Series order now comes from `comics.position` alone (the intelligent reading-order engine
-    /// and its `reading_order_position` column are gone). Manual Series Manager orders used to
-    /// live only in `reading_order_overrides` and were re-applied through that column, so rescans
-    /// had long since reseeded `position` underneath them -- copy them back once. Only whole-series
-    /// overrides are real Series Manager orders; a partial set can only come from the removed
-    /// "confirm auto-placement" review, whose positions used the old engine's numbering, so those
-    /// are dropped rather than mixed into a series ordered on a different scale. Every other
-    /// comic's position is reseeded (issue number, specials after regular issues) since the old
-    /// engine also moved specials' base positions.
+    /// One-time: copies manual Series Manager orders into `comics.position` and reseeds everything
+    /// else (specials after regular issues).
     func applyManualOrdersToPositionIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         guard scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'manualOrdersToPositionV1'") == 0 else { return }
@@ -328,8 +294,7 @@ extension DatabaseManager {
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('manualOrdersToPositionV1')")
     }
 
-    /// Rebuilds `reading_progress` with `ON DELETE CASCADE` (SQLite can't add a REFERENCES clause
-    /// in place), so purging a comic from Trash can't leave its progress row orphaned.
+    /// Rebuilds `reading_progress` with ON DELETE CASCADE (SQLite can't add it in place).
     func addCascadeToProgressIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         let alreadyRun = scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'progressRatingsCascadeV1'") > 0
@@ -355,9 +320,8 @@ extension DatabaseManager {
         exec("INSERT OR IGNORE INTO migrations (name) VALUES ('progressRatingsCascadeV1')")
     }
 
-    /// Drops the tables and columns of features removed from ComicArc (ratings/reviews, the Diary,
-    /// series links, Tier Lists, the intelligent reading-order engine, and the offline comics
-    /// database). Each statement tolerates the object already being gone.
+    /// Drops tables and columns of removed features. Each statement tolerates the object already
+    /// being gone.
     func dropRemovedFeatureDataIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         guard scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'dropRemovedFeaturesV1'") == 0 else { return }
@@ -365,8 +329,7 @@ extension DatabaseManager {
                       "idx_diary_comic_id", "idx_diary_logged_at"] {
             exec("DROP INDEX IF EXISTS \(index)")
         }
-        // comic_shelves/shelves/list_items/lists/saved_filters: tables from much older versions
-        // that nothing has read since.
+        // Legacy tables from early versions.
         for table in ["ratings", "diary_entries", "series_links", "tier_list_items", "tier_lists",
                       "comic_shelves", "shelves", "list_items", "lists", "saved_filters"] {
             exec("DROP TABLE IF EXISTS \(table)")
@@ -382,8 +345,8 @@ extension DatabaseManager {
         exec("VACUUM")
     }
 
-    /// The Reading List used to be its own table; it's now an ordinary Reading Path titled
-    /// "Reading List". Moves any existing entries over (oldest first) and drops the old table.
+    /// Moves the old `reading_list` table into a Reading Path titled "Reading List" (oldest first),
+    /// then drops it.
     func moveReadingListIntoPathIfNeeded() {
         exec("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
         guard scalarInt("SELECT COUNT(*) FROM migrations WHERE name = 'readingListToPathV1'") == 0 else { return }

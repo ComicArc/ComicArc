@@ -139,8 +139,7 @@ extension DatabaseManager {
 
     // MARK: - Reading Path sync
 
-    /// Every Reading Path as (title, description, ordered file hashes) -- file hashes, not ids,
-    /// since ids mean nothing across two independently scanned libraries.
+    /// Every Reading Path as (title, description, ordered file hashes) for cross-device sync.
     func pathSyncSnapshot() -> [(title: String, description: String, hashes: [String])] {
         queue.sync {
             let runs = rows("SELECT id, title, COALESCE(description,'') FROM runs ORDER BY COALESCE(position, id * -1)") {
@@ -157,9 +156,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Additive merge of another device's Reading Paths, matched by title: missing paths are
-    /// created, and comics missing from a path are appended in the other device's order. Never
-    /// removes anything, so a sync can't delete a path or an entry.
+    /// Additive merge of another device's paths by title. Never removes anything.
     func applySyncedPaths(_ paths: [(title: String, description: String, hashes: [String])]) -> (created: Int, added: Int) {
         queue.sync {
             var created = 0, added = 0

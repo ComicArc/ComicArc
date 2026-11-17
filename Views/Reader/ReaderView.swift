@@ -3,10 +3,8 @@ import SwiftUI
 struct ReaderView: View {
     let comic: Comic
     let onClose: () -> Void
-    /// Swaps the reader straight into the next issue in the series -- ContentView's ReaderView
-    /// is `.id(comic.id)`-keyed, so calling this with a different comic tears down and rebuilds
-    /// this whole view (and its `ReaderSession`) fresh for it, the same as opening any other
-    /// comic normally.
+    /// Opens a different comic (e.g. the next issue). The view is keyed by comic id, so this
+    /// rebuilds it fresh.
     let onOpenComic: (Comic) -> Void
 
     @State private var session: ReaderSession
@@ -17,13 +15,8 @@ struct ReaderView: View {
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var isFocused: Bool
 
-    /// A brief hero layer that grows from wherever this comic's cover was on screen (a grid card
-    /// or IssueDetailPage) into the reader, then fades to reveal the real paginated content
-    /// underneath -- and the reverse on close. Not tied to whether the first page has actually
-    /// finished decoding: that page is loading in parallel regardless, and gating this on it
-    /// would mean a slow page turns "cover morph" into "cover hangs there," which reads as
-    /// broken rather than as ordinary loading time. Pure transient UI/animation state, unrelated
-    /// to reading -- `ReaderSession` deliberately doesn't own this.
+    /// Hero layer: grows from the cover's on-screen position into the reader, then fades to the
+    /// page; reversed on close. Not gated on the first page loading.
     @State private var heroCoverImage: PlatformImage?
     @State private var showHeroCover = true
     @State private var isClosing = false
@@ -37,8 +30,8 @@ struct ReaderView: View {
     @AppStorage("readerToolbarLocked") private var toolbarLockedPref = false
     @AppStorage("autoplaySpeed") private var autoplayIntervalPref: Double = 6.0
 
-    /// Reader chrome is hover-driven only: the top bar shows while the pointer is near the top
-    /// edge, the bottom bar while it's near the bottom edge. Page turns never reveal either.
+    /// Controls show only while the pointer is near the top or bottom edge; page turns never reveal
+    /// them.
     @State private var hoveringTop = false
     @State private var hoveringBottom = false
     private static let topHoverZone: CGFloat = 72
@@ -124,10 +117,7 @@ struct ReaderView: View {
                 }
             }
             .onChange(of: geo.size) { _, size in
-                // `PlatformImage.pdfRenderScale`, not raw `NSScreen`/`UIScreen` -- this file is
-                // compiled into the iPad/Vision targets too (even though those platforms use their
-                // own reader views), so it needs a cross-platform scale source. Already the right
-                // shape: real display scale, clamped to a sane [2, 3] decode-target range.
+                // Cross-platform scale source (this file also compiles for iPad/visionOS).
                 session.updateViewport(size: size, screenScale: PlatformImage.pdfRenderScale)
                 session.resetZoom()
             }
@@ -147,7 +137,6 @@ struct ReaderView: View {
             return .handled
         }
         .onKeyPress(.escape) {
-            // Close whatever's open on top of the page first, then the reader itself.
             if session.autoplay { session.autoplay = false; return .handled }
             if showPageJump { showPageJump = false; return .handled }
             if showFilmstrip {
@@ -182,10 +171,7 @@ struct ReaderView: View {
             session.autoplayInterval = autoplayIntervalPref
             session.onRequestIssueTransition = { onOpenComic($0) }
             windowService.enterImmersiveMode()
-            // Cache-only: this exact cover was almost certainly just on screen (a grid card or
-            // IssueDetailPage) a moment ago, so this is normally an instant hit, not a fresh
-            // decode -- matches the hero layer's own job of bridging that already-loaded image
-            // into the reader, not doing new work.
+            // Cache-only: the cover was just on screen.
             heroCoverImage = ThumbnailCache.shared.thumbnailFromCache(comicId: comic.id)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
                 withAnimation(Design.motion(Design.springGentle, reduce: reduceMotion)) { showHeroCover = false }
@@ -205,19 +191,13 @@ struct ReaderView: View {
         .sheet(isPresented: $session.showSeriesComplete) {
             SeriesCompleteView(publisher: comic.publisher, series: comic.series)
         }
-        // Always dark, regardless of the user's app theme: the reader chrome (topBar/bottomBar)
-        // uses hardcoded white icons/text over .ultraThinMaterial. Materials pick up a lighter
-        // tint under a .light color scheme, which ContentView applies app-wide for the Sepia
-        // theme -- that would wash the toolbar toward white-on-white right where the fixed
-        // white controls need the darkest, highest-contrast variant of the material.
+        // Always dark: the controls use white icons over a material that would wash out under the
+        // light Sepia theme.
         .preferredColorScheme(.dark)
     }
 
-    /// Every internal trigger that ends a reading session (Escape, ⌘W, the close button) calls
-    /// this instead of `onClose()` directly -- brings the hero-cover layer back first so there's
-    /// something for the matched-geometry shrink to actually animate, then tears the view down
-    /// once that's had a moment to play out. Calling `onClose()` immediately instead would remove
-    /// this view before any of that could be seen.
+    /// Every close path runs this: show the hero layer again so the cover can shrink back, then
+    /// close.
     private func handleClose() {
         guard !isClosing else { return }
         isClosing = true
@@ -245,12 +225,11 @@ struct ReaderView: View {
                 session.updateViewport(size: $0, screenScale: PlatformImage.pdfRenderScale)
             })
             #else
-            EmptyView()  // This reader is macOS-only; iPad and visionOS use iPadReaderView.
+            EmptyView()
             #endif
         }
     }
 
-    /// The current page, or both pages of a spread in on-screen (left-to-right) order.
     private var pagedImages: [PlatformImage] {
         guard let first = session.currentImage else { return [] }
         guard session.effectiveDoublePage, let second = session.secondaryImage else { return [first] }

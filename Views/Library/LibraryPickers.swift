@@ -5,7 +5,8 @@ struct SortPicker: View {
 
     var body: some View {
         Menu {
-            ForEach(DatabaseManager.SortOrder.allCases) { order in
+            // Sorts with no data in this library are hidden (unless currently selected).
+            ForEach(DatabaseManager.SortOrder.allCases.filter { !vm.emptySortOrders.contains($0) || $0 == vm.sortOrder }) { order in
                 Button {
                     vm.sortOrder = order
                     vm.reload()

@@ -4,10 +4,9 @@ import SwiftUI
 import AppKit
 import CoreImage
 
-/// The Mac paged reader surface: a real `NSScrollView`, so a zoomed page moves with ordinary
-/// two-finger/mouse-wheel scrolling and scrollbars instead of click-and-drag. Magnification is
-/// the zoom level (1 = the chosen fit mode), pinch zooms around the cursor, double-click toggles
-/// 2x, and a horizontal two-finger swipe turns the page whenever nothing is scrollable sideways.
+/// The Mac paged reader: an `NSScrollView`, so a zoomed page scrolls with the trackpad or mouse
+/// wheel. Magnification 1 is the chosen fit mode; pinch zooms around the cursor, double-click
+/// toggles 2x, and a horizontal swipe turns the page when there's nothing to scroll sideways.
 struct ZoomablePageView: NSViewRepresentable {
     let images: [PlatformImage]
     let page: Int

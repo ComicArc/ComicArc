@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// A batch tool to re-encode CBR (RAR) comics as CBZ (zip) in place -- macOS-only, mirroring the
-/// existing CBR-support gating everywhere else in the app, since it depends on the same bundled
-/// `unar`. Reduces how much of the library still depends on `unar`/`lsar` being present to be
-/// read at all.
+/// Batch re-encodes CBR comics as CBZ in place (macOS only, uses the bundled `unar`).
 #if os(macOS)
 struct ConvertCBRToCBZView: View {
     @Environment(\.dismiss) private var dismiss

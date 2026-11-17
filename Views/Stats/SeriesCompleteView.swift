@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// A celebratory recap shown the moment every issue currently in the library for one series has
-/// been read -- "complete" is deliberately library-relative (zero unread issues among what's
-/// actually on disk right now), not a claim about whether the real-world series has ended, since
-/// nothing in the schema tracks that and most series a user reads are ongoing anyway.
+/// Recap shown when every issue of a series in the library has been read (library-relative, not
+/// whether the real series ended).
 struct SeriesCompleteView: View {
     let publisher: String
     let series: String
@@ -88,8 +86,6 @@ struct SeriesCompleteView: View {
 
         guard let first = loaded.first else { return }
 
-        // Independent of each other -- run concurrently rather than making the share card wait
-        // through both one after another.
         async let accentColorResult: Color? = withCheckedContinuation { continuation in
             ThumbnailCache.shared.accentColor(for: first) { continuation.resume(returning: $0) }
         }

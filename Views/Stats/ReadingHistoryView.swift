@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 struct ReadingHistoryView: View {
     @EnvironmentObject var vm: LibraryViewModel
@@ -106,5 +107,48 @@ struct ReadingHistoryView: View {
 
     private func shortTime(_ iso: String) -> String {
         DayGroupingFormatters.shortTime(iso)
+    }
+}
+
+/// Groups UTC timestamps by the user's local day, so evening sessions don't split across UTC
+/// midnight.
+enum DayGroupingFormatters {
+    // Used from background tasks; a configured DateFormatter is thread-safe.
+    static let utcParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    static let localDayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static let localTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    static func localDayKey(from iso: String) -> String {
+        guard let d = utcParser.date(from: iso) else { return String(iso.prefix(10)) }
+        return localDayKeyFormatter.string(from: d)
+    }
+
+    static func formattedGroupDate(_ iso: String) -> String {
+        guard let d = localDayKeyFormatter.date(from: iso) else { return iso }
+        let out = DateFormatter()
+        out.dateStyle = .full
+        return out.string(from: d).uppercased()
+    }
+
+    static func shortTime(_ iso: String) -> String {
+        guard let d = utcParser.date(from: iso) else { return "" }
+        return localTimeFormatter.string(from: d)
     }
 }

@@ -43,20 +43,16 @@ extension LibraryViewModel {
                     if state.changed {
                         self.indexSpotlight()
                         self.refreshDuplicates()
+                    } else if self.spotlightIndexIsOutdated {
+                        self.indexSpotlight()
                     }
                     if !state.removedIds.isEmpty { self.removeFromSpotlight(state.removedIds) }
                     self.notifyScanComplete(added: state.added)
                     self.presentScanReport(state)
                     self.refreshLibraryHealth()
                     self.refreshRenameCandidates()
-                    // The corruption-recovery safety net (DatabaseManager.recoverIfCorrupted)
-                    // previously only had a backup from launch time -- a scan is exactly the kind
-                    // of session that adds a lot of new, otherwise-unbacked-up data.
-                    // Calls the singleton directly rather than through `self.db` -- `self` is
-                    // main-actor-isolated, and reaching through it from inside `Task.detached`
-                    // (which runs off the main actor) is exactly the isolation crossing Swift 6
-                    // flags; `DatabaseManager.shared` itself is a plain thread-safe singleton with
-                    // its own internal serial queue, so it doesn't need `self` at all here.
+                    // A scan adds a lot of data, so refresh the corruption-recovery backup
+                    // afterwards. Uses the singleton directly to stay off the main actor.
                     if state.added > 0 { Task.detached(priority: .utility) { DatabaseManager.shared.refreshBackup() } }
                 }
             }
@@ -80,11 +76,6 @@ extension LibraryViewModel {
                 case .unsupportedFormat:
                     failures.append((url.lastPathComponent, "Unsupported file type"))
                 }
-                // Direct `await`-ed calls to small @MainActor methods, passing plain Sendable
-                // values as arguments -- rather than the previous `await MainActor.run { self?...
-                // }` closures, which reached back into this detached task's `weak self` and
-                // mutable locals from inside a separately-dispatched closure, exactly the
-                // isolation crossing Swift 6's strict concurrency checking flags.
                 await self?.setImportProgress(done: i + 1, total: urls.count)
             }
             await self?.reload()
@@ -106,10 +97,7 @@ extension LibraryViewModel {
     @MainActor
     private func finishImport(added: Int, skipped: Int, failures: [(name: String, reason: String)], totalCount: Int) {
         importProgress = nil
-        // A single successful, ordinary import with nothing to flag isn't worth interrupting the
-        // user over -- only surface the summary when there's something to report (any failure) or
-        // the batch was large enough that silent completion would leave real doubt about whether
-        // it actually worked.
+        // Only show the summary when something failed or the batch was large.
         if !failures.isEmpty || totalCount > 1 {
             lastImportSummary = ImportSummary(added: added, skipped: skipped, failures: failures)
         }
@@ -131,8 +119,10 @@ extension LibraryViewModel {
     }
 
     func notifyScanComplete(added: Int) {
+        // Only ask for notification permission when a scan actually added comics.
+        guard added > 0 else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted, added > 0 else { return }
+            guard granted else { return }
             let content          = UNMutableNotificationContent()
             content.title        = "Library Updated"
             content.body         = "Added \(added) new comic\(added == 1 ? "" : "s") to your library."

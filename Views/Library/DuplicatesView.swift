@@ -17,9 +17,7 @@ struct DuplicatesView: View {
         }
     }
 
-    /// The unambiguous case: every member is byte-for-byte the same file (shared, non-nil hash),
-    /// not just the same series/issue/type -- safe to auto-resolve without per-group review,
-    /// unlike the general groups above which can legitimately be different printings/variants.
+    /// Groups where every copy is the same file (same hash), safe to resolve without review.
     private var hashIdenticalGroups: [[Comic]] {
         vm.duplicateGroups.filter { group in
             guard group.count > 1, let hash = group.first?.fileHash, !hash.isEmpty else { return false }
@@ -32,9 +30,6 @@ struct DuplicatesView: View {
     }
 
     var body: some View {
-        // Hoisted so each is filtered once per render instead of once per reference below --
-        // both are re-derived from `vm.duplicateGroups` on every access since they're computed
-        // properties.
         let groups = filteredGroups
         let identicalGroups = hashIdenticalGroups
         Group {
@@ -48,10 +43,8 @@ struct DuplicatesView: View {
                         if !identicalGroups.isEmpty {
                             safeResolveHeader(count: identicalGroups.count)
                         }
-                        // Keyed by the group's own content (comic ids), not positional offset --
-                        // if a group resolves/rescans while this view is visible, an offset-keyed
-                        // ForEach would match the wrong data onto an already-initialized row's
-                        // @State, leaving it showing the previous group's now-stale content.
+                        // Keyed by content (comic ids) so rows keep the right state if groups
+                        // change.
                         ForEach(groups, id: \.self) { group in
                             if let first = group.first {
                                 DuplicateGroupCard(publisher: first.publisher, series: first.series,
@@ -110,14 +103,12 @@ struct DuplicatesView: View {
     }
 }
 
-/// Byte size on disk, used to break ties between otherwise-equal copies when picking a keeper.
 private func fileSize(_ comic: Comic) -> Int64 {
     (try? FileManager.default.attributesOfItem(atPath: comic.filePath)[.size] as? Int64) ?? 0
 }
 
-/// The single "which copy should we keep" heuristic, shared between the per-group manual picker
-/// (`DuplicateGroupCard`) and the batch "Resolve All Safe Duplicates" action above -- more pages,
-/// then larger file size, wins.
+/// Which copy to keep: more pages wins, then larger file. Shared by the per-group picker and
+/// Resolve All.
 private func recommendedKeeper(in comics: [Comic]) -> Comic? {
     comics.max { a, b in (a.pageCount, fileSize(a)) < (b.pageCount, fileSize(b)) }
 }
@@ -130,10 +121,7 @@ private struct DuplicateGroupCard: View {
     @EnvironmentObject var vm: LibraryViewModel
     @Environment(\.fileService) private var fileService
 
-    // Computed once (on appear / whenever `comics` actually changes) instead of as a computed
-    // property re-evaluated on every access -- `recommendedId` used to be read once per row
-    // inside the ForEach below, and each read did its own O(n) file-size stat() sweep over the
-    // whole group, turning a single render into O(n^2) blocking main-thread file I/O.
+    // Computed once per change of `comics`, since it stats every file in the group.
     @State private var recommendedId: Int64?
     @State private var pendingKeepOnly: Comic?
     @State private var pendingDeleteSingle: Comic?

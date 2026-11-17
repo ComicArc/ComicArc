@@ -4,16 +4,11 @@ import SQLite3
 extension DatabaseManager {
     func clearAll() {
         queue.sync {
-            // A force-quit/crash mid-sequence (this is a user-triggered destructive "reset
-            // library" action) must not leave some tables wiped and others not -- inTransaction
-            // rolls back the whole reset if any single DELETE fails, rather than committing
-            // whatever happened to complete first.
+            // One transaction so a reset never half-completes.
             let tables = [
                 "reading_history", "reading_progress", "reading_goals", "bookmarks",
                 "favorites", "comic_tags", "series_covers", "run_items", "runs", "tags",
-                // "Clear All" is a full factory reset, not just a comics wipe -- these have no
-                // foreign key to comics (keyed by series/publisher name, or independent
-                // user-created collections) so they'd otherwise silently survive a reset untouched.
+                // Tables keyed by name rather than comic id, so they need clearing explicitly.
                 "reading_order_overrides", "metadata_conflicts", "series_reader_prefs",
                 "character_covers", "series_order", "character_order", "publisher_order", "comics",
             ]
@@ -58,13 +53,8 @@ extension DatabaseManager {
         }
     }
 
-    /// Permanently deletes soft-deleted comic rows -- Trash previously had no purge path at all,
-    /// so a soft-deleted comic's row (and every joined bookmark/progress/tag/run-item) lived forever, growing the DB unboundedly with no way to
-    /// actually reclaim it. Never touches the underlying file -- if `delete(fileService:)` already
-    /// moved it to the real system Trash, that's the user's Finder Trash to empty separately; if
-    /// it was soft-deleted without a file move (a "missing"/"folder_removed" row), there's no file
-    /// here to touch either way. Restricted to rows already in `deleted_at IS NOT NULL` as a safety
-    /// net against ever hard-deleting a live, visible comic by id mistake.
+    /// Permanently deletes soft-deleted rows (cascading to their bookmarks, progress, tags and path
+    /// entries). Never touches files.
     func purge(_ ids: [Int64]) {
         guard !ids.isEmpty else { return }
         queue.sync {
@@ -78,8 +68,6 @@ extension DatabaseManager {
         }
     }
 
-    /// Purges every currently-trashed comic in one call -- backs the Trash screen's "Empty Trash"
-    /// action.
     func purgeAllTrashed() {
         queue.sync {
             _ = run("DELETE FROM comics WHERE deleted_at IS NOT NULL")

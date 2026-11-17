@@ -78,8 +78,6 @@ jobs:
           files: artifacts/*
           generate_release_notes: false
           body: |
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's new.
-
             **First launch:** macOS will flag this as unsigned. Right-click → Open, or run:
             ```sh
             xattr -cr /Applications/ComicArc.app

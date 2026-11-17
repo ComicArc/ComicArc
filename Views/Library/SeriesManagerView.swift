@@ -16,9 +16,7 @@ struct SeriesManagerView: View {
     @State private var showMergeConfirm = false
     @State private var pagePickerIssue: Comic? = nil
     @State private var exportErrorMessage: String? = nil
-    // Bumped whenever a custom cover is set for a row -- IssueThumbnail's `.task` only runs once
-    // per view identity, so merely refetching `issues` (same comic ids, same ForEach identity)
-    // would never make an already-appeared row re-query ThumbnailCache and pick up the new image.
+    // Bumped when a custom cover is set, so already-visible rows reload their thumbnail.
     @State private var thumbnailRefreshToken = 0
 
     init(series: String, publisher: String?) {
@@ -117,8 +115,6 @@ struct SeriesManagerView: View {
     }
 
     private var issuesSection: some View {
-        // Hoisted so each filter over `issues` runs once per render instead of once per
-        // reference below -- both are computed properties re-derived on every access.
         let visible = issues
         return VStack(alignment: .leading, spacing: 14) {
             HStack {

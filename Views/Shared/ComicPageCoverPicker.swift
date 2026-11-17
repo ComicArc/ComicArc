@@ -5,9 +5,7 @@ struct ComicPageCoverPicker: View {
     let onPick: (PlatformImage) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    /// Opened once for the whole grid, not per cell -- `ThumbnailStore` needs an already-open
-    /// document (see its doc comment), and opening one per cell would mean N redundant CBZ
-    /// listings, or worse, N racing CBR extractions before any of them populate the shared cache.
+    /// One document opened for the whole grid, shared by every cell.
     @State private var document: ComicDocument?
 
     private let columns = [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 12)]
@@ -74,9 +72,7 @@ private struct CoverPickerPageCell: View {
         .accessibilityLabel("Page \(index + 1)")
         .accessibilityHint("Double-tap to use this page as the cover")
         .task(id: "\(index)-\(document != nil)") {
-            // Same rationale as the reader filmstrip: a grid of every page in the comic would
-            // otherwise decode full-resolution pages through the shared reading-page cache,
-            // evicting real reading pages for a picker that only needs small thumbnails.
+            // Uses `ThumbnailStore` so the picker never evicts pages from the reading cache.
             guard let document else { return }
             ThumbnailStore.shared.thumbnail(document: document, comicId: comic.id, page: index) { image = $0 }
         }

@@ -140,8 +140,8 @@ struct RenameFilesView: View {
         Task.detached(priority: .userInitiated) {
             let comics = DatabaseManager.shared.allComics()
 
-            // Just a text cleanup of each comic's own current filename (underscores -> spaces,
-            // collapsed whitespace) -- see `ComicFileNaming.cleanedFilename`.
+            // Text cleanup of each comic's current filename (see
+            // `ComicFileNaming.cleanedFilename`).
             let idealNames = ComicFileNaming.idealFilenames(for: comics)
 
             var proposed: [(comic: Comic, newPath: String)] = []
@@ -154,9 +154,8 @@ struct RenameFilesView: View {
                 proposed.append((comic, newPath))
             }
 
-            // A collision here means two different files in the same folder would clean up to the
-            // identical name -- keyed case-insensitively since macOS's default filesystems (APFS,
-            // HFS+) treat "Batman #1.cbz" and "batman #1.cbz" as the same file.
+            // Two files in one folder cleaning up to the same name, compared case-insensitively
+            // like APFS.
             var pathCounts: [String: Int] = [:]
             for p in proposed { pathCounts[p.newPath.lowercased(), default: 0] += 1 }
 
@@ -189,12 +188,8 @@ struct RenameFilesView: View {
         Task.detached(priority: .userInitiated) {
             let fm = FileManager.default
 
-            // Two-phase rename: a file's target name can currently be occupied by ANOTHER file
-            // that's also being renamed away in this same batch (e.g. two comics effectively
-            // swapping names, or a chain of them). Renaming directly in one pass makes success
-            // depend on arbitrary processing order -- whichever file happens to move out of the
-            // way first. Moving everything to a unique temp name first guarantees every source
-            // path is vacated before any final name is claimed, so ordering can't cause a failure.
+            // Two-phase rename (everything to a temp name first), so files swapping or chaining
+            // names succeed regardless of order.
             struct Staged { let comicId: Int64; let tempURL: URL; let finalURL: URL; let oldName: String; let oldURL: URL }
             var staged: [Staged] = []
             var failedStaging: [RenameFailure] = []
@@ -221,8 +216,7 @@ struct RenameFilesView: View {
             for item in staged {
                 do {
                     guard !fm.fileExists(atPath: item.finalURL.path) else {
-                        // Genuinely occupied by something outside this batch -- move back so the
-                        // file isn't left stranded under a temp name.
+                        // Target taken by a file outside this batch: move back.
                         let revertURL = item.tempURL.deletingLastPathComponent().appendingPathComponent(item.oldName)
                         try? fm.moveItem(at: item.tempURL, to: revertURL)
                         failedFinal.append(RenameFailure(name: item.oldName,
@@ -235,10 +229,7 @@ struct RenameFilesView: View {
                                                       newPath: item.finalURL.path))
                     succeeded += 1
                 } catch {
-                    // The final move itself failed (e.g. the computed name is too long for the
-                    // filesystem, the disk is full, or permissions changed mid-batch) -- move the
-                    // file back to its original name rather than leaving it stranded under the
-                    // hidden temp name with the DB still pointing at a path that no longer exists.
+                    // Final move failed: move the file back to its original name.
                     let revertURL = item.tempURL.deletingLastPathComponent().appendingPathComponent(item.oldName)
                     try? fm.moveItem(at: item.tempURL, to: revertURL)
                     failedFinal.append(RenameFailure(name: item.oldName,
@@ -333,10 +324,7 @@ private struct RenameResultsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// Reverses every successful rename from this batch by moving each file back to its original
-    /// name and pointing the comic's row back at that path -- only offered while this results
-    /// screen is still on-screen (the batch's old/new paths aren't persisted anywhere after that),
-    /// so this is a "changed your mind right now" safety net, not a general history/undo log.
+    /// Reverses this batch's renames. Only available while the results screen is open.
     private func undoAll() {
         isUndoing = true
         let moves = report.succeededMoves
@@ -359,9 +347,6 @@ private struct RenameResultsView: View {
                                                    reason: "Couldn't move it back: \(error.localizedDescription)"))
                 }
             }
-            // Snapshotting to a `let` right before crossing to the main actor -- `failures` is
-            // still a mutable local from the loop above, and capturing it directly in this
-            // closure is exactly the kind of mutable-var-across-isolation capture Swift 6 flags.
             let finalFailures = failures
             await MainActor.run {
                 undoFailures = finalFailures
@@ -407,16 +392,13 @@ struct RenameFailure: Equatable {
     let reason: String
 }
 
-/// One completed rename, kept around only so "Undo All" on the results screen knows what to move
-/// back where -- not persisted anywhere, so it only exists for the lifetime of that screen.
 struct RenameMove: Equatable {
     let comicId: Int64
     let oldPath: String
     let newPath: String
 }
 
-/// Pure summary of a rename batch's outcome -- kept separate from the view so it's directly unit-
-/// testable (Swift Testing, no simulator needed) rather than only exercisable by running the UI.
+/// Outcome summary of a rename batch.
 struct RenameReport: Equatable {
     let succeeded: Int
     let unchanged: Int

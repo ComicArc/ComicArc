@@ -39,9 +39,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Renames a tag across the whole library. `tags.name` is UNIQUE, so if `newName` already
-    /// belongs to a different tag, this merges into it instead of erroring: every comic tagged
-    /// with either ends up tagged with just the target, and the old tag row is removed.
+    /// Renames a tag; if `newName` already exists, merges into that tag instead.
     func renameTag(id: Int64, newName: String) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -49,10 +47,8 @@ extension DatabaseManager {
             let existingId = scalarInt("SELECT id FROM tags WHERE name = ? AND id != ?", args: [trimmed, id])
             if existingId > 0 {
                 inTransaction {
-                    // Repoint every comic_tags row from the old tag to the target tag; a row
-                    // that would collide with the target's own PRIMARY KEY (comic_id, tag_id) --
-                    // i.e. a comic already wearing both tags -- is left alone here and cleaned
-                    // up by the cascade below instead of erroring the whole rename.
+                    // Rows that would collide (comic already has both tags) are left for the
+                    // cascade below.
                     guard run("UPDATE OR IGNORE comic_tags SET tag_id = ? WHERE tag_id = ?",
                               args: [Int64(existingId), id]) != -1 else { return false }
                     guard run("DELETE FROM tags WHERE id = ?", args: [id]) != -1 else { return false }
@@ -64,8 +60,6 @@ extension DatabaseManager {
         }
     }
 
-    /// Removes a tag from the entire library (every comic that had it), not just one comic --
-    /// `comic_tags.tag_id` cascades, so this is the one statement that needs to run.
     func deleteTagGlobally(id: Int64) {
         queue.sync { _ = run("DELETE FROM tags WHERE id = ?", args: [id]) }
     }

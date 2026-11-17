@@ -16,32 +16,20 @@ final class ThumbnailCache: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.comicarc.thumbs", qos: .utility, attributes: .concurrent)
 
     private let inflightLock = NSLock()
-    // Each pending callback remembers the generation pair current when IT was registered, not
-    // just when the in-flight extraction it coalesced onto started. Without this, a caller that
-    // arrives after evict()/setCustomCover()/clearAll() invalidates an already-running extraction
-    // would still be handed that extraction's stale result once it finishes -- the generation
-    // check below only stops the stale result from being persisted, not from being delivered.
+    // Each callback remembers the generation it registered under, so a late caller never receives a
+    // stale result.
     private var inFlight: [Int64: [(gen: Int, globalGen: Int, callback: (PlatformImage?) -> Void)]] = [:]
-    // Guards against a race where a slow extraction (e.g. reading from a flaky/waking external
-    // drive right before the file gets soft-deleted) is still in flight when evict()/
-    // setCustomCover() runs to force a fresh read for a just-revived comic or a user-picked
-    // cover. Without this, the stale extraction finishes AFTER and writes its bad result right
-    // back to cache/disk, silently undoing the eviction/override with no further trigger to fix
-    // it. `globalGeneration` covers clearAll(), which invalidates every comic at once.
+    // Bumped by evict/setCustomCover/clearAll so an extraction still in flight can't overwrite the
+    // newer value.
     private var generations: [Int64: Int] = [:]
     private var globalGeneration = 0
 
     private let accentColorLock = NSLock()
     private var accentColors: [Int64: Color] = [:]
-    // Without this, a comic with no color sidecar (extraction failed, or genuinely no color)
-    // re-hits disk on every single appearance forever -- there was previously no way to
-    // distinguish "never looked up" from "looked up, nothing there".
+    // Comics known to have no accent color, so they aren't re-read from disk every time.
     private var noAccentColorIds: Set<Int64> = []
 
-    // Same idea as accentColors/noAccentColorIds above, but keyed by a group's own stable string
-    // key (e.g. "chargroup_DC_Batman") instead of a single comic id -- a series/character
-    // "identity color" for the art-driven grid/header treatment, computed from the group's
-    // representative cover and surviving that representative comic changing.
+    // Accent colors for series/character groups, keyed by the group's string key.
     private var groupAccentColors: [String: Color] = [:]
     private var noGroupAccentColorIds: Set<String> = []
 
@@ -79,9 +67,7 @@ final class ThumbnailCache: @unchecked Sendable {
             if let img = validatedDiskImage(at: diskURL) {
                 cache.setObject(img, forKey: key, cost: img.byteSize)
                 result = img
-                // Backfills the accent-color sidecar for a cover cached before this feature
-                // existed -- without this, every pre-existing thumbnail would need an eviction
-                // just to ever get an accent color.
+                // Backfills the accent color for covers cached before accent colors existed.
                 if accentColorFromCache(comicId: comicId) == nil { saveAccentColor(for: comicId, from: img) }
             } else {
                 try? FileManager.default.removeItem(at: diskURL)
@@ -91,10 +77,7 @@ final class ThumbnailCache: @unchecked Sendable {
                     inflightLock.lock()
                     let stillCurrent = generations[comicId, default: 0] == gen && globalGeneration == startGlobalGen
                     inflightLock.unlock()
-                    // Only persist if nothing evicted/overrode this comic's thumbnail (or cleared
-                    // the whole cache) while this extraction was running -- such a change mid-
-                    // flight means the caller wanted a fresh read or a specific override, and
-                    // this result was computed from data that predates it.
+                    // Only persist if nothing invalidated this comic while extracting.
                     if stillCurrent {
                         cache.setObject(thumb, forKey: key, cost: thumb.byteSize)
                         save(thumb, to: diskURL)
@@ -111,11 +94,8 @@ final class ThumbnailCache: @unchecked Sendable {
                     if entry.gen == gen && entry.globalGen == startGlobalGen {
                         entry.callback(result)
                     } else {
-                        // This caller registered after something invalidated the extraction that
-                        // just ran -- handing back `result` would silently deliver stale data.
-                        // Re-request instead: an immediate cache/disk hit if the invalidator
-                        // already wrote a fresh value (e.g. setCustomCover), otherwise a fresh
-                        // extraction.
+                        // This caller arrived after an invalidation, so request again rather than
+                        // return stale data.
                         thumbnail(id: comicId, filePath: filePath, completion: entry.callback)
                     }
                 }
@@ -123,13 +103,23 @@ final class ThumbnailCache: @unchecked Sendable {
         }
     }
 
-    /// Mirrors `thumbnail(for:completion:)` -- the accent color is computed alongside the
-    /// thumbnail itself (see `saveAccentColor`), so getting it just means waiting for whatever
-    /// already produces or fetches that thumbnail, then reading the color back out of cache.
+    /// Memory hits return immediately; otherwise the sidecar file is read off the main thread, and
+    /// a comic with no color yet waits for its thumbnail (which computes the color).
     func accentColor(for comic: Comic, completion: @escaping (Color?) -> Void) {
-        if let cached = accentColorFromCache(comicId: comic.id) { completion(cached); return }
-        thumbnail(for: comic) { [weak self] _ in
-            completion(self?.accentColorFromCache(comicId: comic.id))
+        accentColorLock.lock()
+        let memory = accentColors[comic.id]
+        accentColorLock.unlock()
+        if let memory { completion(memory); return }
+        queue.async { [self] in
+            if let color = accentColorFromCache(comicId: comic.id) {
+                DispatchQueue.main.async { completion(color) }
+                return
+            }
+            DispatchQueue.main.async { [self] in
+                thumbnail(for: comic) { [weak self] _ in
+                    completion(self?.accentColorFromCache(comicId: comic.id))
+                }
+            }
         }
     }
 
@@ -154,10 +144,8 @@ final class ThumbnailCache: @unchecked Sendable {
         try? hex.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    /// Series/character "identity color" -- same average-color technique as `accentColor(for:)`
-    /// above, but derived from a group's representative cover (custom cover image if one's been
-    /// set, else the group's representative comic) and cached under the group's own key so the
-    /// color is stable even if that representative comic later changes.
+    /// A group's accent color, from its custom cover or representative comic, cached under the
+    /// group key.
     func groupAccentColor(key: String, coverImagePath: String?, representativeComicId: Int64,
                            completion: @escaping (Color?) -> Void) {
         if let cached = groupAccentColorFromCache(key: key) { completion(cached); return }
@@ -206,8 +194,7 @@ final class ThumbnailCache: @unchecked Sendable {
         key.components(separatedBy: .init(charactersIn: "/:")).joined(separator: "_")
     }
 
-    /// Called whenever a group's custom cover changes -- without this, the identity color
-    /// computed from the *old* cover would keep being served from cache/disk indefinitely.
+    /// Call when a group's custom cover changes.
     func evictGroupAccentColor(key: String) {
         accentColorLock.lock()
         groupAccentColors.removeValue(forKey: key)
@@ -244,7 +231,7 @@ final class ThumbnailCache: @unchecked Sendable {
     private func validatedDiskImage(at url: URL) -> PlatformImage? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               (attrs[.size] as? Int ?? 0) > 0 else { return nil }
-        return PlatformImage.fromURL(url)
+        return PlatformImage.decodedFromURL(url)
     }
 
     func prewarm(comics: [Comic]) {
@@ -257,11 +244,8 @@ final class ThumbnailCache: @unchecked Sendable {
             let group = DispatchGroup()
             for comic in uncached {
                 sema.wait(); group.enter()
-                // Dispatch onto a separate global queue, not `queue` itself: thumbnailSync
-                // blocks its thread on a semaphore waiting for thumbnail(...)'s own queue.async
-                // to finish -- submitting that blocking wait back onto the very queue it's
-                // waiting on is a GCD anti-pattern that can starve the pool during a large
-                // library's prewarm instead of a clean, bounded fan-out.
+                // A separate queue: thumbnailSync blocks waiting on `queue`, so it must not run on
+                // it.
                 DispatchQueue.global(qos: .utility).async { [self] in _ = thumbnailSync(for: comic); sema.signal(); group.leave() }
             }
             group.wait()
@@ -352,15 +336,12 @@ final class ThumbnailCache: @unchecked Sendable {
         return FileManager.default.fileExists(atPath: dest.path) ? dest.path : nil
     }
 
-    /// Called from inside `queue.async` (see `thumbnail(for:completion:)` above), so the
-    /// synchronous open (real work for CBR: a subprocess extraction, shared with reading-time
-    /// extraction via `CBRExtractionCache`) is safe here, off the main thread.
+    /// Runs on `queue`, so the blocking open is off the main thread.
     private func extract(from path: String) -> PlatformImage? {
         guard let document = try? ComicDocumentFactory.openSync(path: path),
               let source = try? document.pageSource(index: 0) else { return nil }
         defer { document.close() }
-        // Decode straight at (3x) thumbnail size -- decoding a ~2000x3000 page at full resolution
-        // only to shrink it to a card cover was most of each new cover's cost.
+        // Decode straight at thumbnail size (3x) instead of full resolution.
         return PageDecoder.decode(source, maxPixelSize: Int(max(thumbSize.width, thumbSize.height) * 3))
     }
 
@@ -372,8 +353,6 @@ final class ThumbnailCache: @unchecked Sendable {
         do {
             try data.write(to: url, options: .atomic)
         } catch {
-            // The one real diagnostic point for "why are my thumbnails not showing up" -- a
-            // failure here (disk full, permissions) previously left zero trace anywhere.
             thumbnailLogger.error("Failed to write thumbnail '\(url.lastPathComponent)' to disk: \(error.localizedDescription)")
         }
     }

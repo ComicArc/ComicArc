@@ -13,9 +13,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Every bookmark flagged as a favorite moment, across the whole library, newest first --
-    /// backing the standalone "Favorite Moments" browsing screen. Fetches the child rows, then
-    /// batch-resolves their comics via one IN query.
+    /// Every favorite-moment bookmark across the library, newest first.
     func favoriteMoments() -> [FavoriteMoment] {
         queue.sync {
             let raw: [Bookmark] = rows("""
@@ -64,8 +62,7 @@ extension DatabaseManager {
         }
     }
 
-    /// Favoriting a page that isn't already bookmarked creates the bookmark -- a favorite moment
-    /// IS a bookmark, just one flagged as worth revisiting on its own.
+    /// Favoriting an unbookmarked page creates the bookmark.
     func setBookmarkFavorite(comicId: Int64, page: Int, isFavorite: Bool) {
         queue.sync {
             _ = run("INSERT OR IGNORE INTO bookmarks (comic_id, page) VALUES (?,?)", args: [comicId, page])

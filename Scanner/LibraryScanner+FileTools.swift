@@ -6,18 +6,15 @@ import ZIPFoundation
 import AppKit
 #endif
 
-/// Maintenance operations on comic files: CBR-to-CBZ conversion and ComicInfo.xml write-back.
+/// CBR-to-CBZ conversion and ComicInfo.xml write-back.
 #if os(macOS)
 extension LibraryScanner {
     enum CBRConversionError: Error {
         case unarNotFound, notACBR, extractionFailed, noImagesFound, destinationExists, zipWriteFailed
     }
 
-    /// Converts one CBR/RAR archive to a CBZ at the same location, extracting every image (and
-    /// any ComicInfo.xml) via the same bundled `unar` CBR reading already depends on elsewhere in
-    /// this file, then re-zipping with ZIPFoundation -- reduces the app's own runtime dependency
-    /// on unar/lsar being present for that specific file going forward. Runs on `queue` like every
-    /// other scan-adjacent archive operation, never on the caller's thread.
+    /// Converts one CBR to a CBZ at the same location (extract with `unar`, re-zip with
+    /// ZIPFoundation). Runs on `queue`.
     func convertCBRToCBZ(path: String) -> Result<URL, CBRConversionError> {
         let sourceURL = URL(fileURLWithPath: path)
         guard sourceURL.pathExtension.lowercased() == "cbr" else { return .failure(.notACBR) }
@@ -60,9 +57,7 @@ extension LibraryScanner {
         return .success(destURL)
     }
 
-    /// Full pipeline for one comic: convert its CBR to CBZ, point the library record at the new
-    /// file (with a fresh hash -- see `updateFilePathAndHash`'s doc comment), then remove the
-    /// original .cbr so the library doesn't end up with both.
+    /// Converts a comic's CBR, points its record at the new file and hash, then removes the .cbr.
     private func convertAndUpdateLibraryEntry(comicId: Int64, path: String) -> Result<URL, CBRConversionError> {
         let result = convertCBRToCBZ(path: path)
         guard case .success(let newURL) = result else { return result }
@@ -75,8 +70,7 @@ extension LibraryScanner {
         return .success(newURL)
     }
 
-    /// Batch entry point for the "Convert CBR to CBZ" Settings tool -- runs on `queue`, same as
-    /// every other archive-touching operation in this file, so it can never race a concurrent scan.
+    /// Batch conversion for the Convert CBR to CBZ tool. Runs on `queue` so it can't race a scan.
     func convertAllCBRToCBZ(_ comics: [(id: Int64, path: String)],
                             onProgress: @escaping (Int, Int) -> Void,
                             completion: @escaping (Int, [(path: String, error: CBRConversionError)]) -> Void) {
@@ -99,12 +93,8 @@ extension LibraryScanner {
         case notACBZ, archiveOpenFailed, zipWriteFailed
     }
 
-    /// The exact field-name set this app's own reader (`comicInfoXML` above) looks for -- writing
-    /// back under the same names guarantees a comic ComicArc itself writes then re-scans reads
-    /// back identically, which is the write-back feature's core safety requirement. CBZ only (no
-    /// RAR write support); a narrow, explicitly-listed field set deliberately smaller than every
-    /// field this app tracks -- only the identity fields that map cleanly onto the standard
-    /// schema, not app-only concepts like tags or manual issue orders.
+    /// Writes the identity fields back under the exact names `comicInfoXML` reads, so a rescan
+    /// reads them back identically. CBZ only.
     func writeComicInfoBack(comic: Comic) -> Result<Void, ComicInfoWriteError> {
         guard comic.filePath.lowercased().hasSuffix(".cbz") else { return .failure(.notACBZ) }
         guard let archive = try? Archive(url: URL(fileURLWithPath: comic.filePath), accessMode: .update, pathEncoding: nil) else {
@@ -120,8 +110,7 @@ extension LibraryScanner {
             _ = try? archive.extract(existingEntry, consumer: { data.append($0) })
             existingRoot = try? XMLDocument(data: data).rootElement()
         }
-        // Preserves every field this app doesn't manage (Summary, Notes, Web, LanguageISO, etc.)
-        // untouched if a ComicInfo.xml already exists; starts fresh only if there was none.
+        // Fields this app doesn't manage are preserved if a ComicInfo.xml already exists.
         let root = existingRoot ?? XMLElement(name: "ComicInfo")
 
         func setField(_ name: String, _ value: String?) {

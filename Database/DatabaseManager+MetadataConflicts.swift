@@ -10,9 +10,8 @@ extension DatabaseManager {
         let source: String
     }
 
-    /// Re-detecting the same (comic, field) conflict updates the existing row and resets it to
-    /// 'pending' -- a stale dismissal must not permanently hide a disagreement that's still real
-    /// (and possibly changed) on a later pass.
+    /// Re-detecting a conflict reopens it, so an old dismissal can't hide a still-real
+    /// disagreement.
     func upsertMetadataConflicts(_ items: [MetadataConflictInput]) {
         guard !items.isEmpty else { return }
         _ = queue.sync {
@@ -64,10 +63,8 @@ extension DatabaseManager {
         }
     }
 
-    /// `apply`: writes the proposed value to `comics` and marks `meta_edited = 1` -- applying a
-    /// conflict is itself a deliberate user choice, so it earns the same protection any other
-    /// manual correction gets. `dismiss`: only updates the conflict's own status; `comics` is
-    /// untouched, the current value stands.
+    /// `apply` writes the value and sets meta_edited = 1 (a manual choice). `dismiss` only updates
+    /// the conflict.
     func resolveMetadataConflict(id: Int64, apply: Bool) {
         queue.sync {
             guard let row = rows("SELECT comic_id, field, proposed_value FROM metadata_conflicts WHERE id = ?",
@@ -98,9 +95,7 @@ extension DatabaseManager {
         queue.sync { _ = run("INSERT OR IGNORE INTO migrations (name) VALUES (?)", args: [Self.importPriorityAuditMigrationName]) }
     }
 
-    /// Rows that predate the raw-fact mirror columns (added well after `has_comicinfo` already
-    /// existed) -- these are exactly the comics whose series/publisher were decided under the old
-    /// folder/filename-first priority, with no record of what their own ComicInfo.xml said.
+    /// Rows from before the raw-fact columns existed, which still need a one-time audit.
     func pendingImportPriorityAuditPaths() -> [(id: Int64, path: String)] {
         queue.sync {
             rows("SELECT id, file_path FROM comics WHERE has_comicinfo = 1 AND comicinfo_series IS NULL AND deleted_at IS NULL")

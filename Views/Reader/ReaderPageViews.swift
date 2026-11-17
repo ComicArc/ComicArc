@@ -42,13 +42,7 @@ struct ScrollPageView: View {
     @State private var loadFailed = false
     @State private var viewportWidth: CGFloat = 0
 
-    /// Scroll mode always fits to width (height flows with aspect ratio), unlike Mac paged mode
-    /// (fitPage) or iPad's TabView (fitWidth/fitHeight/fitPage), where the long edge in either
-    /// direction can be the binding constraint -- width is the one fixed, known dimension here,
-    /// so it's the right basis for a target-size-aware decode. Previously always requested
-    /// `maxPixelSize: nil` (full/native resolution) for every page, unconditionally -- the one
-    /// reading surface most exposed to that cost, since `LazyVStack` can have several of these
-    /// alive near the viewport at once during a fast scroll.
+    /// Scroll mode always fits to width, so decode at that width rather than full resolution.
     private var targetMaxPixelSize: Int? {
         guard viewportWidth > 0 else { return nil }
         return Int(viewportWidth * PlatformImage.pdfRenderScale)

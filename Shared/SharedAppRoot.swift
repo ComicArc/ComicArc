@@ -1,12 +1,31 @@
 import SwiftUI
 import CoreSpotlight
 
-/// The `WindowGroup` content shared identically by the iPad and visionOS app entry points --
-/// they present the exact same `iPadRootView` (visionOS reuses it wholesale, no UI of its own),
-/// with the same onboarding gate, environment injection, scenePhase handling, and Spotlight
-/// activity handling. Mac's entry point stays separate on purpose: a different root view
-/// (`ContentView`), a substantially larger command set, and an `AppDelegate`/Sparkle updater with
-/// no iPad/visionOS equivalent -- not worth forcing into one shared shape.
+/// Entry point for the iPad and visionOS apps (visionOS reuses the iPad interface).
+@main
+struct ComicArcTouchApp: App {
+    @StateObject private var vm = LibraryViewModel.shared
+    private let fileService   = makePlatformFileService()
+    private let windowService = makePlatformWindowService()
+
+    var body: some Scene {
+        WindowGroup {
+            SharedAppRootContent(vm: vm, fileService: fileService, windowService: windowService)
+        }
+        .commands {
+            CommandGroup(replacing: .newItem) {}
+            #if os(visionOS)
+            LibraryMenuCommands(vm: vm)
+            #else
+            LibraryMenuCommands(vm: vm, includeRenameFiles: true)
+            #endif
+            NavigateMenuCommands(vm: vm)
+        }
+    }
+}
+
+/// The window content shared by the iPad and visionOS apps (both show `iPadRootView`). The Mac app
+/// has its own root.
 struct SharedAppRootContent: View {
     @ObservedObject var vm: LibraryViewModel
     let fileService: any FileServiceProtocol
@@ -40,9 +59,7 @@ struct SharedAppRootContent: View {
     }
 }
 
-/// `includeRenameFiles`: iPad's Library menu has a "Rename Files to Match Library…" item that
-/// visionOS's doesn't -- the one real content difference between the two, preserved as a
-/// parameter rather than silently dropped or force-added to both.
+/// `includeRenameFiles`: only the iPad menu has Rename Files.
 struct LibraryMenuCommands: Commands {
     let vm: LibraryViewModel
     var includeRenameFiles: Bool = false

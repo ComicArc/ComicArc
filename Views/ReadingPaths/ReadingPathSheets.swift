@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The comic picker sheet for adding comics to a Reading Path. The caller supplies which comics
-/// are already in it (`alreadyInCollection`) and what adding does (`onAdd`).
+/// Comic picker for adding comics to a Reading Path.
 struct AddComicsToCollectionView: View {
     let title: String
     let alreadyInCollection: () -> Set<Int64>
@@ -27,9 +26,7 @@ struct AddComicsToCollectionView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Add \(selected.isEmpty ? "" : "(\(selected.count))")") {
-                    // Order by the picker's own list order, not Set iteration order (which is
-                    // unspecified) -- otherwise multi-selecting several comics lands them in the
-                    // collection in an arbitrary order unrelated to anything the user saw or chose.
+                    // Keep the list's order, not the Set's.
                     let orderedIds = allComics.map(\.comic.id).filter { selected.contains($0) }
                     onAdd(orderedIds)
                     dismiss()
@@ -59,11 +56,7 @@ struct AddComicsToCollectionView: View {
         }
         .frame(width: 520, height: 520)
         .task {
-            // `alreadyInCollection()` reads state the caller already has in memory (cheap,
-            // main-actor-isolated) -- only the full-library fetch needs to be off-main. Calling
-            // the closure from inside `Task.detached` was the actual cause of the "main
-            // actor-isolated property accessed from outside the actor" warning, since
-            // `alreadyInCollection` itself is bound to this main-actor-isolated view.
+            // Only the library fetch runs off the main actor.
             let existing = alreadyInCollection()
             let comics = await Task.detached(priority: .userInitiated) {
                 DatabaseManager.shared.allComics()
@@ -71,5 +64,65 @@ struct AddComicsToCollectionView: View {
             allComics   = comics.map { (comic: $0, searchKey: "\($0.title) \($0.series)".lowercased()) }
             existingIds = existing
         }
+    }
+}
+
+/// The Reading Path edit sheet. A nil `buyLink` hides that field.
+struct EditCollectionView: View {
+    let noun: String
+    @Binding var item: Run
+    var buyLink: Binding<String>? = nil
+    let onSave: (_ title: String, _ description: String, _ buyLink: String?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var description: String
+    @State private var buyLinkText: String
+
+    init(noun: String, item: Binding<Run>, buyLink: Binding<String>? = nil,
+         onSave: @escaping (String, String, String?) -> Void) {
+        self.noun = noun
+        self._item = item
+        self.buyLink = buyLink
+        self.onSave = onSave
+        _title = State(initialValue: item.wrappedValue.title)
+        _description = State(initialValue: item.wrappedValue.description)
+        _buyLinkText = State(initialValue: buyLink?.wrappedValue ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Edit \(noun)").font(.title2.bold()).padding(24)
+
+            Form {
+                Section {
+                    TextField("Title", text: $title)
+                    TextField("Description", text: $description)
+                    if buyLink != nil {
+                        TextField("Buy / Info Link (URL)", text: $buyLinkText).autocorrectionDisabled()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
+                Spacer()
+                Button("Save") { save() }
+                    .keyboardShortcut(.return)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(24)
+        }
+        .frame(width: 400)
+    }
+
+    private func save() {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        let d = description.trimmingCharacters(in: .whitespaces)
+        let l = buyLink != nil ? buyLinkText.trimmingCharacters(in: .whitespaces) : nil
+        onSave(t, d, l?.isEmpty == true ? nil : l)
+        dismiss()
     }
 }

@@ -1,9 +1,7 @@
 import SwiftUI
 import MultipeerConnectivity
 
-/// UI for local, cloud-free sync of reading progress and Reading Paths -- see PeerSyncService's
-/// own doc comment for what's synced and how. Shared as-is between
-/// macOS and iPadOS; MultipeerConnectivity's API is identical on both platforms.
+/// Sync UI for macOS and iPadOS. See `PeerSyncService` for what's synced.
 struct PeerSyncView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var sync = PeerSyncService.shared

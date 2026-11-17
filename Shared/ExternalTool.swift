@@ -1,10 +1,7 @@
 #if os(macOS)
 import Foundation
 
-/// Locates and runs the bundled/Homebrew CLI tools (`unar`, `lsar`) CBR support depends on.
-/// Shared by `LibraryScanner` (page-count listing at scan time) and `CBRDocument` (page
-/// extraction at read time) so there's exactly one place that knows how to find and launch these
-/// binaries, instead of two copies drifting apart.
+/// Finds and runs the bundled `unar`/`lsar` tools, for both scanning and reading CBRs.
 final class ExternalTool: @unchecked Sendable {
     static let shared = ExternalTool()
     private init() {}
@@ -33,12 +30,8 @@ final class ExternalTool: @unchecked Sendable {
     }
 
     private let activeProcessLock = NSLock()
-    /// Keyed by identity, not a single `Process?` field -- `shell()` can genuinely run
-    /// concurrently (a background scan's CBR page-count listing and the reader opening a
-    /// different CBR comic at the same time, on different queues). A single shared field meant
-    /// the later-finishing call's cleanup could null out the still-running other call's process
-    /// reference, so `terminateActiveProcess()` (called on app quit) could lose track of it
-    /// entirely and leave an orphaned `unar`/`lsar` subprocess running past app exit.
+    /// Tracks every running process (scan and reader can run at once), so `terminateActiveProcess`
+    /// stops them all.
     private var activeProcesses: [ObjectIdentifier: Process] = [:]
 
     @discardableResult
